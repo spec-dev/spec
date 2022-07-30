@@ -276,7 +276,7 @@ class Spec {
     }
 
     _doneProcessingNewConfig() {
-        if (this.pendingConfigUpdate) {-
+        if (this.pendingConfigUpdate) {
             this._onNewConfig()
             return
         }
