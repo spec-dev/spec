@@ -1,0 +1,35 @@
+{
+    "name": "loader",
+    "description": "Spec Loader",
+    "version": "1.0.0",
+    "private": true,
+    "main": "dist/index.js",
+    "scripts": {
+        "start": "node dist/index.js",
+        "dev": "ts-node ./src/index.ts",
+        "clean": "rimraf dist",
+        "format": "prettier --write \"{src,test}/**/*.ts\"",
+        "build": "run-s clean format build:main",
+        "build:main": "tsc -p tsconfig.json"
+    },
+    "dependencies": {
+        "@ltd/j-toml": "1.30.0",
+        "@spec.dev/event-client": "file:../event-client",
+        "knex": "^2.2.0",
+        "lru-cache": "^7.13.1",
+        "pg": "^8.7.3",
+        "short-uuid": "^4.2.0"
+    },
+    "devDependencies": {
+        "@types/node": "^18.0.3",
+        "npm-run-all": "^4.1.5",
+        "prettier": "^2.1.2",
+        "pretty-quick": "^3.1.0",
+        "rimraf": "^3.0.2",
+        "ts-jest": "^26.3.0",
+        "ts-loader": "^8.0.11",
+        "ts-node": "^10.8.2",
+        "typedoc": "^0.22.11",
+        "typescript": "^4.5.5"
+    }
+}

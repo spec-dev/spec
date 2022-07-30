@@ -1,0 +1,8 @@
+#!/bin/bash
+
+DB_NAME="$1"
+DB_INIT_DIR="./db/init"
+
+for file in "$DB_INIT_DIR"/*; do
+    psql -d "$DB_NAME" -f "${file}"
+done

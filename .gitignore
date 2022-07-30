@@ -1,0 +1,21 @@
+node_modules/
+**/node_modules/
+**/dist/
+**/dist-dev/
+**/dist-report/
+npm-debug.log*
+.DS_Store
+*.pem
+*.env
+typings/
+*.tsbuildinfo
+.npm
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Local config
+.spec/
