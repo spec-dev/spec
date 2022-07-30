@@ -20,7 +20,7 @@ class Spec {
 
     pendingConfigUpdate: boolean = false
     
-    seenEvents: LRU<string, boolean> = new LRU<string, boolean>({
+    seenEvents: LRU<string, boolean> = new LRU({
         max: 5000,
     })
     
