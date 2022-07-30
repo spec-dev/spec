@@ -1,7 +1,7 @@
 {
-    "name": "loader",
-    "description": "Spec Loader",
-    "version": "1.0.0",
+    "name": "spec",
+    "description": "Spec data loader",
+    "version": "0.0.1",
     "private": true,
     "main": "dist/index.js",
     "scripts": {
