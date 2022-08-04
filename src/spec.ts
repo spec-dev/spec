@@ -75,7 +75,7 @@ class Spec {
             return
         }
 
-        // Subscribe to all events powering the live objects.
+        // Subscribe to all events powering the live objects used.
         const newEventNames = this._subscribeToLiveObjectEvents()
         if (!Object.keys(this.subs).length) {
             logger.info('No events to subscribe to.')

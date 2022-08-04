@@ -6,13 +6,13 @@ export type StringMap = { [key: string]: string }
 
 export type AnyMap = { [key: string | number]: any }
 
-export interface ColumnSourcesConfig {
+export interface ColumnSourceConfig {
     object: string
     property: string
 }
 
 export interface ColumnConfig {
-    sources: ColumnSourcesConfig[]
+    source: ColumnSourceConfig
 }
 
 export type TableConfig = { [key: string]: ColumnConfig }

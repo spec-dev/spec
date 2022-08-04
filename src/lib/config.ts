@@ -87,19 +87,18 @@ class Config {
 
         const dataSources = {}
         for (const columnName in table) {
-            const sources = table[columnName].sources
+            const source = table[columnName].source
+            if (!source) continue
+            
+            const { object, property } = source
+            const liveObject = this.getLiveObject(object)
+            if (!liveObject) continue
 
-            for (const source of sources) {
-                const { object, property } = source
-                const liveObject = this.getLiveObject(object)
-                if (!liveObject) continue
-
-                const dataSourceKey = `${liveObject.id}:${property}`
-                if (!dataSources.hasOwnProperty(dataSourceKey)) {
-                    dataSources[dataSourceKey] = []
-                }
-                dataSources[dataSourceKey].push({ columnName })
+            const dataSourceKey = `${liveObject.id}:${property}`
+            if (!dataSources.hasOwnProperty(dataSourceKey)) {
+                dataSources[dataSourceKey] = []
             }
+            dataSources[dataSourceKey].push({ columnName })
         }
 
         return dataSources
