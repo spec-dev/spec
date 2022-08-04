@@ -26,7 +26,6 @@ export async function getEventCursorsForNames(names: string[]): Promise<EventCur
 }
 
 export async function saveEventCursors(records: EventCursor[]) {
-    logger.info('Saving event cursors...')
     try {
         await eventCursors()
             .insert(records)

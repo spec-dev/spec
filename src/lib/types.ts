@@ -66,14 +66,25 @@ export interface EdgeFunction {
     url: string // i.e. "https://functions.spec.dev/compound.marketAPY@0.0.1"
 }
 
+export interface LiveObjectLink {
+    table: string
+    properties: StringMap
+}
+
 export interface LiveObject {
     id: string // i.e. "compound.CompoundMarketAPY@0.0.1"
     configName: string // i.e. "CompoundMarketAPY"
-    links: StringMap[]
+    links: LiveObjectLink[]
     // typeDef: LiveObjectTypeDef
     events: Event[]
     // edgeFunctions: EdgeFunction[]
 }
+
+export interface TableDataSource {
+    columnName: string
+}
+
+export type TableDataSources = { [key: string]: TableDataSource[] }
 
 export interface EventCursor {
     name: string
@@ -89,4 +100,18 @@ export interface EventSub {
     cursorChanged: boolean
     shouldBuffer: boolean
     buffer: SpecEvent<StringKeyMap>[]
+}
+
+export enum OpType {
+    Insert = 'insert',
+    Update = 'update',
+    Delete = 'delete',
+}
+
+export interface Op {
+    type: OpType
+    schema: string
+    table: string
+    where: StringKeyMap
+    data?: StringKeyMap
 }

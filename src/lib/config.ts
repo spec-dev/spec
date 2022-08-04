@@ -1,10 +1,18 @@
 import toml from '@ltd/j-toml'
 import fs from 'fs'
 import constants from './constants'
-import { ProjectConfig, LiveObjectsConfig, TablesConfig, StringMap } from './types'
 import { ConfigError } from './errors'
 import { noop } from './utils/formatters'
 import logger from './logger'
+import {
+    ProjectConfig, 
+    LiveObjectsConfig, 
+    LiveObjectConfig,
+    TablesConfig,
+    TableConfig,
+    StringMap,
+    TableDataSources,
+} from './types'
 
 class Config {
 
@@ -60,6 +68,41 @@ class Config {
     constructor(onUpdate?: () => void) {
         this.isValid = true
         this.onUpdate = onUpdate || noop
+    }
+
+    getLiveObject(configName: string): LiveObjectConfig | null {
+        return this.liveObjects[configName] || null
+    }
+
+    getTable(schemaName: string, tableName: string): TableConfig {
+        const tables = this.tables
+        const schema = tables[schemaName]
+        if (!schema) return null
+        return schema[tableName] || null
+    }
+
+    getDataSourcesForTable(schemaName: string, tableName: string): TableDataSources | null {
+        const table = this.getTable(schemaName, tableName)
+        if (!table) return null
+
+        const dataSources = {}
+        for (const columnName in table) {
+            const sources = table[columnName].sources
+
+            for (const source of sources) {
+                const { object, property } = source
+                const liveObject = this.getLiveObject(object)
+                if (!liveObject) continue
+
+                const dataSourceKey = `${liveObject.id}:${property}`
+                if (!dataSources.hasOwnProperty(dataSourceKey)) {
+                    dataSources[dataSourceKey] = []
+                }
+                dataSources[dataSourceKey].push({ columnName })
+            }
+        }
+
+        return dataSources
     }
 
     load() {

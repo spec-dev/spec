@@ -7,6 +7,7 @@ import { LiveObject, StringKeyMap, EventSub } from './lib/types'
 import { ensureSpecSchemaIsReady, getEventCursorsForNames, saveEventCursors } from './lib/db/spec'
 import { SpecEvent } from '@spec.dev/event-client'
 import LRU from 'lru-cache'
+import ApplyEventService from './lib/services/ApplyEventService'
 
 class Spec {
 
@@ -21,10 +22,12 @@ class Spec {
     pendingConfigUpdate: boolean = false
     
     seenEvents: LRU<string, boolean> = new LRU({
-        max: 5000,
+        max: 5000, // TODO: Move to constants and potentially make configurable via env vars
     })
     
     async start() {
+        logger.info('Starting Spec...')
+
         // Run anytime message client socket connects.
         messageClient.onConnect = () => this._onMessageClientConnected()
 
@@ -123,7 +126,28 @@ class Spec {
     }
 
     async _processEvent(event: SpecEvent<StringKeyMap>) {
-        logger.info('Processing event...', event)
+        // Get sub for event.
+        const sub = this.subs[event.name]
+        if (!sub) {
+            logger.error(`Processing event for ${event.name} without subscription...something's wrong.`)
+            return
+        }
+
+        // Apply the event to each live object that depends on it.
+        for (const liveObjectId of sub.liveObjectIds || []) {
+            const liveObject = this.liveObjects[liveObjectId]
+            if (!liveObject) continue
+
+            const onError = (err: any) => logger.error(
+                `Failed to apply event to live object - 
+                (event=${event.name}; liveObject=${liveObjectId}): ${err}`
+            )
+            try {
+                new ApplyEventService(event, liveObject).perform().catch(onError)
+            } catch (err) {
+                onError(err)
+            }
+        }
     }
 
     async _getLiveObjectsInConfig() {
