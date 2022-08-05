@@ -1,12 +1,15 @@
 import logger from '../../logger'
 import { doesSchemaExist, doesTableExist } from '../ops'
 import { EVENT_CURSORS_TABLE_NAME } from './eventCursors'
+import { LIVE_COLUMNS_TABLE_NAME } from './liveColumns'
 export * from './eventCursors'
+export * from './liveColumns'
 
 export const SPEC_SCHEMA_NAME = 'spec'
 
 const specSchemaTableNames = [
     EVENT_CURSORS_TABLE_NAME,
+    LIVE_COLUMNS_TABLE_NAME,
 ]
 
 const NOT_READY_DELAY = 30000 // ms

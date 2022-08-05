@@ -23,7 +23,7 @@ export type TablesConfig = { [key: string]: SchemaConfig }
 
 export interface LiveObjectConfig {
     id: string
-    links: StringMap[]
+    links: LiveObjectLink[]
 }
 
 export type LiveObjectsConfig = { [key: string]: LiveObjectConfig }
@@ -114,4 +114,28 @@ export interface Op {
     table: string
     where: StringKeyMap
     data?: StringKeyMap
+}
+
+export enum LiveColumnSeedStatus {
+    InProgress = 'in-progress',
+    Succeeded = 'succeeded',
+    Failed = 'failed',
+}
+
+export interface LiveColumn {
+    columnPath: string
+    liveProperty: string
+    seedStatus: LiveColumnSeedStatus
+}
+
+export interface LiveColumnQuerySpec {
+    columnPath: string
+    liveProperty: string
+}
+
+export interface SeedSpec {
+    liveObjectId: string
+    tablePath: string
+    linkProperties: StringMap
+    seedColNames: string[]
 }

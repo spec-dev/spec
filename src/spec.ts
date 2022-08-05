@@ -3,11 +3,12 @@ import config from './lib/config'
 import constants from './lib/constants'
 import { resolveLiveObjects } from './lib/rpcs/liveObjects'
 import messageClient from './lib/rpcs/messageClient'
-import { LiveObject, StringKeyMap, EventSub } from './lib/types'
-import { ensureSpecSchemaIsReady, getEventCursorsForNames, saveEventCursors } from './lib/db/spec'
+import { LiveObject, StringKeyMap, EventSub, SeedSpec } from './lib/types'
+import { ensureSpecSchemaIsReady, getEventCursorsForNames, saveEventCursors, seedFailed } from './lib/db/spec'
 import { SpecEvent } from '@spec.dev/event-client'
 import LRU from 'lru-cache'
 import ApplyEventService from './lib/services/ApplyEventService'
+import UpsertLiveColumnsService from './lib/services/UpsertLiveColumnsService'
 
 class Spec {
 
@@ -20,6 +21,8 @@ class Spec {
     processingNewConfig: boolean = false
 
     pendingConfigUpdate: boolean = false
+
+    liveObjectsToIgnoreEventsFrom: Set<string> = new Set()
     
     seenEvents: LRU<string, boolean> = new LRU({
         max: 5000, // TODO: Move to constants and potentially make configurable via env vars
@@ -68,14 +71,17 @@ class Spec {
 
     async _onMessageClientConnected() {
         // Resolve all live objects for the versions listed in the config file.
-        await this._getLiveObjectsInConfig()
+        const newLiveObjects = await this._getLiveObjectsInConfig()
         if (this.liveObjects === null) {
             logger.info('No live objects listed in config.')
             this._doneProcessingNewConfig()
             return
         }
 
-        // Subscribe to all events powering the live objects used.
+        // Upsert live columns listed in the config and start seeding the new ones.
+        await this._upsertAndSeedLiveColumns()
+
+        // Subscribe to all events powering the live objects.
         const newEventNames = this._subscribeToLiveObjectEvents()
         if (!Object.keys(this.subs).length) {
             logger.info('No events to subscribe to.')
@@ -150,31 +156,33 @@ class Spec {
         }
     }
 
-    async _getLiveObjectsInConfig() {
+    async _getLiveObjectsInConfig(): Promise<LiveObject[]> {
         // Get the list of live object version ids that haven't already been fetched.
-        const newlyDetectedLiveObjectVersionIds = config.liveObjectVersionIds.filter(
+        const newlyDetectedLiveObjectVersionIds = config.liveObjectIds.filter(
             id => !this.liveObjects.hasOwnProperty(id)
         )
         if (!newlyDetectedLiveObjectVersionIds.length) {
             logger.info('No new live objects detected.')
-            return
+            return []
         }
         
         // Fetch the newly detected live objects via rpc.
         const newLiveObjects = await resolveLiveObjects(newlyDetectedLiveObjectVersionIds)
         if (newLiveObjects === null) {
             logger.error(`Failed to fetch new live objects: ${newlyDetectedLiveObjectVersionIds.join(', ')}.`)
-            return
+            return []
         }
 
         // Add them to the live objects map.
         for (let liveObject of newLiveObjects) {
             this.liveObjects[liveObject.id] = liveObject
         }
+
+        return newLiveObjects
     }
 
     _subscribeToLiveObjectEvents(): string[] {
-        const liveObjectsByEvent = this._mapLiveObjectByEvent()
+        const liveObjectsByEvent = this._mapLiveObjectsByEvent()
         const newEventNames = []
 
         // Subscribe to new events.
@@ -239,6 +247,80 @@ class Spec {
         }
 
         logger.info('Events in-sync.')
+    }
+
+    async _upsertAndSeedLiveColumns() {
+        // Upsert any new/changed live columns listed in the config.
+        const upsertLiveColumnService = new UpsertLiveColumnsService()
+        try {
+            await upsertLiveColumnService.perform() 
+        } catch (err) {
+            logger.error(`Failed to upsert live columns: ${err}`)
+            return
+        }
+
+        // Seed or re-seed all live columns that were upserted.
+        const liveColumnsToSeed = upsertLiveColumnService.liveColumnsToUpsert
+        const tablePathsUsingLiveObjectId = upsertLiveColumnService.tablePathsUsingLiveObjectId
+
+        // Get a map of unique live-object/table relations (grouping the column names).
+        const uniqueLiveObjectTablePaths = {}
+        const tablePathsUsingLiveObjectIdForSeed: { [key: string]: Set<string> } = {}
+        for (const { columnPath, liveProperty } of liveColumnsToSeed) {
+            const [schemaName, tableName, colName] = columnPath.split('.')
+            const [liveObjectId, _] = liveProperty.split(':')
+            const tablePath = [schemaName, tableName].join('.')
+            const uniqueKey = [liveObjectId, tablePath].join(':')
+            if (!uniqueLiveObjectTablePaths.hasOwnProperty(uniqueKey)) {
+                uniqueLiveObjectTablePaths[uniqueKey] = []
+            }
+            uniqueLiveObjectTablePaths[uniqueKey].push(colName)
+            if (!tablePathsUsingLiveObjectIdForSeed.hasOwnProperty(liveObjectId)) {
+                tablePathsUsingLiveObjectIdForSeed[liveObjectId] = new Set<string>()
+            }
+            if (!tablePathsUsingLiveObjectIdForSeed[liveObjectId].has(tablePath)) {
+                tablePathsUsingLiveObjectIdForSeed[liveObjectId].add(tablePath)
+            }
+        }
+
+        // Create unique live-object/table seed specs to perform.
+        const seedSpecs: SeedSpec[] = []
+        for (const uniqueKey in uniqueLiveObjectTablePaths) {
+            const seedColNames = uniqueLiveObjectTablePaths[uniqueKey]
+            const [liveObjectId, tablePath] = uniqueKey.split(':')
+            const linkProperties = config.getLinkProperties(liveObjectId, tablePath)
+            if (!linkProperties) {
+                logger.error(
+                    `No link properties found for liveObjectId: ${liveObjectId}, 
+                    tablePath: ${tablePath}...something's wrong.`
+                )
+                seedFailed(seedColNames.map(colName => [tablePath, colName].join('.')))
+                continue
+            }
+            seedSpecs.push({
+                liveObjectId,
+                tablePath,
+                linkProperties,
+                seedColNames,
+            })
+        }
+
+        seedSpecs.forEach(seedSpec => {
+            const numTablesUsingLiveObject = tablePathsUsingLiveObjectId[seedSpec.liveObjectId].size
+            const numTablesUsingLiveObjectForSeed = tablePathsUsingLiveObjectIdForSeed[seedSpec.liveObjectId].size
+            // If this live object is only used in the table(s) about to be seeded, 
+            // then add it to a list to indicates that events should be ignored.
+            if (numTablesUsingLiveObject === numTablesUsingLiveObjectForSeed) {
+                this.liveObjectsToIgnoreEventsFrom.add(seedSpec.liveObjectId)
+            }
+        })
+
+        // Start seeding.
+        this._seedColumns(seedSpecs)
+    }
+
+    async _seedColumns(seedSpecs: SeedSpec[]) {
+        console.log('Seed specs', seedSpecs)
     }
 
     async _processAllBufferedEvents() {
@@ -328,9 +410,12 @@ class Spec {
         }
     }
 
-    _mapLiveObjectByEvent(): { [key: string]: string[] } {
+    _mapLiveObjectsByEvent(): { [key: string]: string[] } {
         const subs = {}
         for (const liveObjectId in this.liveObjects) {
+            // Ignore events from live objects actively/exclusively being used to seed.
+            if (this.liveObjectsToIgnoreEventsFrom.has(liveObjectId)) continue
+
             const eventNames = this.liveObjects[liveObjectId].events.map(e => e.name)
             for (const eventName of eventNames) {
                 if (!subs.hasOwnProperty(eventName)) {

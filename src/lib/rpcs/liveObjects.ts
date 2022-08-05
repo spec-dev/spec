@@ -2,8 +2,8 @@ import { LiveObject } from '../types'
 import messageClient from './messageClient'
 import config from '../config'
 
-export async function resolveLiveObjects(liveObjectVersionIds: string[]): Promise<LiveObject[] | null> {
-    const { data, error } = await messageClient.resolveLiveObjects(liveObjectVersionIds)
+export async function resolveLiveObjects(liveObjectIds: string[]): Promise<LiveObject[] | null> {
+    const { data, error } = await messageClient.resolveLiveObjects(liveObjectIds)
     if (error) return null
     if (!data.length) return []
 

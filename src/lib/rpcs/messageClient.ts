@@ -47,12 +47,12 @@ export class MessageClient {
         await this.client.off(eventName)
     }
 
-    async resolveLiveObjects(liveObjectVersionIds: string[]): Promise<{ 
+    async resolveLiveObjects(liveObjectIds: string[]): Promise<{ 
         data: ResolvedLiveObject[] | null, 
         error: RpcError | null,
     }> {
         const { data, error } = await this.call(RPC.ResolveLiveObjects, { 
-            ids: liveObjectVersionIds,
+            ids: liveObjectIds,
         })
         return {
             data: data ? data as ResolvedLiveObject[] : null,

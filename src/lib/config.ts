@@ -38,7 +38,7 @@ class Config {
         return this.config.tables || {}
     }
 
-    get liveObjectVersionIds(): string[] {
+    get liveObjectIds(): string[] {
         const ids = []
         const objects = this.liveObjects
         for (let configName in objects) {
@@ -72,6 +72,21 @@ class Config {
 
     getLiveObject(configName: string): LiveObjectConfig | null {
         return this.liveObjects[configName] || null
+    }
+
+    getLinkProperties(liveObjectId: string, tablePath: string): StringMap | null {
+        const objects = this.liveObjects
+        for (const configName in objects) {
+            const obj = objects[configName]
+            if (obj.id !== liveObjectId) continue
+
+            for (const link of obj.links) {
+                if (link.table === tablePath) {
+                    return link.properties
+                }
+            }
+        }
+        return null
     }
 
     getTable(schemaName: string, tableName: string): TableConfig {

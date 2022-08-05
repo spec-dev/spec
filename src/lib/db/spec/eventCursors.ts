@@ -1,4 +1,4 @@
-import { schema, db } from '..'
+import { schema } from '..'
 import { EventCursor } from '../../types'
 import { SPEC_SCHEMA_NAME } from '.'
 import logger from '../../logger'
