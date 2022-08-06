@@ -5,6 +5,7 @@ import { areColumnsEmpty } from '../db/ops'
 import { callSpecFunction } from '../utils/requests'
 import config from '../config'
 import { db } from '../db'
+import { QueryError } from '../errors'
 
 class SeedTableService {
 
@@ -30,13 +31,16 @@ class SeedTableService {
         this._findSeedFunction()
         if (!this.seedFunction) throw 'Live object doesn\'t have an associated seed function.'
 
-        // Find me just the required arguments that I need to call this function and then find me those corresponding columns.
+        // Find the required args that I need to call this function, and then find their corresponding columns.
         const requiredArgColPaths = this._getRequiredArgColumns()
-
+        let isCrossTableLink = false
         const linkPropertyTableColumns = {}
         for (const colPath of requiredArgColPaths) {
             const [schemaName, tableName, colName] = colPath.split('.')
             const tablePath = [schemaName, tableName].join('.')
+            if (tablePath !== this.seedSpec.tablePath) {
+                isCrossTableLink = true
+            }
             if (!linkPropertyTableColumns.hasOwnProperty(tablePath)) {
                 linkPropertyTableColumns[tablePath] = []
             }
@@ -51,23 +55,33 @@ class SeedTableService {
 
         const colsEmptyResults = await Promise.all(promises)
         const allRequiredInputColsAreEmpty = colsEmptyResults.filter(v => !v).length === 0
-        allRequiredInputColsAreEmpty ? await this._seedFromScratch() : await this._seedWithInputCols()   
+
+        if (allRequiredInputColsAreEmpty) {
+            if (isCrossTableLink) {
+                logger.info('Can\'t seed a cross-table relationship from scratch.')
+                return
+            }
+            if (!this.seedSpec.seedIfEmpty) {
+                logger.info(`Table not configured to seed when seedIfEmpty isn't truthy: ${this.seedSpec}.`)
+                return
+            }
+            await this._seedFromScratch()
+        } else {
+            await this._seedWithInputCols()
+        }
     }
 
     async _seedFromScratch() {
-        if (!this.seedSpec.seedIfEmpty) return
-        const { data, error } = await callSpecFunction(this.seedFunction.name, [])
+        const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunction.name, [])
         if (error) throw error
-        if (!data.length) return
+        if (!liveObjectsData.length) return
 
-        const uniqueColNames = this._getSeedTableLinkColNames()
-        const properties = Object.keys(data[0])
         const records = []
-        for (const entry of data) {
+        for (const liveObjectData of liveObjectsData) {
             const record = {}
-            for (const property of properties) {
+            for (const property in liveObjectData) {
                 const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
-                const value = entry[property]
+                const value = liveObjectData[property]
                 for (const { columnName } of colsWithThisPropertyAsDataSource) {
                     record[columnName] = value
                 }
@@ -75,23 +89,16 @@ class SeedTableService {
             records.push(record)
         }
 
-        // What's unique needs to be explicit somehow...and that honestly depends on the relationship between the live object
-        // and the tables...because what you classicly think would be "unique" could easily be not-unique as soon as you
-        // introduce a time dimension...
         try {
-            await db.from(this.seedSpec.tablePath)
-                .insert(records)
+            await db.from(this.seedSpec.tablePath).insert(records)
         } catch (err) {
-            logger.error(`Error upserting ${this.seedSpec.tablePath}: ${err}`)
+            const [schemaName, tableName] = this.seedSpec.tablePath
+            throw new QueryError('insert', schemaName, tableName, err)
         }
     }
 
     async _seedWithInputCols() {
         // Get records where all required input columns have a value.
-
-    }
-
-    _createUpsertOp(entry: StringKeyMap) {
 
     }
 
