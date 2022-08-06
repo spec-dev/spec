@@ -14,6 +14,7 @@ export async function resolveLiveObjects(liveObjectIds: string[]): Promise<LiveO
         liveObjects.push({
             ...liveObject,
             events: entry.events,
+            edgeFunctions: entry.edgeFunctions,
         })
     }
     return liveObjects

@@ -1,5 +1,5 @@
 import { createEventClient, SpecEventClient, EventCallback } from '@spec.dev/event-client'
-import { EventCursor, MessageClientOptions } from '../types'
+import { EventCursor, MessageClientOptions, ResolvedLiveObject } from '../types'
 import constants from '../constants'
 import { noop } from '../utils/formatters'
 import { RpcError } from '../errors'
@@ -9,11 +9,6 @@ import short from 'short-uuid'
 
 const DEFAULT_OPTIONS = {
     onConnect: noop,
-}
-
-interface ResolvedLiveObject {
-    id: string // i.e. "compound.CompoundMarketAPY@0.0.1"
-    events: Event[]
 }
 
 export class MessageClient {

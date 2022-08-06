@@ -9,3 +9,19 @@ export function mapBy<T>(arr: T[], key: string): { [key: string]: T } {
     }
     return m
 }
+
+export function reverseMap(obj: AnyMap): AnyMap {
+    const reverse = {}
+    for (let key in obj) {
+        reverse[obj[key]] = key
+    }
+    return reverse
+}
+
+export function toMap(obj): AnyMap {
+    const newObj = {}
+    for (let key in obj) {
+        newObj[key] = obj[key]
+    }
+    return newObj
+}

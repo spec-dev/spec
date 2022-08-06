@@ -2,7 +2,7 @@ import toml from '@ltd/j-toml'
 import fs from 'fs'
 import constants from './constants'
 import { ConfigError } from './errors'
-import { noop } from './utils/formatters'
+import { noop, toMap } from './utils/formatters'
 import logger from './logger'
 import {
     ProjectConfig, 
@@ -12,6 +12,7 @@ import {
     TableConfig,
     StringMap,
     TableDataSources,
+    LiveObjectLink,
 } from './types'
 
 class Config {
@@ -74,7 +75,7 @@ class Config {
         return this.liveObjects[configName] || null
     }
 
-    getLinkProperties(liveObjectId: string, tablePath: string): StringMap | null {
+    getLink(liveObjectId: string, tablePath: string): LiveObjectLink {
         const objects = this.liveObjects
         for (const configName in objects) {
             const obj = objects[configName]
@@ -82,7 +83,10 @@ class Config {
 
             for (const link of obj.links) {
                 if (link.table === tablePath) {
-                    return link.properties
+                    return {
+                        ...link,
+                        properties: toMap(link.properties),
+                    }
                 }
             }
         }

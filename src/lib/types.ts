@@ -41,43 +41,41 @@ export type MessageClientOptions = {
     onConnect?: () => void
 }
 
-export enum LiveObjectPropertyType {
-    String = 'string',
-    Number = 'number',
-    Hash = 'hash',
-}
-
-export interface LiveObjectProperty {
-    name: string
-    type: LiveObjectPropertyType
-}
-
-export interface LiveObjectTypeDef {
-    name: string
-    properties: LiveObjectProperty[]
-}
-
 export interface Event {
     name: string // i.e. "compound.CompoundMarketAPYUpdated@0.0.1"
 }
 
+export enum LiveObjectFunctionRole {
+    GetOne = 'getOne',
+    GetMany = 'getMany',
+}
+
 export interface EdgeFunction {
     name: string // i.e. "compound.marketAPY@0.0.1"
-    url: string // i.e. "https://functions.spec.dev/compound.marketAPY@0.0.1"
+    args: { [key: string]: boolean },
+    argsMap: StringMap,
+    metadata: StringKeyMap,
+    role: LiveObjectFunctionRole,
 }
 
 export interface LiveObjectLink {
     table: string
     properties: StringMap
+    seedIfEmpty?: boolean
 }
 
 export interface LiveObject {
     id: string // i.e. "compound.CompoundMarketAPY@0.0.1"
     configName: string // i.e. "CompoundMarketAPY"
     links: LiveObjectLink[]
-    // typeDef: LiveObjectTypeDef
     events: Event[]
-    // edgeFunctions: EdgeFunction[]
+    edgeFunctions: EdgeFunction[]
+}
+
+export interface ResolvedLiveObject {
+    id: string // i.e. "compound.CompoundMarketAPY@0.0.1"
+    events: Event[]
+    edgeFunctions: EdgeFunction[]
 }
 
 export interface TableDataSource {
@@ -138,4 +136,10 @@ export interface SeedSpec {
     tablePath: string
     linkProperties: StringMap
     seedColNames: string[]
+    seedIfEmpty?: boolean
+}
+
+export interface SpecFunctionResponse {
+    data: any
+    error: string | null
 }

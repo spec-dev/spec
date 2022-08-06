@@ -10,6 +10,8 @@ const constants: StringKeyMap = {
     EVENTS_HOSTNAME: ev('EVENTS_HOSTNAME', 'events.spec.dev'),
     EVENTS_PORT: ev('EVENTS_PORT', 8888),
 
+    FUNCTIONS_ORIGIN: ev('FUNCTIONS_ORIGIN', 'https://functions.spec.dev'),
+
     // TODO
     DB_HOST: ev('DB_HOST', 'localhost'),
     DB_PORT: ev('DB_PORT', 5432),

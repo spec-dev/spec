@@ -15,6 +15,7 @@
     "dependencies": {
         "@ltd/j-toml": "1.30.0",
         "@spec.dev/event-client": "file:../event-client",
+        "cross-fetch": "^3.1.5",
         "knex": "^2.2.0",
         "lru-cache": "^7.13.1",
         "pg": "^8.7.3",

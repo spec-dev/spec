@@ -9,6 +9,7 @@ import { SpecEvent } from '@spec.dev/event-client'
 import LRU from 'lru-cache'
 import ApplyEventService from './lib/services/ApplyEventService'
 import UpsertLiveColumnsService from './lib/services/UpsertLiveColumnsService'
+import SeedTableService from './lib/services/SeedTableService'
 
 class Spec {
 
@@ -77,7 +78,7 @@ class Spec {
             this._doneProcessingNewConfig()
             return
         }
-
+        
         // Upsert live columns listed in the config and start seeding the new ones.
         await this._upsertAndSeedLiveColumns()
 
@@ -259,8 +260,10 @@ class Spec {
             return
         }
 
-        // Seed or re-seed all live columns that were upserted.
+        // We will seed (or re-seed) all live columns that were upserted.
         const liveColumnsToSeed = upsertLiveColumnService.liveColumnsToUpsert
+        if (!liveColumnsToSeed.length) return
+
         const tablePathsUsingLiveObjectId = upsertLiveColumnService.tablePathsUsingLiveObjectId
 
         // Get a map of unique live-object/table relations (grouping the column names).
@@ -288,8 +291,8 @@ class Spec {
         for (const uniqueKey in uniqueLiveObjectTablePaths) {
             const seedColNames = uniqueLiveObjectTablePaths[uniqueKey]
             const [liveObjectId, tablePath] = uniqueKey.split(':')
-            const linkProperties = config.getLinkProperties(liveObjectId, tablePath)
-            if (!linkProperties) {
+            const link = config.getLink(liveObjectId, tablePath)
+            if (!link || !link.properties) {
                 logger.error(
                     `No link properties found for liveObjectId: ${liveObjectId}, 
                     tablePath: ${tablePath}...something's wrong.`
@@ -300,8 +303,9 @@ class Spec {
             seedSpecs.push({
                 liveObjectId,
                 tablePath,
-                linkProperties,
+                linkProperties: link.properties,
                 seedColNames,
+                seedIfEmpty: link.seedIfEmpty || false,
             })
         }
 
@@ -315,12 +319,24 @@ class Spec {
             }
         })
 
-        // Start seeding.
-        this._seedColumns(seedSpecs)
+        // Seed tables.
+        seedSpecs.map(seedSpec => this._seedTable(seedSpec))
     }
 
-    async _seedColumns(seedSpecs: SeedSpec[]) {
-        console.log('Seed specs', seedSpecs)
+    async _seedTable(seedSpec: SeedSpec) {
+        const { liveObjectId, seedColNames, tablePath } = seedSpec
+
+        try {
+            const liveObject = this.liveObjects[liveObjectId]
+            if (!liveObject) throw `No live object found for id ${liveObjectId}`
+            await new SeedTableService(seedSpec, liveObject).perform()
+        } catch (err) {
+            logger.error(`Seed failed - ${err}`)
+            seedFailed(seedColNames.map(colName => [tablePath, colName].join('.')))
+        }
+
+        this.liveObjectsToIgnoreEventsFrom.delete(liveObjectId)
+        // TODO: Re-run some version of subscribeToEvents to kick off subscribing to the events associated with this live object.
     }
 
     async _processAllBufferedEvents() {

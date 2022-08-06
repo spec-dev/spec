@@ -1,7 +1,7 @@
 import { LiveObjectLink, StringKeyMap, StringMap, Op, OpType, TableDataSources } from '../types'
-import logger from '../logger'
 import config from '../config'
 import { db } from '../db'
+import { toMap } from '../utils/formatters'
 import { QueryError } from '../errors'
 
 function getRelationshipBetweenTables(from: string, to: string): StringKeyMap {
@@ -43,7 +43,7 @@ class ApplyDiffService {
     }
 
     get linkProperties(): StringMap {
-        return this.link.properties || {}
+        return toMap(this.link.properties || {})
     }
 
     get linkPrimaryKeys(): string[] {
