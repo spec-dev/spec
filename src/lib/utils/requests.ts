@@ -1,9 +1,10 @@
 
 import { SpecFunctionResponse, StringKeyMap } from '../types'
 import { fetch } from 'cross-fetch'
+import logger from '../logger'
 import constants from '../constants'
 
-export async function callSpecFunction(identifier: string, payload: StringKeyMap): Promise<SpecFunctionResponse> {
+export async function callSpecFunction(identifier: string, payload: StringKeyMap | StringKeyMap[]): Promise<SpecFunctionResponse> {
     const url = new URL(constants.FUNCTIONS_ORIGIN)
     url.pathname = `/${identifier}`
 
@@ -15,12 +16,12 @@ export async function callSpecFunction(identifier: string, payload: StringKeyMap
             headers: { 'Content-Type': 'application/json' },
         })
     } catch (err) {
-        console.error(`Unexpected error calling edge function ${identifier}: ${err?.message || err}`)
+        logger.error(`Unexpected error calling edge function ${identifier}: ${err?.message || err}`)
         return { data: null, error: err?.message || err }
     }
 
     if (resp.status !== 200) {
-        console.error(`Unexpected error calling edge function ${identifier}: got response code ${resp.status}`)
+        logger.error(`Unexpected error calling edge function ${identifier}: got response code ${resp.status}`)
         return { data: null, error: `got response code ${resp.status}` }
     }
 
@@ -28,7 +29,7 @@ export async function callSpecFunction(identifier: string, payload: StringKeyMap
     try {
         respData = await resp.json()
     } catch (err) {
-        console.error(`Unexpected error calling edge function -- Failed to parse JSON response data: ${err?.message || err}`)
+        logger.error(`Unexpected error calling edge function -- Failed to parse JSON response data: ${err?.message || err}`)
         return { data: null, error: `JSON parse error ${err?.message || err}` }
     }
 

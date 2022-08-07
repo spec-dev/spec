@@ -1,11 +1,20 @@
 import logger from '../logger'
-import { SeedSpec, LiveObject, EdgeFunction, LiveObjectFunctionRole, StringKeyMap, TableDataSources } from '../types'
-import { reverseMap } from '../utils/formatters'
+import { SeedSpec, LiveObject, EdgeFunction, LiveObjectFunctionRole, StringKeyMap, TableDataSources, Op, OpType } from '../types'
+import { reverseMap, toChunks } from '../utils/formatters'
 import { areColumnsEmpty } from '../db/ops'
+import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
 import config from '../config'
 import { db } from '../db'
 import { QueryError } from '../errors'
+import constants from '../constants'
+
+function getRelationshipBetweenTables(from: string, to: string): StringKeyMap {
+    return {
+        foreignKey: '',
+        referenceKey: '',
+    }
+}
 
 class SeedTableService {
 
@@ -15,13 +24,40 @@ class SeedTableService {
 
     seedFunction: EdgeFunction | null
 
+    seedColNames: Set<string>
+
     tableDataSources: TableDataSources
+
+    requiredArgColPaths: string[] = []
+
+    colPathToFunctionInputArg: { [key: string]: string } = {}
+
+    inputRecords: StringKeyMap[] = []
+
+    inputBatches: StringKeyMap[][] = []
+
+    get seedTablePath(): string {
+        return this.seedSpec.tablePath
+    }
+
+    get seedSchemaName(): string {
+        return this.seedTablePath.split('.')[0]
+    }
+
+    get seedTableName(): string {
+        return this.seedTablePath.split('.')[1]
+    }
+
+    get seedTablePrimaryKeys(): string[] {
+        return ['id']
+    }
 
     constructor(seedSpec: SeedSpec, liveObject: LiveObject) {
         this.seedSpec = seedSpec
         this.liveObject = liveObject
         this.tableDataSources = this._getLiveObjectTableDataSources()
         this.seedFunction = null
+        this.seedColNames = new Set<string>(this.seedSpec.seedColNames)
     }
 
     async perform() {
@@ -31,16 +67,20 @@ class SeedTableService {
         this._findSeedFunction()
         if (!this.seedFunction) throw 'Live object doesn\'t have an associated seed function.'
 
-        // Find the required args that I need to call this function, and then find their corresponding columns.
-        const requiredArgColPaths = this._getRequiredArgColumns()
-        let isCrossTableLink = false
+        // Find the required args for this function and their associated columns.
+        this._getRequiredArgColumns()
+        if (!this.requiredArgColPaths.length) throw 'No required-arg col-paths found.'
+
         const linkPropertyTableColumns = {}
-        for (const colPath of requiredArgColPaths) {
+        const linkPropertyColumnLocations = { onSeedTable: 0, onForeignTable: 0 }
+        for (const colPath of this.requiredArgColPaths) {
             const [schemaName, tableName, colName] = colPath.split('.')
             const tablePath = [schemaName, tableName].join('.')
-            if (tablePath !== this.seedSpec.tablePath) {
-                isCrossTableLink = true
-            }
+            
+            tablePath === this.seedTablePath
+                ? linkPropertyColumnLocations.onSeedTable++
+                : linkPropertyColumnLocations.onForeignTable++
+
             if (!linkPropertyTableColumns.hasOwnProperty(tablePath)) {
                 linkPropertyTableColumns[tablePath] = []
             }
@@ -52,12 +92,11 @@ class SeedTableService {
             const colNames = linkPropertyTableColumns[tablePath]
             promises.push(areColumnsEmpty(tablePath, colNames))
         }
-
         const colsEmptyResults = await Promise.all(promises)
         const allRequiredInputColsAreEmpty = colsEmptyResults.filter(v => !v).length === 0
-
+        
         if (allRequiredInputColsAreEmpty) {
-            if (isCrossTableLink) {
+            if (linkPropertyColumnLocations.onForeignTable > 0) {
                 logger.info('Can\'t seed a cross-table relationship from scratch.')
                 return
             }
@@ -67,11 +106,26 @@ class SeedTableService {
             }
             await this._seedFromScratch()
         } else {
-            await this._seedWithInputCols()
+            linkPropertyColumnLocations.onSeedTable > 0 
+                ? await this._seedWithAdjacentCols()
+                : await this._seedFromForeignTable()
+        }
+    }
+
+    async _runOps(ops: Op[]) {
+        if (!ops.length) return
+
+        try {
+            await db.transaction(async tx => {
+                await Promise.all(ops.map(op => new RunOpService(op, tx).perform()))
+            })
+        } catch (err) {
+            logger.error(`Ops failed - ${err}`)
         }
     }
 
     async _seedFromScratch() {
+        logger.info(1)
         const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunction.name, [])
         if (error) throw error
         if (!liveObjectsData.length) return
@@ -97,9 +151,156 @@ class SeedTableService {
         }
     }
 
-    async _seedWithInputCols() {
-        // Get records where all required input columns have a value.
+    async _seedFromForeignTable() {
+        logger.info(2)
 
+    }
+
+    async _seedWithAdjacentCols() {
+        logger.info(3)
+        // Get all records in the seed table where each required link column has a value.
+        await this._findInputRecordsFromAdjacentCols()
+        if (!this.inputRecords.length) {
+            logger.info('Found no adjacent-column input records to seed with...')
+            return
+        }
+        
+        // Group input records into batches.
+        this._batchInputRecords()
+
+        // Process each batch.
+        for (let i = 0; i < this.inputBatches.length; i++) {
+            const batch = this.inputBatches[i]
+
+            // Transform the records into function input payloads.
+            const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(batch)
+
+            // Use the seed function to fetch live objects data for the batch.
+            const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunction.name, batchFunctionInputs)
+            if (error || !liveObjectsData.length) continue
+            if (liveObjectsData.length !== batch.length) {
+                logger.error(`Seed function response length mismatch: ${liveObjectsData.length} vs. ${batch.length}`)
+                continue
+            }
+
+            // Use the function response data (live objects data) to generate record-update ops.
+            const updateOps = this._generateUpdateOpsForSeedTableBatch(batch, liveObjectsData)
+            await this._runOps(updateOps)
+        }
+    }
+
+    _batchInputRecords() {
+        this.inputBatches = toChunks(this.inputRecords, constants.SEED_BATCH_SIZE)
+    }   
+
+    _transformRecordsIntoFunctionInputs(records: StringKeyMap[]): StringKeyMap[] {
+        const inputs = []
+        for (const record of records) {
+            const input = {}
+            for (const colPath of this.requiredArgColPaths) {
+                const [colSchemaName, colTableName, colName] = colPath.split('.')
+                const colTablePath = [colSchemaName, colTableName].join('.')
+                const inputArg = this.colPathToFunctionInputArg[colPath]
+                const recordColKey = colTablePath === this.seedTablePath ? colName : colPath
+                input[inputArg] = record[recordColKey]
+            }
+        }
+        return inputs
+    }
+
+    _generateUpdateOpsForSeedTableBatch(batch: StringKeyMap[], liveObjectsData: StringKeyMap[]): Op[] {
+        const ops = []
+        for (let i = 0; i < batch.length; i++) {
+            const record = batch[i]
+            const liveObjectData = liveObjectsData[i]
+
+            const recordUpdates = {}
+            for (const property in liveObjectData) {
+                const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
+                const value = liveObjectData[property]
+                for (const { columnName } of colsWithThisPropertyAsDataSource) {
+                    if (this.seedColNames.has(columnName)) {
+                        recordUpdates[columnName] = value
+                    }
+                }
+            }
+            if (!Object.keys(recordUpdates).length) continue
+
+            // Create the lookup/where conditions for the update.
+            // These will just be the primary keys / values of this record.
+            const whereConditions = {}
+            for (let primaryKey of this.seedTablePrimaryKeys) {
+                whereConditions[primaryKey] = record[primaryKey]
+            }
+
+            ops.push({
+                type: OpType.Update,
+                schema: this.seedSchemaName,
+                table: this.seedTableName,
+                where: whereConditions,
+                data: recordUpdates,
+            })
+        }
+
+        return ops
+    }
+
+    async _findInputRecordsFromAdjacentCols() {
+        const queryConditions = this._getQueryConditionsForSeedTableInputRecords()
+
+        // Start a new query on the table this live object is linked to.
+        let query = db.from(this.seedTablePath)
+
+        // Add JOIN conditions.
+        for (let join of queryConditions.join) {
+            const [joinTable, joinRefKey, joinForeignKey] = join
+            query.innerJoin(joinTable, joinRefKey, joinForeignKey)
+        }
+
+        // Add SELECT conditions.
+        query.select(queryConditions.select)
+
+        // Add WHERE NOT NULL conditions.
+        const whereNotNull = {}
+        for (let i = 0; i < queryConditions.whereNotNull.length; i++) {
+            whereNotNull[queryConditions.whereNotNull[i]] = null
+        }
+        query.whereNot(whereNotNull)
+
+        // Perform the query.
+        try {
+            this.inputRecords = await query
+        } catch (err) {
+            throw new QueryError('select', this.seedSchemaName, this.seedTableName, err)
+        }
+    }
+
+    _getQueryConditionsForSeedTableInputRecords() {
+        const queryConditions = { 
+            join: [],
+            select: [`${this.seedTablePath}.*`],
+            whereNotNull: [], 
+        }
+
+        for (const colPath of this.requiredArgColPaths) {
+            const [colSchemaName, colTableName, colName] = colPath.split('.')
+            const colTablePath = [colSchemaName, colTableName].join('.')
+
+            if (colTablePath !== this.seedTablePath) {
+                const rel = getRelationshipBetweenTables(this.seedTablePath, colTablePath)
+                queryConditions.join.push([
+                    colTableName,
+                    `${colTablePath}.${rel.referenceKey}`,
+                    `${this.seedTablePath}.${rel.foreignKey}`,
+                ])
+                queryConditions.select.push(`${colPath} as ${colPath}`)
+                queryConditions.whereNotNull.push(colPath)
+            } else {
+                queryConditions.whereNotNull.push(colName)
+            }
+        }
+
+        return queryConditions
     }
 
     _findSeedFunction() {
@@ -147,37 +348,29 @@ class SeedTableService {
         }
     }
 
-    _getRequiredArgColumns(): string[] {
+    _getRequiredArgColumns() {
         const { argsMap, args } = this.seedFunction
         const reverseArgsMap = reverseMap(argsMap)
 
         const requiredArgColPaths = []
+        const colPathToFunctionInputArg = {}
         for (let inputKey in args) {
             const propertyKey = reverseArgsMap[inputKey] || inputKey
             const isRequiredInput = args[inputKey]
 
             if (isRequiredInput) {
-                requiredArgColPaths.push(this.seedSpec.linkProperties[propertyKey])
+                const colPath = this.seedSpec.linkProperties[propertyKey]
+                requiredArgColPaths.push(colPath)
+                colPathToFunctionInputArg[colPath] = inputKey
             }
         }
-        return requiredArgColPaths
-    }
 
-    _getSeedTableLinkColNames(): string[] {
-        const colNames = []
-        for (const propertyKey in this.seedSpec.linkProperties) {
-            const [schemaName, tableName, colName] = this.seedSpec.linkProperties[propertyKey].split('.')
-            const tablePath = [schemaName, tableName].join('.')
-            if (tablePath === this.seedSpec.tablePath) {
-                colNames.push(colName)
-            }
-        }
-        return colNames
+        this.requiredArgColPaths = requiredArgColPaths
+        this.colPathToFunctionInputArg = colPathToFunctionInputArg
     }
 
     _getLiveObjectTableDataSources(): TableDataSources {
-        const [schema, table] = this.seedSpec.tablePath.split('.')
-        const allTableDataSources = config.getDataSourcesForTable(schema, table) || {}
+        const allTableDataSources = config.getDataSourcesForTable(this.seedSchemaName, this.seedTableName) || {}
         const tableDataSourcesForThisLiveObject = {}
 
         // Basically just recreate the map, but filtering out the data sources that 

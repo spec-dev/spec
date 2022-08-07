@@ -11,6 +11,7 @@ const constants: StringKeyMap = {
     EVENTS_PORT: ev('EVENTS_PORT', 8888),
 
     FUNCTIONS_ORIGIN: ev('FUNCTIONS_ORIGIN', 'https://functions.spec.dev'),
+    SEED_BATCH_SIZE: 50,
 
     // TODO
     DB_HOST: ev('DB_HOST', 'localhost'),
@@ -24,6 +25,8 @@ const constants: StringKeyMap = {
 
     // TODO: 
     SAVE_EVENT_CURSORS_INTERVAL: 1000,
+
+
 }
 
 constants.PROJECT_CONFIG_PATH = path.join(constants.SPEC_CONFIG_DIR, 'project.toml')
