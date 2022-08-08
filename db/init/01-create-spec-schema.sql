@@ -1,11 +1,13 @@
--- Create spec schema
+-- Create spec schema and grant priveleges
 
-CREATE SCHEMA IF NOT EXISTS spec;
+create schema if not exists spec;
 
-GRANT ALL PRIVILEGES ON SCHEMA spec TO spec;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA spec TO spec;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA spec TO spec;
+grant usage on schema spec to spec;
+alter default privileges in schema spec grant all on tables to spec;
+alter default privileges in schema spec grant all on functions to spec;
+alter default privileges in schema spec grant all on sequences to spec;
 
-GRANT ALL PRIVILEGES ON SCHEMA public TO spec;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO spec;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO spec;
+grant usage on schema public to spec;
+alter default privileges in schema public grant all on tables to spec;
+alter default privileges in schema public grant all on functions to spec;
+alter default privileges in schema public grant all on sequences to spec;

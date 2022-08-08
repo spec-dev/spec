@@ -1,3 +1,3 @@
 -- Create spec user
 
-CREATE USER spec;
+create user spec;
