@@ -110,8 +110,8 @@ export interface Op {
     type: OpType
     schema: string
     table: string
-    where: StringKeyMap
-    data?: StringKeyMap
+    where?: StringKeyMap
+    data?: StringKeyMap | StringKeyMap[]
 }
 
 export enum LiveColumnSeedStatus {

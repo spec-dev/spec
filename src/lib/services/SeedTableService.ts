@@ -61,7 +61,7 @@ class SeedTableService {
     }
 
     async perform() {
-        logger.info(`Seeding ${this.seedSpec.tablePath}...`)
+        logger.info(`Seeding ${this.seedTablePath}...`)
 
         // Find seed function to use.
         this._findSeedFunction()
@@ -125,13 +125,13 @@ class SeedTableService {
     }
 
     async _seedFromScratch() {
-        logger.info(1)
+        // Pull all live objects for this seed.
         const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunction.name, [])
         if (error) throw error
         if (!liveObjectsData.length) return
-
-        const records = []
-        for (const liveObjectData of liveObjectsData) {
+        
+        // Create records data from live objects data.
+        const records = liveObjectsData.map(liveObjectData => {
             const record = {}
             for (const property in liveObjectData) {
                 const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
@@ -140,24 +140,33 @@ class SeedTableService {
                     record[columnName] = value
                 }
             }
-            records.push(record)
-        }
+            return record
+        })
 
-        try {
-            await db.from(this.seedSpec.tablePath).insert(records)
-        } catch (err) {
-            const [schemaName, tableName] = this.seedSpec.tablePath
-            throw new QueryError('insert', schemaName, tableName, err)
+        // Chunk into batches.
+        const batches = toChunks(records, constants.SEED_BATCH_SIZE)
+
+        // Insert records in batches.
+        for (let i = 0; i < batches.length; i++) {
+            const batch = batches[i]
+            const insertOp = {
+                type: OpType.Insert,
+                schema: this.seedSchemaName,
+                table: this.seedTableName,
+                data: batch,
+            }
+
+            // TODO: Figure out onConflict shit for upsertion using the unique columns of the seedTable.
+
+            await this._runOps([insertOp])
         }
     }
 
     async _seedFromForeignTable() {
-        logger.info(2)
 
     }
 
     async _seedWithAdjacentCols() {
-        logger.info(3)
         // Get all records in the seed table where each required link column has a value.
         await this._findInputRecordsFromAdjacentCols()
         if (!this.inputRecords.length) {

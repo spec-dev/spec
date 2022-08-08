@@ -20,6 +20,9 @@ class RunOpService {
 
     async perform() {
         switch (this.op.type) {
+            case OpType.Insert:
+                await this._runInsert()
+                break
             case OpType.Update:
                 await this._runUpdate()
                 break
@@ -28,12 +31,21 @@ class RunOpService {
         }
     }
 
+    async _runInsert() {
+        // Start a new insert query for this table.
+        let insertQuery = this.tx(this.tablePath).insert(this.op.data)
+            
+        // Perform the query, inserting the record(s).
+        try {
+            await insertQuery
+        } catch (err) {
+            throw new QueryError('insert', this.op.schema, this.op.table, err)
+        }
+    }
+
     async _runUpdate() {
         const whereConditions = this._getWhereConditionsAsList()
-        const prettyWhereConditions = whereConditions.map(c => c.join('=')).join(', ')
         
-        logger.info(`Updating ${this.tablePath} where ${prettyWhereConditions}...`)
-
         // Start a new update query for this table.
         let updateQuery = this.tx(this.tablePath).update(this.op.data)
 
@@ -53,7 +65,7 @@ class RunOpService {
 
     _getWhereConditionsAsList(): string[][] {
         let conditions = []
-        for (let colName in this.op.where) {
+        for (let colName in (this.op.where || {})) {
             conditions.push([colName, this.op.where[colName]])
         }
         return conditions
