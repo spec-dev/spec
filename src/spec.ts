@@ -4,7 +4,7 @@ import constants from './lib/constants'
 import { resolveLiveObjects } from './lib/rpcs/liveObjects'
 import messageClient from './lib/rpcs/messageClient'
 import { LiveObject, StringKeyMap, EventSub, SeedSpec } from './lib/types'
-import { ensureSpecSchemaIsReady, getEventCursorsForNames, saveEventCursors, seedFailed } from './lib/db/spec'
+import { ensureSpecSchemaIsReady, getEventCursorsForNames, saveEventCursors, seedFailed, seedSucceeded } from './lib/db/spec'
 import { SpecEvent } from '@spec.dev/event-client'
 import LRU from 'lru-cache'
 import ApplyEventService from './lib/services/ApplyEventService'
@@ -333,10 +333,15 @@ class Spec {
         } catch (err) {
             logger.error(`Seed failed - ${err}`)
             seedFailed(seedColNames.map(colName => [tablePath, colName].join('.')))
+            return
         }
 
+        // Mark seed as success.
+        seedSucceeded(seedColNames.map(colName => [tablePath, colName].join('.')))
+
+        // Start listening to events from this live object now.
         this.liveObjectsToIgnoreEventsFrom.delete(liveObjectId)
-        // TODO: Re-run some version of subscribeToEvents to kick off subscribing to the events associated with this live object.
+        this._subscribeToLiveObjectEvents()
     }
 
     async _processAllBufferedEvents() {

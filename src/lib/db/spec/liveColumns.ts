@@ -43,14 +43,22 @@ export async function saveLiveColumns(records: LiveColumn[]) {
 }
 
 export async function seedFailed(columnPaths: string | string[]) {
+    updateSeedStatus(columnPaths, LiveColumnSeedStatus.Failed)
+}
+
+export async function seedSucceeded(columnPaths: string | string[]) {
+    updateSeedStatus(columnPaths, LiveColumnSeedStatus.Succeeded)
+}
+
+export async function updateSeedStatus(columnPaths: string | string[], seedStatus: LiveColumnSeedStatus) {
     if (!Array.isArray(columnPaths)) {
         columnPaths = [columnPaths]
     }
     try {
         await liveColumns()
-            .update('seed_status', LiveColumnSeedStatus.Failed)
+            .update('seed_status', seedStatus)
             .whereIn('column_path', columnPaths)
     } catch (err) {
-        logger.error(`Error marking live columns as failed (ironically): ${err}`)
+        logger.error(`Error updating live column seed status to ${seedStatus}: ${err}`)
     }
 }

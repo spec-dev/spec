@@ -1,20 +1,13 @@
 import logger from '../logger'
-import { SeedSpec, LiveObject, EdgeFunction, LiveObjectFunctionRole, StringKeyMap, TableDataSources, Op, OpType } from '../types'
+import { SeedSpec, LiveObject, EdgeFunction, LiveObjectFunctionRole, StringKeyMap, TableDataSources, Op, OpType, ForeignKeyConstraint } from '../types'
 import { reverseMap, toChunks } from '../utils/formatters'
-import { areColumnsEmpty } from '../db/ops'
+import { areColumnsEmpty, getRelationshipBetweenTables } from '../db/ops'
 import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
 import config from '../config'
 import { db } from '../db'
 import { QueryError } from '../errors'
 import constants from '../constants'
-
-function getRelationshipBetweenTables(from: string, to: string): StringKeyMap {
-    return {
-        foreignKey: 'market_id',
-        referenceKey: 'id',
-    }
-}
 
 class SeedTableService {
 
@@ -35,6 +28,8 @@ class SeedTableService {
     inputRecords: StringKeyMap[] = []
 
     inputBatches: StringKeyMap[][] = []
+
+    rels: { [key: string]: ForeignKeyConstraint | null } = {}
 
     get seedTablePath(): string {
         return this.seedSpec.tablePath
@@ -196,9 +191,9 @@ class SeedTableService {
     async _seedFromForeignTable(foreignTablePath: string, linkColNames: string[]) {
         logger.info(`Seeding ${this.seedTablePath} from foreign table ${foreignTablePath}...`)
 
-        // Get seed table <-> foreign table relationship.
-        const rel = getRelationshipBetweenTables(this.seedTablePath, foreignTablePath)
-        if (!rel) throw `Tables have no relationship: ${this.seedTablePath} <-> ${foreignTablePath}.`
+        // Get seed table -> foreign table relationship.
+        const rel = await this._getRel(this.seedTablePath, foreignTablePath)
+        if (!rel) throw `No relationship ${this.seedTablePath} -> ${foreignTablePath} exists.`
 
         // Get all records in the foreign table where each required link column is NOT NULL.
         await this._findInputRecordsFromForeignTable(foreignTablePath, linkColNames)
@@ -410,7 +405,7 @@ class SeedTableService {
     }
 
     async _findInputRecordsFromAdjacentCols() {
-        const queryConditions = this._getQueryConditionsForSeedTableInputRecords()
+        const queryConditions = await this._getQueryConditionsForSeedTableInputRecords()
 
         // Start a new query on the table this live object is linked to.
         let query = db.from(this.seedTablePath)
@@ -440,7 +435,7 @@ class SeedTableService {
     }
 
     async _findExistingLiveObjectRecords(liveObjectsData: StringKeyMap[]): Promise<StringKeyMap[]> {
-        const queryConditions = this._getQueryConditionsForExistingLiveObjectRecords(liveObjectsData)
+        const queryConditions = await this._getQueryConditionsForExistingLiveObjectRecords(liveObjectsData)
 
         // Start a new query on the table this live object is linked to.
         let query = db.from(this.seedTablePath)
@@ -467,7 +462,7 @@ class SeedTableService {
         }
     }
 
-    _getQueryConditionsForSeedTableInputRecords(): StringKeyMap {
+    async _getQueryConditionsForSeedTableInputRecords(): Promise<StringKeyMap> {
         const queryConditions = { 
             join: [],
             select: [`${this.seedTablePath}.*`],
@@ -479,12 +474,15 @@ class SeedTableService {
             const colTablePath = [colSchemaName, colTableName].join('.')
 
             if (colTablePath !== this.seedTablePath) {
-                const rel = getRelationshipBetweenTables(this.seedTablePath, colTablePath)
+                const rel = await this._getRel(this.seedTablePath, colTablePath)
+                if (!rel) throw `No rel from ${this.seedTablePath} -> ${colTablePath}`
+
                 queryConditions.join.push([
                     colTableName,
                     `${colTablePath}.${rel.referenceKey}`,
                     `${this.seedTablePath}.${rel.foreignKey}`,
                 ])
+
                 queryConditions.select.push(`${colPath} as ${colPath}`)
                 queryConditions.whereNotNull.push(colPath)
             } else {
@@ -495,7 +493,7 @@ class SeedTableService {
         return queryConditions
     }
 
-    _getQueryConditionsForExistingLiveObjectRecords(liveObjectsData: StringKeyMap[]): StringKeyMap {
+    async _getQueryConditionsForExistingLiveObjectRecords(liveObjectsData: StringKeyMap[]): Promise<StringKeyMap> {
         const queryConditions = { 
             join: [],
             select: [`${this.seedTablePath}.*`],
@@ -511,7 +509,9 @@ class SeedTableService {
     
             // Handle foreign tables.
             if (colTablePath !== tablePath) {
-                const rel = getRelationshipBetweenTables(tablePath, colTablePath)
+                const rel = await this._getRel(tablePath, colTablePath)
+                if (!rel) throw `No rel from ${tablePath} -> ${colTablePath}`
+
                 queryConditions.join.push([
                     colTableName,
                     `${colTablePath}.${rel.referenceKey}`,
@@ -634,6 +634,18 @@ class SeedTableService {
         }
 
         return tableDataSourcesForThisLiveObject
+    }
+
+    async _getRel(tablePath: string, foreignTablePath: string): Promise<ForeignKeyConstraint | null> {
+        const key = [tablePath, foreignTablePath].join(':')
+
+        if (this.rels.hasOwnProperty(key)) {
+            return this.rels[key]
+        }
+        
+        const rel = await getRelationshipBetweenTables(tablePath, foreignTablePath)
+        this.rels[key] = rel
+        return rel
     }
 }
 

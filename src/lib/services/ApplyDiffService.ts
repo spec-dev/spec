@@ -1,15 +1,9 @@
-import { LiveObjectLink, StringKeyMap, StringMap, Op, OpType, TableDataSources } from '../types'
+import { LiveObjectLink, StringKeyMap, StringMap, Op, OpType, TableDataSources, ForeignKeyConstraint } from '../types'
 import config from '../config'
 import { db } from '../db'
 import { toMap } from '../utils/formatters'
+import { getRelationshipBetweenTables } from '../db/ops'
 import { QueryError } from '../errors'
-
-function getRelationshipBetweenTables(from: string, to: string): StringKeyMap {
-    return {
-        foreignKey: '',
-        referenceKey: '',
-    }
-}
 
 class ApplyDiffService {
 
@@ -29,6 +23,8 @@ class ApplyDiffService {
     recordsToUpdate: StringKeyMap[] = []
 
     tableDataSources: TableDataSources
+
+    rels: { [key: string]: ForeignKeyConstraint | null } = {}
 
     get linkTablePath(): string {
         return this.link.table
@@ -71,7 +67,7 @@ class ApplyDiffService {
 
         // Find existing records that should be updated by this diff, 
         // and curate the ops for those updates.
-        this._determineQueryConditions()
+        await this._determineQueryConditions()
         await this._findRecordsToUpdate()
         this._createUpdateOps()
         return this.ops
@@ -126,7 +122,7 @@ class ApplyDiffService {
         }
     }
 
-    _determineQueryConditions() {
+    async _determineQueryConditions() {
         this.queryConditions = { where: [], join: [] }
         const properties = this.linkProperties
         const tablePath = this.linkTablePath
@@ -138,7 +134,9 @@ class ApplyDiffService {
     
             // Handle foreign tables.
             if (colTablePath !== tablePath) {
-                const rel = getRelationshipBetweenTables(tablePath, colTablePath)
+                const rel = await this._getRel(tablePath, colTablePath)
+                if (!rel) throw `No rel from ${tablePath} -> ${colTablePath}`
+
                 this.queryConditions.join.push([
                     colTableName,
                     `${colTablePath}.${rel.referenceKey}`,
@@ -212,6 +210,18 @@ class ApplyDiffService {
         }
 
         return tableDataSourcesForThisLiveObject
+    }
+
+    async _getRel(tablePath: string, foreignTablePath: string): Promise<ForeignKeyConstraint | null> {
+        const key = [tablePath, foreignTablePath].join(':')
+
+        if (this.rels.hasOwnProperty(key)) {
+            return this.rels[key]
+        }
+        
+        const rel = await getRelationshipBetweenTables(tablePath, foreignTablePath)
+        this.rels[key] = rel
+        return rel
     }
 }
 

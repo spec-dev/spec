@@ -143,3 +143,23 @@ export interface SpecFunctionResponse {
     data: any
     error: string | null
 }
+
+export enum ConstraintType {
+    ForeignKey = 'f',
+    Unique = 'u',
+}
+
+export interface Constraint {
+    type: ConstraintType,
+    raw: string,
+    parsed: StringMap,
+}
+
+export interface ForeignKeyConstraint {
+    schema: string,
+    table: string,
+    foreignSchema: string,
+    foreignTable: string,
+    foreignKey: string,
+    referenceKey: string,
+}
