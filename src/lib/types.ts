@@ -112,6 +112,7 @@ export interface Op {
     table: string
     where?: StringKeyMap
     data?: StringKeyMap | StringKeyMap[]
+    uniqueColGroups?: string[][]
 }
 
 export enum LiveColumnSeedStatus {
@@ -147,12 +148,14 @@ export interface SpecFunctionResponse {
 export enum ConstraintType {
     ForeignKey = 'f',
     Unique = 'u',
+    UniqueIndex = 'ui',
+    PrimaryKey = 'p',
 }
 
 export interface Constraint {
     type: ConstraintType,
     raw: string,
-    parsed: StringMap,
+    parsed: StringKeyMap,
 }
 
 export interface ForeignKeyConstraint {

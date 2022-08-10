@@ -34,6 +34,15 @@ class RunOpService {
     async _runInsert() {
         // Start a new insert query for this table.
         let insertQuery = this.tx(this.tablePath).insert(this.op.data)
+
+        // Turn this into an upsert by merging on-conflict of any unique column constraints.
+        for (const uniqueColGroup of (this.op.uniqueColGroups || [])) {
+            if (uniqueColGroup.length === 1) {
+                insertQuery.onConflict(uniqueColGroup[0]).merge()
+            } else {
+                insertQuery.onConflict(uniqueColGroup).merge()
+            }
+        }
             
         // Perform the query, inserting the record(s).
         try {

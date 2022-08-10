@@ -16,13 +16,13 @@ class UpsertLiveColumnsService {
     tablePathsUsingLiveObjectId: { [key: string]: Set<string> } = {}
 
     async perform() {
-        this._getQuerySpecs()
         await this._getExistingLiveColumns()
-        this._findLiveColumnsToUpsert()
         await this._upsertLiveColumns()
     }
 
     async _upsertLiveColumns() {
+        this._findLiveColumnsToUpsert()
+
         if (!this.liveColumnsToUpsert.length) return
         try {
             await saveLiveColumns(this.liveColumnsToUpsert)
@@ -32,6 +32,8 @@ class UpsertLiveColumnsService {
     }
 
     async _getExistingLiveColumns() {
+        this._getQuerySpecs()
+
         const columnPaths = this.querySpecs.map(qs => qs.columnPath)
 
         // Get all existing live columns by given array of column paths.
@@ -74,9 +76,11 @@ class UpsertLiveColumnsService {
             // For each table...
             for (const tableName in config.tables[schemaName]) {
                 const tablePath = [schemaName, tableName].join('.')
+
                 // Get all data sources used by the table.
                 const dataSources = config.getDataSourcesForTable(schemaName, tableName)
-                // For each property used by the data sources..
+
+                // For each live object property used by the data sources...
                 for (const liveProperty in dataSources) {
                     const [liveObjectId, _] = liveProperty.split(':')
                     if (!this.tablePathsUsingLiveObjectId.hasOwnProperty(liveObjectId)) {

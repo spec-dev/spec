@@ -1,5 +1,5 @@
 import { db } from './index'
-import { ConstraintType, Constraint, ForeignKeyConstraint, StringMap } from '../types'
+import { ConstraintType, Constraint, ForeignKeyConstraint, StringKeyMap } from '../types'
 
 export async function doesSchemaExist(name: string): Promise<boolean> {
     const result = await db.raw(
@@ -37,40 +37,82 @@ export async function tableCount(tablePath: string): Promise<number> {
     return result ? Number((result[0] || {}).count || 0) : 0
 }
 
-export async function getTableConstraints(tablePath: string, constraintType: ConstraintType): Promise<Constraint[]> {
+export async function getTableConstraints(
+    tablePath: string, 
+    constraintTypes?: ConstraintType | ConstraintType[],
+): Promise<Constraint[]> {
     const [schema, table] = tablePath.split('.')
-    const result = await db.raw(
-        `SELECT 
-            pg_get_constraintdef(c.oid) AS constraint
-        FROM pg_constraint c 
-        JOIN pg_namespace n 
-            ON n.oid = c.connamespace 
-        WHERE contype IN (?) 
-        AND n.nspname = ?
-        AND conrelid::regclass::text = ?`,
-        [constraintType, schema, table]
-    )
-    
-    return (result?.rows || []).map(row => {
+    constraintTypes = Array.isArray(constraintTypes) 
+        ? constraintTypes 
+        : (constraintTypes ? [constraintTypes] : Object.values(ConstraintType))
+    const requiredConstraintTypes = new Set<string>(constraintTypes)
+
+    let rawConstraints = []
+    if (requiredConstraintTypes.has(ConstraintType.ForeignKey) || 
+        requiredConstraintTypes.has(ConstraintType.PrimaryKey) || 
+        requiredConstraintTypes.has(ConstraintType.Unique)
+    ) {
+        const { rows } = await db.raw(
+            `SELECT
+                pg_get_constraintdef(c.oid) AS constraint,
+                contype,
+                conname
+            FROM pg_constraint c 
+            JOIN pg_namespace n 
+                ON n.oid = c.connamespace 
+            WHERE contype IN ('p', 'f', 'u')
+            AND n.nspname = ?
+            AND conrelid::regclass::text = ?`,
+            [schema, table]
+        )
+        rawConstraints = rows
+    }
+
+    if (requiredConstraintTypes.has(ConstraintType.UniqueIndex)) {
+        const existingConstraintNames = new Set<string>(rawConstraints.map(c => c.conname))
+        const { rows } = await db.raw(
+            `SELECT
+                indexname as conname,
+                indexdef as constraint
+            FROM pg_indexes 
+            WHERE schemaname = ? 
+            AND tablename = ?`,
+            [schema, table]
+        )
+
+        const otherUniqueIndexes = rows.filter(row => (
+            row.constraint.toLowerCase().includes('unique index')) && !existingConstraintNames.has(row.conname)
+        ).map(row => ({ ...row, contype: ConstraintType.UniqueIndex }))
+
+        rawConstraints = [...rawConstraints, ...otherUniqueIndexes]
+    }
+
+    return rawConstraints.map(row => {
         let constraint = { 
-            type: constraintType, 
+            type: row.contype, 
             raw: row.constraint,
             parsed: {},
+        }
+
+        if (!requiredConstraintTypes.has(constraint.type)) {
+            return null
         }
         
         switch (constraint.type) {
             case ConstraintType.ForeignKey:
                 constraint.parsed = parseForeignKeyConstraint(constraint.raw) || {}
                 break
+            case ConstraintType.PrimaryKey:
             case ConstraintType.Unique:
-                constraint.parsed = parseUniqueConstraint(constraint.raw) || {}
+            case ConstraintType.UniqueIndex:
+                constraint.parsed = parseColNamesFromConstraint(constraint.raw) || {}
                 break
             default:
                 break
         }
 
         return constraint
-    })
+    }).filter(c => !!c)
 }
 
 export async function getRelationshipBetweenTables(
@@ -111,7 +153,30 @@ export async function getRelationshipBetweenTables(
     }
 }
 
-function parseForeignKeyConstraint(raw: string): StringMap | null {
+export async function getUniqueColGroups(tablePath: string): Promise<string[][]> {
+    const uniqueConstraints = await getTableConstraints(tablePath, [
+        ConstraintType.PrimaryKey,
+        ConstraintType.Unique,
+        ConstraintType.UniqueIndex,
+    ])
+    if (!uniqueConstraints.length) return []
+
+    const seen = new Set<string>()
+    const colNameGroups = []
+
+    for (const constraint of uniqueConstraints) {
+        const { colNames } = constraint.parsed
+        if (!colNames || !colNames.length) continue
+        const key = colNames.join(':')
+        if (seen.has(key)) continue
+        seen.add(key)
+        colNameGroups.push(colNames)
+    }
+
+    return colNameGroups
+}
+
+function parseForeignKeyConstraint(raw: string): StringKeyMap | null {
     const matches = raw.match(/FOREIGN KEY \(([a-zA-Z0-9_]+)\) REFERENCES ([a-zA-Z0-9_.]+)\(([a-zA-Z0-9_]+)\)/i)
     if (!matches || matches.length !== 4) return null
 
@@ -133,6 +198,9 @@ function parseForeignKeyConstraint(raw: string): StringMap | null {
     }
 }
 
-function parseUniqueConstraint(raw: string): StringMap | null {
-    return {}
+function parseColNamesFromConstraint(raw: string): StringKeyMap | null {
+    const matches = raw.match(/\(([a-zA-Z0-9_, ]+)\)/i)
+    if (!matches || matches.length !== 2) return null
+    const colNames = matches[1].split(',').map(col => col.trim()).sort()
+    return { colNames }
 }

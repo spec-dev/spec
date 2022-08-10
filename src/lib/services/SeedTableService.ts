@@ -1,7 +1,7 @@
 import logger from '../logger'
 import { SeedSpec, LiveObject, EdgeFunction, LiveObjectFunctionRole, StringKeyMap, TableDataSources, Op, OpType, ForeignKeyConstraint } from '../types'
 import { reverseMap, toChunks } from '../utils/formatters'
-import { areColumnsEmpty, getRelationshipBetweenTables } from '../db/ops'
+import { areColumnsEmpty, getRelationshipBetweenTables, getUniqueColGroups } from '../db/ops'
 import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
 import config from '../config'
@@ -30,6 +30,8 @@ class SeedTableService {
     inputBatches: StringKeyMap[][] = []
 
     rels: { [key: string]: ForeignKeyConstraint | null } = {}
+
+    seedTableUniqueColGroups: string[][] = []
 
     get seedTablePath(): string {
         return this.seedSpec.tablePath
@@ -139,6 +141,9 @@ class SeedTableService {
         // Chunk into batches.
         const batches = toChunks(records, constants.SEED_BATCH_SIZE)
 
+        // Get seed table's unique constraints (col groups).
+       await this._findSeedTableUniqueColGroups()
+
         // Insert records in batches.
         for (let i = 0; i < batches.length; i++) {
             const batch = batches[i]
@@ -147,6 +152,7 @@ class SeedTableService {
                 schema: this.seedSchemaName,
                 table: this.seedTableName,
                 data: batch,
+                uniqueColGroups: this.seedTableUniqueColGroups,
             }
 
             // TODO: Figure out onConflict shit for upsertion using the unique columns of the seedTable.
@@ -204,6 +210,9 @@ class SeedTableService {
 
         // Group input records into batches.
         this._batchInputRecords()
+
+        // Get seed table's unique constraints (col groups).
+        await this._findSeedTableUniqueColGroups()
 
         // Process each batch.
         for (let i = 0; i < this.inputBatches.length; i++) {
@@ -367,12 +376,15 @@ class SeedTableService {
                             newRecord[columnName] = value
                         }
                     }
+
                     newRecord[foreignKey] = foreignInputRecord[referenceKey]
+
                     ops.push({
                         type: OpType.Insert,
                         schema: this.seedSchemaName,
                         table: this.seedTableName,
                         data: newRecord,
+                        uniqueColGroups: this.seedTableUniqueColGroups,
                     })
                 }    
             }
@@ -597,6 +609,10 @@ class SeedTableService {
             this.seedFunction = edgeFunction
             break
         }
+    }
+
+    async _findSeedTableUniqueColGroups() {
+        this.seedTableUniqueColGroups = await getUniqueColGroups(this.seedTablePath)
     }
 
     _getRequiredArgColumns() {

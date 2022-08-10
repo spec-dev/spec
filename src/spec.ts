@@ -19,9 +19,9 @@ class Spec {
 
     saveEventCursorsJob: any = null
 
-    processingNewConfig: boolean = false
+    isProcessingNewConfig: boolean = false
 
-    pendingConfigUpdate: boolean = false
+    hasPendingConfigUpdate: boolean = false
 
     liveObjectsToIgnoreEventsFrom: Set<string> = new Set()
     
@@ -32,16 +32,16 @@ class Spec {
     async start() {
         logger.info('Starting Spec...')
 
-        // Run anytime message client socket connects.
+        // Run any time the message client socket connects.
         messageClient.onConnect = () => this._onMessageClientConnected()
 
-        // Ensure the 'spec' schema and associated tables exist.
+        // Ensure the 'spec' schema and associated tables within it exist.
         await ensureSpecSchemaIsReady()
 
-        // Subscribe to any config file changes.
+        // Subscribe & react to config file changes.
         config.onUpdate = () => {
-            if (this.processingNewConfig) {
-                this.pendingConfigUpdate = true
+            if (this.isProcessingNewConfig) {
+                this.hasPendingConfigUpdate = true
             } else {
                 this._onNewConfig()
             }
@@ -53,7 +53,7 @@ class Spec {
     }
 
     async _onNewConfig() {
-        this.processingNewConfig = true
+        this.isProcessingNewConfig = true
 
         // Load and validate the project config file.
         config.load()
@@ -403,12 +403,12 @@ class Spec {
     }
 
     _doneProcessingNewConfig() {
-        if (this.pendingConfigUpdate) {
+        if (this.hasPendingConfigUpdate) {
             this._onNewConfig()
             return
         }
 
-        this.processingNewConfig = false
+        this.isProcessingNewConfig = false
     }
 
     _createSaveCursorsJob() {
