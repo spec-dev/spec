@@ -62,6 +62,7 @@ export interface LiveObjectLink {
     table: string
     properties: StringMap
     seedIfEmpty?: boolean
+    eventsCanInsert?: boolean
 }
 
 export interface LiveObject {

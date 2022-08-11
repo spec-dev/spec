@@ -176,6 +176,13 @@ export async function getUniqueColGroups(tablePath: string): Promise<string[][]>
     return colNameGroups
 }
 
+export async function getPrimaryKeys(tablePath: string): Promise<string[]> {
+    const primaryKeyConstraint = ((await getTableConstraints(tablePath, [
+        ConstraintType.PrimaryKey,
+    ])) || [])[0]
+    return primaryKeyConstraint?.parsed?.colNames || []
+}
+
 function parseForeignKeyConstraint(raw: string): StringKeyMap | null {
     const matches = raw.match(/FOREIGN KEY \(([a-zA-Z0-9_]+)\) REFERENCES ([a-zA-Z0-9_.]+)\(([a-zA-Z0-9_]+)\)/i)
     if (!matches || matches.length !== 4) return null

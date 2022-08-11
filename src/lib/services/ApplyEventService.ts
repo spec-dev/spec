@@ -30,6 +30,7 @@ class ApplyEventService {
     }
 
     async perform() {
+        logger.info('Applying event...', this.event)
         await this.getOps()
         await this.runOps()
     }
@@ -64,14 +65,14 @@ class ApplyEventService {
         const linksToApplyDiffTo = []
         const liveObjectDiff = this.liveObjectDiff
         for (const link of this.links) {
-            let diffHasAllRequiredLinkProperties = true
+            let diffHasAllLinkProperties = true
             for (const property in link.properties) {
                 if (!liveObjectDiff.hasOwnProperty(property)) {
-                    diffHasAllRequiredLinkProperties = false
+                    diffHasAllLinkProperties = false
                     break
                 }
             }
-            if (diffHasAllRequiredLinkProperties) {
+            if (diffHasAllLinkProperties) {
                 linksToApplyDiffTo.push(link)
             }
         }

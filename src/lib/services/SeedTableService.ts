@@ -1,7 +1,7 @@
 import logger from '../logger'
 import { SeedSpec, LiveObject, EdgeFunction, LiveObjectFunctionRole, StringKeyMap, TableDataSources, Op, OpType, ForeignKeyConstraint } from '../types'
 import { reverseMap, toChunks } from '../utils/formatters'
-import { areColumnsEmpty, getRelationshipBetweenTables, getUniqueColGroups } from '../db/ops'
+import { areColumnsEmpty, getPrimaryKeys, getRelationshipBetweenTables, getUniqueColGroups } from '../db/ops'
 import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
 import config from '../config'
@@ -33,6 +33,8 @@ class SeedTableService {
 
     seedTableUniqueColGroups: string[][] = []
 
+    seedTablePrimaryKeys: string[] = []
+
     get seedTablePath(): string {
         return this.seedSpec.tablePath
     }
@@ -43,10 +45,6 @@ class SeedTableService {
 
     get seedTableName(): string {
         return this.seedTablePath.split('.')[1]
-    }
-
-    get seedTablePrimaryKeys(): string[] {
-        return ['id']
     }
 
     get seedFunctionName(): string {
@@ -73,9 +71,11 @@ class SeedTableService {
         // TODO: Break out.
         const linkPropertyTableColumns = {}
         const linkPropertyColumnLocations = { onSeedTable: 0, onForeignTable: 0 }
+        const uniqueTablePaths = new Set<string>()
         for (const colPath of this.requiredArgColPaths) {
             const [schemaName, tableName, colName] = colPath.split('.')
             const tablePath = [schemaName, tableName].join('.')
+            uniqueTablePaths.add(tablePath)
             
             tablePath === this.seedTablePath
                 ? linkPropertyColumnLocations.onSeedTable++
@@ -106,11 +106,15 @@ class SeedTableService {
                 return
             }
             await this._seedFromScratch()
-        } else if (linkPropertyColumnLocations.onSeedTable > 0) {
+        }
+        else if (linkPropertyColumnLocations.onSeedTable > 0) {
             await this._seedWithAdjacentCols()
-        } else if (linkPropertyColumnLocations.onForeignTable > 1) {
+        } 
+        // TODO: This is possible, just gonna take a lot more lookup work.
+        else if (linkPropertyColumnLocations.onForeignTable > 1 && uniqueTablePaths.size > 1) {
             logger.warn(`${this.seedTablePath} - Can't seed table using exclusively more than one foreign table.`)
-        } else {
+        }
+        else {
             const tablePath = Object.keys(linkPropertyTableColumns)[0] as string
             const colNames = linkPropertyTableColumns[tablePath] as string[]
             await this._seedFromForeignTable(tablePath, colNames)
@@ -169,7 +173,9 @@ class SeedTableService {
             logger.info('Found no adjacent-column input records to seed with...')
             return
         }
-        
+    
+        await this._getSeedTablePrimaryKeys()
+
         // Group input records into batches.
         this._batchInputRecords()
 
@@ -211,8 +217,10 @@ class SeedTableService {
         // Group input records into batches.
         this._batchInputRecords()
 
-        // Get seed table's unique constraints (col groups).
-        await this._findSeedTableUniqueColGroups()
+        await Promise.all([
+            this._getSeedTablePrimaryKeys(),
+            this._findSeedTableUniqueColGroups(),
+        ])
 
         // Process each batch.
         for (let i = 0; i < this.inputBatches.length; i++) {
@@ -394,7 +402,7 @@ class SeedTableService {
     }
 
     async _findRecords(tablePath: string, joinConditions: string[][], whereConditions: any[][]): Promise<StringKeyMap[]> {
-        let query = db.from(tablePath)
+        let query = db.from(tablePath).select([`${tablePath}.*`])
 
         // Add JOIN conditions.
         for (let join of joinConditions) {
@@ -662,6 +670,11 @@ class SeedTableService {
         const rel = await getRelationshipBetweenTables(tablePath, foreignTablePath)
         this.rels[key] = rel
         return rel
+    }
+
+    async _getSeedTablePrimaryKeys() {
+        this.seedTablePrimaryKeys = await getPrimaryKeys(this.seedTablePath)
+        if (!this.seedTablePrimaryKeys.length) throw `Primary keys could not determined for ${this.seedTablePath}`
     }
 }
 
