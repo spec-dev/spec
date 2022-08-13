@@ -101,6 +101,19 @@ export interface EventSub {
     buffer: SpecEvent<StringKeyMap>[]
 }
 
+export enum TableSubStatus {
+    Pending,
+    Creating,
+    Subscribing,
+    Subscribed,
+}
+
+export interface TableSub {
+    schema: string,
+    table: string,
+    status: TableSubStatus,
+}
+
 export enum OpType {
     Insert = 'insert',
     Update = 'update',
@@ -166,4 +179,17 @@ export interface ForeignKeyConstraint {
     foreignTable: string,
     foreignKey: string,
     referenceKey: string,
+}
+
+export enum TriggerEvent {
+    INSERT = 'INSERT',
+    UPDATE = 'UPDATE',
+}
+
+export interface Trigger {
+    schema: string,
+    table: string,
+    event: TriggerEvent,
+    name: string,
+    joinedPrimaryKeys?: string,
 }

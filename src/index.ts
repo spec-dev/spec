@@ -1,6 +1,6 @@
 import Spec from './spec'
 
-function start() {    
+function start() {
     new Spec().start()
 }
 

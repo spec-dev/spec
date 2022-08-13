@@ -3,19 +3,22 @@ import config from './lib/config'
 import constants from './lib/constants'
 import { resolveLiveObjects } from './lib/rpcs/liveObjects'
 import messageClient from './lib/rpcs/messageClient'
-import { LiveObject, StringKeyMap, EventSub, SeedSpec } from './lib/types'
+import { LiveObject, StringKeyMap, EventSub, SeedSpec, TableSub, TableSubStatus, TriggerEvent, Trigger } from './lib/types'
 import { ensureSpecSchemaIsReady, getEventCursorsForNames, saveEventCursors, seedFailed, seedSucceeded } from './lib/db/spec'
 import { SpecEvent } from '@spec.dev/event-client'
+import { getPrimaryKeys } from './lib/db/ops'
+import { formatTriggerName, dropTrigger, createTrigger } from './lib/db/triggers'
 import LRU from 'lru-cache'
 import ApplyEventService from './lib/services/ApplyEventService'
 import UpsertLiveColumnsService from './lib/services/UpsertLiveColumnsService'
 import SeedTableService from './lib/services/SeedTableService'
+import { getSpecTriggers } from './lib/db/triggers'
 
 class Spec {
 
     liveObjects: { [key: string]: LiveObject } = {}
 
-    subs: { [key: string]: EventSub } = {}
+    eventSubs: { [key: string]: EventSub } = {}
 
     saveEventCursorsJob: any = null
 
@@ -24,6 +27,8 @@ class Spec {
     hasPendingConfigUpdate: boolean = false
 
     liveObjectsToIgnoreEventsFrom: Set<string> = new Set()
+
+    tableSubs: { [key: string]: TableSub } = {}
     
     seenEvents: LRU<string, boolean> = new LRU({
         max: 5000, // TODO: Move to constants and potentially make configurable via env vars
@@ -65,6 +70,9 @@ class Spec {
             return
         }
 
+        // Upsert table subscriptions (listen to data changes).
+        this._upsertTableSubs()
+
         // Connect to event/rpc message client. 
         // Force run the onConnect handler if already connected.
         messageClient.client ? messageClient.onConnect() : messageClient.connect()
@@ -84,7 +92,7 @@ class Spec {
 
         // Subscribe to all events powering the live objects.
         const newEventNames = this._subscribeToLiveObjectEvents()
-        if (!Object.keys(this.subs).length) {
+        if (!Object.keys(this.eventSubs).length) {
             logger.info('No events to subscribe to.')
             this._doneProcessingNewConfig()
             return
@@ -109,7 +117,7 @@ class Spec {
 
     async _onEvent(event: SpecEvent<StringKeyMap>, options?: StringKeyMap) {
         // Ensure we're actually subscribed to this event.
-        const sub = this.subs[event.name]
+        const sub = this.eventSubs[event.name]
         if (!sub) {
             logger.error(`Got event for ${event.name} without subscription...something's wrong.`)
             return
@@ -124,7 +132,7 @@ class Spec {
         
         // Buffer new event if still resolving previous missed events.
         if (sub.shouldBuffer || options?.forceToBuffer) {
-            this.subs[event.name].buffer.push(event)
+            this.eventSubs[event.name].buffer.push(event)
             return
         }
 
@@ -134,7 +142,7 @@ class Spec {
 
     async _processEvent(event: SpecEvent<StringKeyMap>) {
         // Get sub for event.
-        const sub = this.subs[event.name]
+        const sub = this.eventSubs[event.name]
         if (!sub) {
             logger.error(`Processing event for ${event.name} without subscription...something's wrong.`)
             return
@@ -188,7 +196,7 @@ class Spec {
 
         // Subscribe to new events.
         for (const newEventName in liveObjectsByEvent) {
-            if (!this.subs.hasOwnProperty(newEventName)) {
+            if (!this.eventSubs.hasOwnProperty(newEventName)) {
                 // Register event callback.
                 messageClient.on(
                     newEventName,
@@ -196,7 +204,7 @@ class Spec {
                 )
 
                 // Register sub.
-                this.subs[newEventName] = {
+                this.eventSubs[newEventName] = {
                     name: newEventName,
                     liveObjectIds: liveObjectsByEvent[newEventName],
                     cursor: null,
@@ -216,14 +224,14 @@ class Spec {
 
     async _loadEventCursors() {
         // Get event subs that haven't been registered yet in the eventCursors map.
-        const eventNamesWithNoCursor = Object.keys(this.subs).filter(
-            eventName => !this.subs[eventName].cursor
+        const eventNamesWithNoCursor = Object.keys(this.eventSubs).filter(
+            eventName => !this.eventSubs[eventName].cursor
         )
 
         // Get the missing event cursors from Postgres.
         const records = await getEventCursorsForNames(eventNamesWithNoCursor)
         for (let eventCursor of records) {
-            this.subs[eventCursor.name].cursor = eventCursor
+            this.eventSubs[eventCursor.name].cursor = eventCursor
         }
     }
 
@@ -231,7 +239,7 @@ class Spec {
         // Get the previous cursors for the new events. 
         const cursors = []
         for (let newEventName of newEventNames) {
-            const cursor = this.subs[newEventName].cursor
+            const cursor = this.eventSubs[newEventName].cursor
             cursor && cursors.push(cursor)
         }
         if (!cursors.length) return
@@ -346,7 +354,7 @@ class Spec {
 
     async _processAllBufferedEvents() {
         let promises = []
-        for (let eventName in this.subs) {
+        for (let eventName in this.eventSubs) {
             promises.push(this._processEventBuffer(eventName))
         }
         await Promise.all(promises)
@@ -358,20 +366,20 @@ class Spec {
 
         // Process each event (but don't await the processing).
         let event
-        while (this.subs[eventName].buffer.length > 0) {
-            event = this.subs[eventName].buffer.shift()
+        while (this.eventSubs[eventName].buffer.length > 0) {
+            event = this.eventSubs[eventName].buffer.shift()
             this._processEvent(event)
         }
 
         // Turn buffer off and use the last seen event as the new cursor.
-        this.subs[eventName].shouldBuffer = false
+        this.eventSubs[eventName].shouldBuffer = false
         event && this._updateEventCursor(event)
     }
 
     async _sortEventBuffer(eventName: string): Promise<void> {
         return new Promise(async (res, _) => {
             while (true) {
-                const buffer = this.subs[eventName].buffer
+                const buffer = this.eventSubs[eventName].buffer
                 if (!buffer.length) break
     
                 // Sort buffer by nonce (smallest none first).
@@ -379,11 +387,11 @@ class Spec {
                 
                 // If some new event was buffered (race condition) during ^this sort,
                 // try again.
-                if (sortedBuffer.length !== this.subs[eventName].buffer.length) {
+                if (sortedBuffer.length !== this.eventSubs[eventName].buffer.length) {
                     continue
                 }
     
-                this.subs[eventName].buffer = sortedBuffer
+                this.eventSubs[eventName].buffer = sortedBuffer
                 break
             }
             res()
@@ -393,10 +401,10 @@ class Spec {
     async _saveEventCursors() {
         // Get all event cursors that changed since the last save interval.
         const cursorsToSave = []
-        for (let eventName in this.subs) {
-            if (this.subs[eventName].cursorChanged) {
-                cursorsToSave.push(this.subs[eventName].cursor)
-                this.subs[eventName].cursorChanged = false
+        for (let eventName in this.eventSubs) {
+            if (this.eventSubs[eventName].cursorChanged) {
+                cursorsToSave.push(this.eventSubs[eventName].cursor)
+                this.eventSubs[eventName].cursorChanged = false
             }
         }
         cursorsToSave.length && await saveEventCursors(cursorsToSave)
@@ -421,12 +429,12 @@ class Spec {
     }
 
     _removeUselessSubs(liveObjectsByEvent: { [key: string]: string[] }) {
-        for (const oldEventName in this.subs) {
+        for (const oldEventName in this.eventSubs) {
             if (!liveObjectsByEvent.hasOwnProperty(oldEventName)) {
                 messageClient.off(oldEventName)
-                const eventCursor = this.subs[oldEventName].cursor
+                const eventCursor = this.eventSubs[oldEventName].cursor
                 saveEventCursors([eventCursor])
-                delete this.subs[oldEventName]
+                delete this.eventSubs[oldEventName]
             }
         }
     }
@@ -457,13 +465,178 @@ class Spec {
     }
 
     _updateEventCursor(event: SpecEvent<StringKeyMap>) {
-        this.subs[event.name].cursor = {
+        this.eventSubs[event.name].cursor = {
             name: event.name,
             id: event.id,
             nonce: event.nonce,
             timestamp: event.origin.eventTimestamp,
         }
-        this.subs[event.name].cursorChanged = true
+        this.eventSubs[event.name].cursorChanged = true
+    }
+
+    async _upsertTableSubs() {
+        // Create a map of table subs from the tables mentioned in the config.
+        this._populateTableSubsFromConfig()
+
+        // Find which table subs are pending (which ones we need to check on to make sure they exist).
+        const pendingSubs = Object.values(this.tableSubs).filter(ts => (
+            ts.status === TableSubStatus.Pending
+        ))
+        if (!pendingSubs.length) return
+
+        // Get all existing spec triggers.
+        let triggers
+        try {
+            triggers = await getSpecTriggers()
+        } catch (err) {
+            logger.error(`Failed to fetch spec triggers: ${err}`)
+            return
+        }
+
+        // Map existing triggers by <schema>:<table>:<event>
+        const existingTriggersMap = {}
+        for (const trigger of triggers) {
+            const { schema, table, event } = trigger
+            const key = [schema, table, event].join(':')
+            existingTriggersMap[key] = trigger
+        }
+        
+        // Upsert all pending subs (their Postgres triggers and functions).
+        await Promise.all(pendingSubs.map(ts => this._upsertTableSub(ts, existingTriggersMap)))
+
+        // All subs that were successfully upserted in the previous step should now be in the subscribing state.
+        const subsThatNeedSubscribing = Object.values(this.tableSubs).filter(ts => (
+            ts.status === TableSubStatus.Subscribing
+        ))
+        if (!subsThatNeedSubscribing.length) {
+            logger.warn('Not all pending table subs moved to the subscribing status...')
+            return
+        }
+
+        // Subscribe to tables (listen for trigger notifications).
+        await this._subscribeToTables(subsThatNeedSubscribing)
+    }
+
+    async _subscribeToTables(tableSubs: TableSub[]) {
+        console.log('Subscribe to table subs', tableSubs)
+    }
+
+    async _upsertTableSub(tableSub: TableSub, existingTriggersMap: { [key: string]: Trigger }) {
+        const { schema, table } = tableSub
+        const tablePath = [schema, table].join('.')
+        const insertTriggerKey = [schema, table, TriggerEvent.INSERT].join(':')
+        const updateTriggerKey = [schema, table, TriggerEvent.UPDATE].join(':')
+
+        // Get the current insert & update triggers for this table.
+        const insertTrigger = existingTriggersMap[insertTriggerKey]
+        const updateTrigger = existingTriggersMap[updateTriggerKey]
+
+        // Should create new triggers if they don't exist.
+        let createUpdateTrigger = !updateTrigger
+        let createInsertTrigger = !insertTrigger
+
+        let currentPrimaryKeys = null
+
+        // If the insert trigger already exists, ensure the primary keys for the table haven't changed.
+        if (insertTrigger) {
+            try {
+                currentPrimaryKeys = await getPrimaryKeys(tablePath)
+            } catch (err) {
+                logger.error(`Error fetching primary keys for ${tablePath}`)
+            }
+            if (currentPrimaryKeys) {
+                // If the trigger name is different, it means the table's primary keys must have changed,
+                // so drop the existing triggers and we'll recreate them (+ the functions).
+                const expectedTriggerName = formatTriggerName(schema, table, insertTrigger.event, currentPrimaryKeys)
+                if (expectedTriggerName && (insertTrigger.name !== expectedTriggerName)) {
+                    try {
+                        await dropTrigger(insertTrigger)
+                        createInsertTrigger = true
+                    } catch (err) {
+                        logger.error(`Error dropping trigger: ${insertTrigger.name}`)
+                    }
+                }
+            }
+        }
+
+        // If the update trigger already exists, ensure the primary keys for the table haven't changed.
+        if (updateTrigger) {
+            try {
+                currentPrimaryKeys = currentPrimaryKeys || (await getPrimaryKeys(tablePath))
+            } catch (err) {
+                logger.error(`Error fetching primary keys for ${tablePath}`)
+            }
+            if (currentPrimaryKeys) {
+                // If the trigger name is different, it means the table's primary keys must have changed,
+                // so drop the existing trigger and we'll recreate it (+ upsert the function).
+                const expectedTriggerName = formatTriggerName(schema, table, updateTrigger.event, currentPrimaryKeys)
+                if (expectedTriggerName && (updateTrigger.name !== expectedTriggerName)) {
+                    try {
+                        await dropTrigger(updateTrigger)
+                        createUpdateTrigger = true
+                    } catch (err) {
+                        logger.error(`Error dropping trigger: ${updateTrigger.name}`)
+                    }
+                }
+            }
+        }
+
+        // Jump to subscribing status if already created.
+        if (!createInsertTrigger && !createUpdateTrigger) {
+            this.tableSubs[tablePath].status = TableSubStatus.Subscribing
+            return
+        }
+
+        this.tableSubs[tablePath].status = TableSubStatus.Creating
+
+        // Create the needed triggers.
+        const promises = []
+        createInsertTrigger && promises.push(createTrigger(schema, table, TriggerEvent.INSERT, { 
+            primaryKeys: currentPrimaryKeys,
+        }))
+        createUpdateTrigger && promises.push(createTrigger(schema, table, TriggerEvent.UPDATE, {
+            primaryKeys: currentPrimaryKeys,
+        }))
+
+        try {
+            await Promise.all(promises)
+        } catch (err) {
+            logger.error(`Error creating triggers for ${tablePath}: ${err}`)
+            return
+        }
+
+        this.tableSubs[tablePath].status = TableSubStatus.Subscribing
+    }
+
+    _populateTableSubsFromConfig() {
+        const objects = config.liveObjects
+
+        const registerTableSub = tablePath => {
+            if (this.tableSubs.hasOwnProperty(tablePath)) {
+                return
+            }
+            const [schema, table] = tablePath.split('.')
+            this.tableSubs[tablePath] = {
+                status: TableSubStatus.Pending,
+                schema,
+                table,
+            }
+        }
+
+        for (const configName in objects) {
+            const obj = objects[configName]
+            const links = obj.links || []
+
+            for (const link of links) {
+                registerTableSub(link.table)
+
+                for (const colPath of Object.values(link.properties || {})) {
+                    const [colSchema, colTable, _] = colPath.split('.')
+                    const colTablePath = [colSchema, colTable].join('.')
+                    registerTableSub(colTablePath)
+                }
+            }
+        }
     }
 }
 
