@@ -3,10 +3,11 @@ import config from './lib/config'
 import constants from './lib/constants'
 import { resolveLiveObjects } from './lib/rpcs/liveObjects'
 import messageClient from './lib/rpcs/messageClient'
-import { LiveObject, StringKeyMap, EventSub, SeedSpec, TableSub, TableSubStatus, TriggerEvent, Trigger } from './lib/types'
+import { LiveObject, StringKeyMap, EventSub, SeedSpec, TableSub, TableSubStatus, TriggerEvent, Trigger, TableSubEvent, DBColumn, StringMap } from './lib/types'
 import { ensureSpecSchemaIsReady, getEventCursorsForNames, saveEventCursors, seedFailed, seedSucceeded } from './lib/db/spec'
 import { SpecEvent } from '@spec.dev/event-client'
 import { getPrimaryKeys } from './lib/db/ops'
+import { tableSubscriber } from './lib/db'
 import { formatTriggerName, dropTrigger, createTrigger } from './lib/db/triggers'
 import LRU from 'lru-cache'
 import ApplyEventService from './lib/services/ApplyEventService'
@@ -517,9 +518,63 @@ class Spec {
         await this._subscribeToTables(subsThatNeedSubscribing)
     }
 
-    async _subscribeToTables(tableSubs: TableSub[]) {
-        console.log('Subscribe to table subs', tableSubs)
+    async _subscribeToTables(subsThatNeedSubscribing: TableSub[]) {
+        // Register tables as subscribed.
+        for (const { schema, table } of subsThatNeedSubscribing) {
+            const tablePath = [schema, table].join('.')
+            this.tableSubs[tablePath].status = TableSubStatus.Subscribed
+            logger.info(`Listening for changes on table ${tablePath}...`)
+        }
+
+        // Ensure we're not already subscribed to the table subs channel.
+        const subscribedChannels = tableSubscriber.getSubscribedChannels()
+        if (subscribedChannels.includes(constants.TABLE_SUBS_CHANNEL)) return
+
+        // Register event handler.
+        tableSubscriber.notifications.on(
+            constants.TABLE_SUBS_CHANNEL,
+            event => this._onTableDataChange(event),
+        )
+
+        // Start listening to tables.
+        try {
+            await tableSubscriber.connect()
+            await tableSubscriber.listenTo(constants.TABLE_SUBS_CHANNEL)
+        } catch (err) {
+            logger.error(`Error connecting to table-subs notification channel: ${err}`)
+        }
     }
+
+    _onTableDataChange(event: TableSubEvent) {
+        if (!event) return
+        const { schema, table } = event
+        const tablePath = [schema, table].join('.')
+
+        // Get table sub this event belongs to.
+        const tableSub = this.tableSubs[tablePath]
+        if (!tableSub || tableSub.status !== TableSubStatus.Subscribed) {
+            logger.warn(`Got data-change event for table (${tablePath}) not subscribed to...`)
+            return
+        }
+
+        // Parse primary keys in case of numerics.
+        event.primaryKeys = this._parsePrimaryKeys(event.primaryKeys, tableSub.primaryKeyTypes)
+        
+        console.log(event)
+    }
+
+    _parsePrimaryKeys(primaryKeysData: StringKeyMap, primaryKeyTypes: StringMap): StringKeyMap {
+        const newPrimaryKeys = {}
+        for (const key in primaryKeysData) {
+            let val = primaryKeysData[key]
+            const colType = primaryKeyTypes[key]
+            if (colType === 'number') {
+                val = Number(val)
+            }
+            newPrimaryKeys[key] = val
+        }
+        return newPrimaryKeys
+     }
 
     async _upsertTableSub(tableSub: TableSub, existingTriggersMap: { [key: string]: Trigger }) {
         const { schema, table } = tableSub
@@ -535,16 +590,17 @@ class Spec {
         let createUpdateTrigger = !updateTrigger
         let createInsertTrigger = !insertTrigger
 
-        let currentPrimaryKeys = null
+        let currentPrimaryKeyCols, currentPrimaryKeys
 
         // If the insert trigger already exists, ensure the primary keys for the table haven't changed.
         if (insertTrigger) {
             try {
-                currentPrimaryKeys = await getPrimaryKeys(tablePath)
+                currentPrimaryKeyCols = await getPrimaryKeys(tablePath, true)
             } catch (err) {
                 logger.error(`Error fetching primary keys for ${tablePath}`)
             }
-            if (currentPrimaryKeys) {
+            if (currentPrimaryKeyCols) {
+                currentPrimaryKeys = currentPrimaryKeyCols.map(pk => pk.name)
                 // If the trigger name is different, it means the table's primary keys must have changed,
                 // so drop the existing triggers and we'll recreate them (+ the functions).
                 const expectedTriggerName = formatTriggerName(schema, table, insertTrigger.event, currentPrimaryKeys)
@@ -562,11 +618,12 @@ class Spec {
         // If the update trigger already exists, ensure the primary keys for the table haven't changed.
         if (updateTrigger) {
             try {
-                currentPrimaryKeys = currentPrimaryKeys || (await getPrimaryKeys(tablePath))
+                currentPrimaryKeyCols = currentPrimaryKeyCols || (await getPrimaryKeys(tablePath, true))
             } catch (err) {
                 logger.error(`Error fetching primary keys for ${tablePath}`)
             }
-            if (currentPrimaryKeys) {
+            if (currentPrimaryKeyCols) {
+                currentPrimaryKeys = currentPrimaryKeyCols.map(pk => pk.name)
                 // If the trigger name is different, it means the table's primary keys must have changed,
                 // so drop the existing trigger and we'll recreate it (+ upsert the function).
                 const expectedTriggerName = formatTriggerName(schema, table, updateTrigger.event, currentPrimaryKeys)
@@ -581,8 +638,24 @@ class Spec {
             }
         }
 
+        try {
+            currentPrimaryKeyCols = currentPrimaryKeyCols || (await getPrimaryKeys(tablePath, true))
+            currentPrimaryKeys = currentPrimaryKeyCols.map(pk => pk.name)
+        } catch (err) {
+            logger.error(`Error fetching primary keys for ${tablePath}`)
+            return
+        }
+
         // Jump to subscribing status if already created.
         if (!createInsertTrigger && !createUpdateTrigger) {
+
+            // TODO: Consolidate with end of function.
+            const primaryKeyTypes = {}
+            for (const { name, type } of currentPrimaryKeyCols) {
+                primaryKeyTypes[name] = type
+            }
+    
+            this.tableSubs[tablePath].primaryKeyTypes = primaryKeyTypes    
             this.tableSubs[tablePath].status = TableSubStatus.Subscribing
             return
         }
@@ -605,6 +678,12 @@ class Spec {
             return
         }
 
+        const primaryKeyTypes = {}
+        for (const { name, type } of currentPrimaryKeyCols) {
+            primaryKeyTypes[name] = type
+        }
+
+        this.tableSubs[tablePath].primaryKeyTypes = primaryKeyTypes
         this.tableSubs[tablePath].status = TableSubStatus.Subscribing
     }
 

@@ -83,7 +83,7 @@ export async function createTrigger(
     const withFunction = options.hasOwnProperty('withFunction') ? options.withFunction : true
 
     // Need primary keys of the table to serve as the suffix of the trigger name.
-    const primaryKeys = options.primaryKeys || (await getPrimaryKeys(tablePath))
+    const primaryKeys = (options.primaryKeys || (await getPrimaryKeys(tablePath))) as string[]
     if (!primaryKeys.length) {
         throw `Can't create trigger -- no primary keys found for table ${tablePath}`
     }
@@ -98,20 +98,20 @@ export async function createTrigger(
     switch (event) {
         case TriggerEvent.INSERT:
             withFunction && (await createInsertFunction(functionName, schema))
-            logger.info(`Creating INSERT trigger ${triggerName}...`)
+            logger.info(`Creating INSERT trigger ${schema}.${triggerName}...`)
             await db.raw(
                 `CREATE TRIGGER ${triggerName} AFTER INSERT ON ??
-                FOR EACH ROW EXECUTE PROCEDURE ${functionName}(${primaryKeysAsArgs})`,
+                FOR EACH ROW EXECUTE PROCEDURE ${schema}.${functionName}(${primaryKeysAsArgs})`,
                 [tablePath]
             )
             break
 
         case TriggerEvent.UPDATE:
             withFunction && (await createUpdateFunction(functionName, schema))
-            logger.info(`Creating UPDATE trigger ${triggerName}...`)
+            logger.info(`Creating UPDATE trigger ${schema}.${triggerName}...`)
             await db.raw(
                 `CREATE TRIGGER ${triggerName} AFTER UPDATE ON ?? 
-                FOR EACH ROW EXECUTE PROCEDURE ${functionName}(${primaryKeysAsArgs})`,
+                FOR EACH ROW EXECUTE PROCEDURE ${schema}.${functionName}(${primaryKeysAsArgs})`,
                 [tablePath],
             )
             break
@@ -153,11 +153,11 @@ export async function createInsertFunction(name: string, schema: string) {
             
             payload := ''
                 || '{'
-                || '"timestamp":"' || CURRENT_TIMESTAMP                       || '",'
-                || '"operation":"' || TG_OP                                   || '",'
-                || '"schema":"'    || TG_TABLE_SCHEMA                         || '",'
-                || '"table":"'     || TG_TABLE_NAME                           || '",'
-                || '"data":{'      || array_to_string(primary_key_data, ',')  || '}'
+                || '"timestamp":"'   || CURRENT_TIMESTAMP                      || '",'
+                || '"operation":"'   || TG_OP                                  || '",'
+                || '"schema":"'      || TG_TABLE_SCHEMA                        || '",'
+                || '"table":"'       || TG_TABLE_NAME                          || '",'
+                || '"primaryKeys":{' || array_to_string(primary_key_data, ',') || '}'
                 || '}';
 
             PERFORM pg_notify('${constants.TABLE_SUBS_CHANNEL}', payload);
@@ -179,7 +179,7 @@ export async function createUpdateFunction(name: string, schema: string) {
             column_name TEXT;
             column_value TEXT;
             primary_key_data TEXT[];
-            diff TEXT;
+            colNamesChanged TEXT;
         BEGIN
             rec := NEW;
 
@@ -193,19 +193,19 @@ export async function createUpdateFunction(name: string, schema: string) {
                 );
             END LOOP;
 
-            diff := (SELECT json_agg(n)::text
+            colNamesChanged := (SELECT json_agg(key)::text
                 FROM json_each_text(to_json(OLD)) o
                 JOIN json_each_text(to_json(NEW)) n USING (key)
                 WHERE n.value IS DISTINCT FROM o.value);
             
             payload := ''
                 || '{'
-                || '"timestamp":"'   || CURRENT_TIMESTAMP                      || '",'
-                || '"operation":"'   || TG_OP                                  || '",'
-                || '"schema":"'      || TG_TABLE_SCHEMA                        || '",'
-                || '"table":"'       || TG_TABLE_NAME                          || '",'
-                || '"primaryKeys":{' || array_to_string(primary_key_data, ',') || '},'
-                || '"diff":"'        || diff                                   || '"'
+                || '"timestamp":"'      || CURRENT_TIMESTAMP                      || '",'
+                || '"operation":"'      || TG_OP                                  || '",'
+                || '"schema":"'         || TG_TABLE_SCHEMA                        || '",'
+                || '"table":"'          || TG_TABLE_NAME                          || '",'
+                || '"primaryKeys":{'    || array_to_string(primary_key_data, ',') || '},'
+                || '"colNamesChanged":' || colNamesChanged                        || ''
                 || '}';
 
             PERFORM pg_notify('${constants.TABLE_SUBS_CHANNEL}', payload);

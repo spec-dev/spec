@@ -112,6 +112,16 @@ export interface TableSub {
     schema: string,
     table: string,
     status: TableSubStatus,
+    primaryKeyTypes?: StringMap,
+}
+
+export interface TableSubEvent {
+    timestamp: string,
+    operation: TriggerEvent,
+    schema: string,
+    table: string,
+    primaryKeys: StringKeyMap,
+    colNamesChanged?: string[],
 }
 
 export enum OpType {
@@ -192,4 +202,9 @@ export interface Trigger {
     event: TriggerEvent,
     name: string,
     joinedPrimaryKeys?: string,
+}
+
+export interface DBColumn {
+    name: string
+    type: string
 }

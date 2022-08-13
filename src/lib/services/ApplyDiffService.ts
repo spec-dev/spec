@@ -171,7 +171,7 @@ class ApplyDiffService {
     }
 
     async _createUpdateOps() {
-        const linkTablePrimaryKeys = await getPrimaryKeys(this.linkTablePath)
+        const linkTablePrimaryKeys = await getPrimaryKeys(this.linkTablePath) as string[]
         if (!linkTablePrimaryKeys.length) throw `Primary keys could not be determined for ${this.linkTablePath}`
         this.ops = this.recordsToUpdate.map(record => this._createUpdateOp(record, linkTablePrimaryKeys)).filter(val => !!val)
     }

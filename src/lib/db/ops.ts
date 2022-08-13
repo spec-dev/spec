@@ -1,5 +1,6 @@
 import { db } from './index'
-import { ConstraintType, Constraint, ForeignKeyConstraint, StringKeyMap } from '../types'
+import { ConstraintType, Constraint, ForeignKeyConstraint, StringKeyMap, DBColumn } from '../types'
+import { numericColTypes } from '../utils/colTypes'
 
 export async function doesSchemaExist(name: string): Promise<boolean> {
     const result = await db.raw(
@@ -35,6 +36,32 @@ export async function isTableEmpty(tablePath: string): Promise<boolean> {
 export async function tableCount(tablePath: string): Promise<number> {
     const result = await db.from(tablePath).count()
     return result ? Number((result[0] || {}).count || 0) : 0
+}
+
+export async function getColTypes(
+    tablePath: string, 
+    colNames: string[], 
+    groupNumerics: boolean = true,
+): Promise<DBColumn[]> {
+    const [schema, table] = tablePath.split('.')
+    const { rows } = await db.raw(
+        `SELECT
+            column_name as name,
+            data_type as type
+        FROM
+            information_schema.columns
+        WHERE
+            table_schema = ? AND
+            table_name = ? AND
+            column_name in (${colNames.map(c => '?').join(', ')});`,
+        [schema, table, ...colNames],
+    )
+    if (!groupNumerics) return rows || []
+
+    return rows.map(col => {
+        const type = numericColTypes.has(col.type) ? 'number' : col.type
+        return { name: col.name, type }
+    })
 }
 
 export async function getTableConstraints(
@@ -176,11 +203,19 @@ export async function getUniqueColGroups(tablePath: string): Promise<string[][]>
     return colNameGroups
 }
 
-export async function getPrimaryKeys(tablePath: string): Promise<string[]> {
+export async function getPrimaryKeys(tablePath: string, includeTypes: boolean = false): Promise<string[] | DBColumn[]> {
     const primaryKeyConstraint = ((await getTableConstraints(tablePath, [
         ConstraintType.PrimaryKey,
     ])) || [])[0]
-    return primaryKeyConstraint?.parsed?.colNames || []
+
+    const colNames = primaryKeyConstraint?.parsed?.colNames || []
+    if (!colNames.length) return []
+
+    if (includeTypes) {
+        return await getColTypes(tablePath, colNames)
+    }
+    
+    return colNames
 }
 
 function parseForeignKeyConstraint(raw: string): StringKeyMap | null {

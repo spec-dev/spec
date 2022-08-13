@@ -19,6 +19,7 @@
         "knex": "^2.2.0",
         "lru-cache": "^7.13.1",
         "pg": "^8.7.3",
+        "pg-listen": "^1.7.0",
         "short-uuid": "^4.2.0"
     },
     "devDependencies": {

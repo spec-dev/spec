@@ -673,7 +673,7 @@ class SeedTableService {
     }
 
     async _getSeedTablePrimaryKeys() {
-        this.seedTablePrimaryKeys = await getPrimaryKeys(this.seedTablePath)
+        this.seedTablePrimaryKeys = await getPrimaryKeys(this.seedTablePath) as string[]
         if (!this.seedTablePrimaryKeys.length) throw `Primary keys could not determined for ${this.seedTablePath}`
     }
 }
