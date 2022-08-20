@@ -47,10 +47,6 @@ class SeedTableService {
         return this.seedTablePath.split('.')[1]
     }
 
-    get seedFunctionName(): string {
-        return this.seedFunction.name
-    }
-
     constructor(seedSpec: SeedSpec, liveObject: LiveObject) {
         this.seedSpec = seedSpec
         this.liveObject = liveObject
@@ -125,7 +121,7 @@ class SeedTableService {
         logger.info(`Seeding ${this.seedTablePath} from scratch...`)
 
         // Pull all live objects for this seed.
-        const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunctionName, [])
+        const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunction, [])
         if (error) throw error
         if (!liveObjectsData.length) return
         
@@ -143,10 +139,10 @@ class SeedTableService {
         })
 
         // Chunk into batches.
-        const batches = toChunks(records, constants.SEED_BATCH_SIZE)
+        const batches = toChunks(records, constants.SEED_INPUT_BATCH_SIZE)
 
         // Get seed table's unique constraints (col groups).
-       await this._findSeedTableUniqueColGroups()
+        await this._findSeedTableUniqueColGroups()
 
         // Insert records in batches.
         for (let i = 0; i < batches.length; i++) {
@@ -187,7 +183,7 @@ class SeedTableService {
             const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(batch, this.seedTablePath)
 
             // Use the seed function to fetch live objects data for the batch.
-            const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunctionName, batchFunctionInputs)
+            const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunction, batchFunctionInputs)
             if (error || !liveObjectsData.length) continue
             if (liveObjectsData.length !== batch.length) {
                 logger.error(`Seed function response length mismatch: ${liveObjectsData.length} vs. ${batch.length}`)
@@ -230,7 +226,7 @@ class SeedTableService {
             const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(batch, foreignTablePath)
 
             // Use the seed function to fetch live objects data for the batch.
-            const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunctionName, batchFunctionInputs)
+            const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunction, batchFunctionInputs)
             if (error || !liveObjectsData.length) continue
             if (liveObjectsData.length !== batch.length) {
                 logger.error(`Seed function response length mismatch: ${liveObjectsData.length} vs. ${batch.length}`)
@@ -256,7 +252,7 @@ class SeedTableService {
     }
 
     _batchInputRecords() {
-        this.inputBatches = toChunks(this.inputRecords, constants.SEED_BATCH_SIZE)
+        this.inputBatches = toChunks(this.inputRecords, constants.SEED_INPUT_BATCH_SIZE)
     }   
 
     _transformRecordsIntoFunctionInputs(records: StringKeyMap[], primaryTablePath: string): StringKeyMap[] {
@@ -582,19 +578,19 @@ class SeedTableService {
             }
 
             const { argsMap, args } = edgeFunction
-            const { linkProperties } = this.seedSpec
+            const { seedWith } = this.seedSpec
  
-            let allLinkedPropertiesAcceptedAsFunctionInput = true
-            for (let propertyKey in linkProperties) {
+            let allSeedWithPropertiesAcceptedAsFunctionInput = true
+            for (let propertyKey of seedWith) {
                 propertyKey = argsMap[propertyKey] || propertyKey
 
                 if (!args.hasOwnProperty(propertyKey)) {
-                    allLinkedPropertiesAcceptedAsFunctionInput = false
+                    allSeedWithPropertiesAcceptedAsFunctionInput = false
                     break
                 }
             }
 
-            if (!allLinkedPropertiesAcceptedAsFunctionInput) {
+            if (!allSeedWithPropertiesAcceptedAsFunctionInput) {
                 continue
             }
 
@@ -604,7 +600,7 @@ class SeedTableService {
                 const propertyKey = reverseArgsMap[inputKey] || inputKey
                 const isRequiredInput = args[inputKey]
 
-                if (isRequiredInput && !linkProperties.hasOwnProperty(propertyKey)) {
+                if (isRequiredInput && !seedWith.includes(propertyKey)) {
                     allRequiredInputPropertiesSatisfied = false
                     break
                 }
@@ -645,16 +641,16 @@ class SeedTableService {
     }
 
     _getLiveObjectTableDataSources(): TableDataSources {
-        const allTableDataSources = config.getDataSourcesForTable(this.seedSchemaName, this.seedTableName) || {}
+        const dataSourcesInTable = config.getDataSourcesForTable(this.seedSchemaName, this.seedTableName) || {}
         const tableDataSourcesForThisLiveObject = {}
 
         // Basically just recreate the map, but filtering out the data sources that 
         // aren't associated with our live object. Additionally, use just the live 
         // object property as the new key (removing the live object id).
-        for (let key in allTableDataSources) {
+        for (let key in dataSourcesInTable) {
             const [liveObjectId, property] = key.split(':')
             if (liveObjectId !== this.liveObject.id) continue
-            tableDataSourcesForThisLiveObject[property] = allTableDataSources[key]
+            tableDataSourcesForThisLiveObject[property] = dataSourcesInTable[key]
         }
 
         return tableDataSourcesForThisLiveObject

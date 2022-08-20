@@ -2,7 +2,6 @@ import { schema } from '..'
 import { LiveColumn, LiveColumnSeedStatus } from '../../types'
 import { SPEC_SCHEMA_NAME } from '.'
 import logger from '../../logger'
-import { Knex } from 'knex'
 
 export const LIVE_COLUMNS_TABLE_NAME = 'live_columns'
 

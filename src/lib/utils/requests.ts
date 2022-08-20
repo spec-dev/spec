@@ -1,27 +1,24 @@
 
-import { SpecFunctionResponse, StringKeyMap } from '../types'
+import { SpecFunctionResponse, StringKeyMap, EdgeFunction } from '../types'
 import { fetch } from 'cross-fetch'
 import logger from '../logger'
 import constants from '../constants'
 
-export async function callSpecFunction(identifier: string, payload: StringKeyMap | StringKeyMap[]): Promise<SpecFunctionResponse> {
-    const url = new URL(constants.FUNCTIONS_ORIGIN)
-    url.pathname = `/${identifier}`
-
+export async function callSpecFunction(edgeFunction: EdgeFunction, payload: StringKeyMap | StringKeyMap[]): Promise<SpecFunctionResponse> {
     let resp: Response
     try {
-        resp = await fetch(url.href, {
+        resp = await fetch(edgeFunction.url, {
             method: 'POST', 
             body: JSON.stringify(payload || {}),
             headers: { 'Content-Type': 'application/json' },
         })
     } catch (err) {
-        logger.error(`Unexpected error calling edge function ${identifier}: ${err?.message || err}`)
+        logger.error(`Unexpected error calling edge function ${edgeFunction.name}: ${err?.message || err}`)
         return { data: null, error: err?.message || err }
     }
 
     if (resp.status !== 200) {
-        logger.error(`Unexpected error calling edge function ${identifier}: got response code ${resp.status}`)
+        logger.error(`Unexpected error calling edge function ${edgeFunction.name}: got response code ${resp.status}`)
         return { data: null, error: `got response code ${resp.status}` }
     }
 

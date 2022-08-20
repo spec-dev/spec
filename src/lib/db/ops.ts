@@ -219,7 +219,7 @@ export async function getPrimaryKeys(tablePath: string, includeTypes: boolean = 
 }
 
 function parseForeignKeyConstraint(raw: string): StringKeyMap | null {
-    const matches = raw.match(/FOREIGN KEY \(([a-zA-Z0-9_]+)\) REFERENCES ([a-zA-Z0-9_.]+)\(([a-zA-Z0-9_]+)\)/i)
+    const matches = raw.match(/FOREIGN KEY \(([a-zA-Z0-9_-]+)\) REFERENCES ([a-zA-Z0-9_.-]+)\(([a-zA-Z0-9_-]+)\)/i)
     if (!matches || matches.length !== 4) return null
 
     const [_, foreignKey, foreignTableOrPath, referenceKey] = matches
@@ -241,7 +241,7 @@ function parseForeignKeyConstraint(raw: string): StringKeyMap | null {
 }
 
 function parseColNamesFromConstraint(raw: string): StringKeyMap | null {
-    const matches = raw.match(/\(([a-zA-Z0-9_, ]+)\)/i)
+    const matches = raw.match(/\(([a-zA-Z0-9-_, ]+)\)/i)
     if (!matches || matches.length !== 2) return null
     const colNames = matches[1].split(',').map(col => col.trim()).sort()
     return { colNames }

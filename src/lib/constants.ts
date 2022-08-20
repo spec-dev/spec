@@ -8,17 +8,17 @@ const constants: StringKeyMap = {
 
     // TODO
     EVENTS_HOSTNAME: ev('EVENTS_HOSTNAME', 'events.spec.dev'),
-    EVENTS_PORT: ev('EVENTS_PORT', 8888),
-
-    FUNCTIONS_ORIGIN: ev('FUNCTIONS_ORIGIN', 'https://functions.spec.dev'),
-    SEED_BATCH_SIZE: 50,
+    EVENTS_PORT: Number(ev('EVENTS_PORT', 8888)),
 
     // TODO
     DB_HOST: ev('DB_HOST', 'localhost'),
-    DB_PORT: ev('DB_PORT', 5432),
+    DB_PORT: Number(ev('DB_PORT', 5432)),
     DB_USER: ev('DB_USER', 'spec'),
     DB_PASSWORD: ev('DB_PASSWORD'),
     DB_NAME: ev('DB_NAME'),
+
+    // TODO
+    SEED_INPUT_BATCH_SIZE: Number(ev('SEED_INPUT_BATCH_SIZE', 1000)),
     
     // TODO
     DEBUG: ['true', true].includes(ev('DEBUG')),

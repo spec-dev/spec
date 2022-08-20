@@ -269,7 +269,7 @@ class Spec {
             return
         }
 
-        // We will seed (or re-seed) all live columns that were upserted.
+        // Seed (or re-seed) all live columns that were upserted.
         const liveColumnsToSeed = upsertLiveColumnService.liveColumnsToUpsert
         if (!liveColumnsToSeed.length) return
 
@@ -313,6 +313,8 @@ class Spec {
                 liveObjectId,
                 tablePath,
                 linkProperties: link.properties,
+                seedWith: link.seedWith,
+                uniqueBy: link.uniqueBy,
                 seedColNames,
                 seedIfEmpty: link.seedIfEmpty || false,
             })
@@ -559,7 +561,17 @@ class Spec {
 
         // Parse primary keys in case of numerics.
         event.primaryKeys = this._parsePrimaryKeys(event.primaryKeys, tableSub.primaryKeyTypes)
-        
+
+        // ON insert...
+        /*
+            Fill out the rest of this record using the live object links where this table is the "target" of the link
+        */
+
+        // switch (event.operation) {
+        //     case TriggerEvent.INSERT:
+        //         this._onTableInsert()
+        // }
+
         console.log(event)
     }
 

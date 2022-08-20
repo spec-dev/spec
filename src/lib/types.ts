@@ -52,15 +52,18 @@ export enum LiveObjectFunctionRole {
 
 export interface EdgeFunction {
     name: string // i.e. "compound.marketAPY@0.0.1"
-    args: { [key: string]: boolean },
-    argsMap: StringMap,
-    metadata: StringKeyMap,
-    role: LiveObjectFunctionRole,
+    args: { [key: string]: boolean }
+    argsMap: StringMap
+    metadata: StringKeyMap
+    role: LiveObjectFunctionRole
+    url: string
 }
 
 export interface LiveObjectLink {
     table: string
     properties: StringMap
+    seedWith: string[]
+    uniqueBy: string[]
     seedIfEmpty?: boolean
     eventsCanInsert?: boolean
 }
@@ -160,6 +163,8 @@ export interface SeedSpec {
     liveObjectId: string
     tablePath: string
     linkProperties: StringMap
+    seedWith: string[]
+    uniqueBy: string[]
     seedColNames: string[]
     seedIfEmpty?: boolean
 }

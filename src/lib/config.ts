@@ -135,7 +135,6 @@ class Config {
 
     validate() {
         // TODO: All the checks...
-
         this.isValid = true
     }
 
