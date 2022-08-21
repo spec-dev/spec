@@ -44,16 +44,12 @@ class ApplyDiffService {
         return toMap(this.link.properties || {})
     }
 
-    get linkColPaths(): string[] {
-        return Object.values(this.linkProperties)
-    }
-
     constructor(diff: StringKeyMap, link: LiveObjectLink, liveObjectId: string) {
         this.liveObjectDiff = diff
         this.link = link
         this.liveObjectId = liveObjectId
         this.tableDataSources = this._getLiveObjectTableDataSources()
-        this._validateLink()
+        this._validateLink() // TODO: Get rid of this and just validate config as soon as changes occur
     }
 
     async perform() {
@@ -62,18 +58,24 @@ class ApplyDiffService {
     }
 
     async getOps(): Promise<Op[]> {
-        // No ops will exist if this table isn't reliant on our live object.
+        // Make sure table is event reliant on this live object...
         if (!Object.keys(this.tableDataSources).length) {
             return this.ops
         }
 
+        // Find existing records that need to be updated.
         await this._findRecordsToUpdate()
-
         if (this.recordsToUpdate.length > 0) {
             await this._createUpdateOps()
-        } else if (this.link.eventsCanInsert) {
+            return this.ops
+        }
+        
+        // If no records already exist to be updated, AND config 
+        // specifies that events can insert new records, then try 
+        // to insert a new record using this diff.
+        if (this.link.eventsCanInsert) {
             await this._createInsertOps()
-        }        
+        }
 
         return this.ops
     }
@@ -90,7 +92,7 @@ class ApplyDiffService {
         const tablePath = this.linkTablePath
 
         const foreignTableQueryConditions = {}
-        for (const property in properties) {
+        for (const property of this.link.uniqueBy) {
             const colPath = properties[property]
             const [colSchemaName, colTableName, colName] = colPath.split('.')
             const colTablePath = `${colSchemaName}.${colTableName}`
@@ -221,7 +223,7 @@ class ApplyDiffService {
         const properties = this.linkProperties
         const tablePath = this.linkTablePath
 
-        for (const property in properties) {
+        for (const property of this.link.uniqueBy) {
             const colPath = properties[property]
             const [colSchemaName, colTableName, _] = colPath.split('.')
             const colTablePath = `${colSchemaName}.${colTableName}`

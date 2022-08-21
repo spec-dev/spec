@@ -36,11 +36,12 @@ class ApplyEventService {
     }
 
     async getOps(): Promise<Op[]> {
-        // Get all links this diff applies to (i.e. the links 
-        // who have all of their property keys included in this diff).
+        // Get links this diff applies to (all links who have all of 
+        // their "uniqueBy" property keys included in this diff).
         this.linksToApplyDiffTo = this._getLinksToApplyDiffTo()
         if (!this.linksToApplyDiffTo.length) {
-            throw 'Live object diff didn\'t satisfy any configured links'
+            logger.info('Live object diff didn\'t satisfy any configured links')
+            return this.ops
         }
 
         // Get ops to apply the diffs for each link.
@@ -65,14 +66,14 @@ class ApplyEventService {
         const linksToApplyDiffTo = []
         const liveObjectDiff = this.liveObjectDiff
         for (const link of this.links) {
-            let diffHasAllLinkProperties = true
-            for (const property in link.properties) {
+            let allUniquePropertiesIncludedInDiff = true
+            for (const property of link.uniqueBy) {
                 if (!liveObjectDiff.hasOwnProperty(property)) {
-                    diffHasAllLinkProperties = false
+                    allUniquePropertiesIncludedInDiff = false
                     break
                 }
             }
-            if (diffHasAllLinkProperties) {
+            if (allUniquePropertiesIncludedInDiff) {
                 linksToApplyDiffTo.push(link)
             }
         }
