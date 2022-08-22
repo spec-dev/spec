@@ -263,7 +263,7 @@ class SeedTableService {
             const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(batchInputRecords, foreignTablePath)
 
             // Callback to use when a batch of response data is available.
-            const onFunctionRespData = async data => await this._handleDataOnForeignTableSeed(
+            const onFunctionRespData = async data => this._handleDataOnForeignTableSeed(
                 data,
                 rel,
                 inputPropertyKeys,
@@ -322,6 +322,7 @@ class SeedTableService {
         foreignTablePath: string,
         referenceKeyValues: StringKeyMap,
     ) {
+        logger.info(`Upserting batch of length ${batch.length}...`)
         const upsertRecords = []
         for (const liveObjectData of batch) {
             // Format a seed table record for this live object data.

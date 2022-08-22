@@ -17,9 +17,9 @@ export async function callSpecFunction(
     const resp = await makeRequest(edgeFunction, payload)
 
     // Handle response based on streaming or not.
-    await (isStreamingResp(resp) 
-        ? handleJSONResp(resp, edgeFunction, onData) 
-        : handleStreamingResp(resp, onData))
+    await (isStreamingResp(resp)
+        ? handleStreamingResp(resp, onData)
+        : handleJSONResp(resp, edgeFunction, onData))
 }
 
 async function handleJSONResp(resp: Response, edgeFunction: EdgeFunction, onData: onDataCallbackType) {
@@ -42,13 +42,14 @@ async function handleStreamingResp(resp: Response, onData: onDataCallbackType) {
 
     // Parse each JSON object and add it to a batch.
     let batch = []
+    let promises = []
     jsonParser.onValue = obj => {
         if (!obj) return
         obj = obj as StringKeyMap
         if (obj.error) throw obj.error // Throw any errors explicitly passed back
         batch.push(obj)
         if (batch.length === constants.STREAMING_SEED_UPSERT_BATCH_SIZE) {
-            onData(batch)
+            promises.push(onData([...batch]))
             batch = []
         }
     }
@@ -63,7 +64,11 @@ async function handleStreamingResp(resp: Response, onData: onDataCallbackType) {
     }
     
     // Trailing results in partial batch.
-    batch.length && onData(batch)
+    if (batch.length) {
+        promises.push(onData(batch))
+    }
+
+    await Promise.all(promises)
 }
 
 async function makeRequest(edgeFunction: EdgeFunction, payload: StringKeyMap | StringKeyMap[]): Response {
@@ -80,4 +85,5 @@ async function makeRequest(edgeFunction: EdgeFunction, payload: StringKeyMap | S
     if (resp.status !== 200) {
         throw `Edge function (${edgeFunction.name}) call failed: got response code ${resp.status}`
     }
+    return resp
 }
