@@ -1,6 +1,6 @@
 import logger from '../logger'
 import { SeedSpec, StringMap, LiveObject, EdgeFunction, LiveObjectFunctionRole, StringKeyMap, TableDataSources, Op, OpType, ForeignKeyConstraint } from '../types'
-import { reverseMap, toChunks } from '../utils/formatters'
+import { reverseMap } from '../utils/formatters'
 import { areColumnsEmpty, getPrimaryKeys, getRelationshipBetweenTables, getUniqueColGroups } from '../db/ops'
 import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
@@ -26,10 +26,6 @@ class SeedTableService {
     requiredArgColPaths: string[] = []
 
     colPathToFunctionInputArg: { [key: string]: string } = {}
-
-    inputRecords: StringKeyMap[] = []
-
-    inputBatches: StringKeyMap[][] = []
 
     rels: { [key: string]: ForeignKeyConstraint | null } = {}
 
@@ -83,6 +79,8 @@ class SeedTableService {
             tablePath === this.seedTablePath
                 ? inputColumnLocations.onSeedTable++
                 : inputColumnLocations.onForeignTable++
+
+
 
             if (!inputTableColumns.hasOwnProperty(tablePath)) {
                 inputTableColumns[tablePath] = []
@@ -173,36 +171,72 @@ class SeedTableService {
     async _seedWithAdjacentCols() {
         logger.info(`Seeding ${this.seedTablePath} from adjacent columns...`)
 
-        // Get all records in the seed table where each required link column is NOT NULL.
-        await this._findInputRecordsFromAdjacentCols()
-        if (!this.inputRecords.length) {
-            logger.info('Found no adjacent-column input records to seed with...')
-            return
-        }
-    
-        await this._getSeedTablePrimaryKeys()
+        // Get these once, up-front.
+        const [queryConditions, _] = await Promise.all([
+            this._buildQueryForSeedWithAdjacentCols(),
+            await this._getSeedTablePrimaryKeys(),
+        ])
 
-        // Group input records into batches.
-        this._batchInputRecords()
+        // Get the live object property keys associated with each input column.
+        const reverseLinkProperties = this.reverseLinkProperties
+        const inputPropertyKeys = this.requiredArgColPaths.map(colPath => reverseLinkProperties[colPath])
 
-        // Process each batch.
-        for (let i = 0; i < this.inputBatches.length; i++) {
-            // const batch = this.inputBatches[i]
+        // Start seeding with batches of input records.
+        let offset = 0
+        while (true) {
+            logger.info('Running batch with offset', offset)
 
-            // // Transform the records into function input payloads.
-            // const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(batch, this.seedTablePath)
+            // Get batch of input records from the seed table.
+            const batchInputRecords = await this._findInputRecordsFromAdjacentCols(queryConditions, offset)
+            if (batchInputRecords === null) {
+                // TODO: Handle seed failure at this input batch.
+                break
+            }
+            offset += batchInputRecords.length
+            const isLastBatch = batchInputRecords.length < constants.SEED_INPUT_BATCH_SIZE
 
-            // // Use the seed function to fetch live objects data for the batch.
-            // const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunction, batchFunctionInputs)
-            // if (error || !liveObjectsData.length) continue
-            // if (liveObjectsData.length !== batch.length) {
-            //     logger.error(`Seed function response length mismatch: ${liveObjectsData.length} vs. ${batch.length}`)
-            //     continue
-            // }
+            const batchFunctionInputs = []
+            const indexedPkConditions = {}
+            for (const record of batchInputRecords) {
+                const input = {}
+                const keyComps = []
+                for (const colPath of this.requiredArgColPaths) {
+                    const [colSchemaName, colTableName, colName] = colPath.split('.')
+                    const colTablePath = [colSchemaName, colTableName].join('.')
+                    const inputArg = this.colPathToFunctionInputArg[colPath]
+                    const recordColKey = (colTablePath === this.seedTablePath) ? colName : colPath
+                    const value = record[recordColKey]
+                    input[inputArg] = value
+                    keyComps.push(value)
+                }
+                batchFunctionInputs.push(input)
+                const key = keyComps.join(valueSep)
+                if (!indexedPkConditions.hasOwnProperty(key)) {
+                    indexedPkConditions[key] = []
+                } 
+                const recordPrimaryKeys = {}
+                for (const pk of this.seedTablePrimaryKeys) {
+                    recordPrimaryKeys[pk] = record[pk]
+                }
+                indexedPkConditions[key].push(recordPrimaryKeys)
+            }
 
-            // // Use the function response data (live objects data) to generate record-update ops.
-            // const updateOps = this._generateUpdateOpsForSeedTableBatch(batch, liveObjectsData)
-            // await this._runOps(updateOps)
+            // Callback to use when a batch of response data is available.
+            const onFunctionRespData = async data => await this._handleSpecFunctionRespForAdjacentColsSeed(
+                data,
+                inputPropertyKeys,
+                indexedPkConditions,
+            )
+
+            // Call spec function and handle response data.
+            try {
+                await callSpecFunction(this.seedFunction, batchFunctionInputs, onFunctionRespData)
+            } catch (err) {
+                // TODO: Handle seed failure at this input batch.
+                break
+            }
+
+            if (isLastBatch) break
         }
     }
 
@@ -255,12 +289,13 @@ class SeedTableService {
             const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(batchInputRecords, foreignTablePath)
 
             // Callback to use when a batch of response data is available.
-            const onFunctionRespData = async data => await this._onSpecFunctionRespData(data, {
+            const onFunctionRespData = async data => await this._handleSpecFunctionRespForForeignTableSeed(
+                data,
                 rel,
                 inputPropertyKeys,
                 foreignTablePath,
                 referenceKeyValues,
-            })
+            )
 
             // Call spec function and handle response data.
             try {
@@ -274,9 +309,15 @@ class SeedTableService {
         }
     }
 
-    async _onSpecFunctionRespData(liveObjectsData: StringKeyMap[], opts: StringKeyMap = {}) {
+    async _handleSpecFunctionRespForForeignTableSeed(
+        batch: StringKeyMap[], 
+        rel: ForeignKeyConstraint,
+        inputPropertyKeys: string[],
+        foreignTablePath: string,
+        referenceKeyValues: StringKeyMap,
+    ) {
         const upsertRecords = []
-        for (const liveObjectData of liveObjectsData) {
+        for (const liveObjectData of batch) {
             // Format a seed table record for this live object data.
             const upsertRecord = {}
             for (const property in liveObjectData) {
@@ -287,18 +328,15 @@ class SeedTableService {
                 }
             }
 
-            if (opts.rel) {
-                const { inputPropertyKeys = [], foreignTablePath, referenceKeyValues = {} } = opts
-                // Find and set the reference key for the foreign table.
-                const uniqueInputRecordKey = inputPropertyKeys.map(propertyKey => liveObjectData[propertyKey]).join(valueSep)
-                if (!referenceKeyValues.hasOwnProperty(uniqueInputRecordKey)) {
-                    logger.error(`Could not find reference key on foreign table ${foreignTablePath} for value ${uniqueInputRecordKey}`)
-                    continue
-                }
-                const referenceKeyValue = referenceKeyValues[uniqueInputRecordKey]
-                upsertRecord[opts.rel.foreignKey] = referenceKeyValue
-                upsertRecords.push(upsertRecord)
+            // Find and set the reference key for the foreign table.
+            const uniqueInputRecordKey = inputPropertyKeys.map(propertyKey => liveObjectData[propertyKey]).join(valueSep)
+            if (!referenceKeyValues.hasOwnProperty(uniqueInputRecordKey)) {
+                logger.error(`Could not find reference key on foreign table ${foreignTablePath} for value ${uniqueInputRecordKey}`)
+                continue
             }
+            const referenceKeyValue = referenceKeyValues[uniqueInputRecordKey]
+            upsertRecord[rel.foreignKey] = referenceKeyValue
+            upsertRecords.push(upsertRecord)
         }
 
         const upsertBatchOp = {
@@ -318,21 +356,51 @@ class SeedTableService {
         }
     }
 
-    async _runOps(ops: Op[]) {
-        if (!ops.length) return
+    async _handleSpecFunctionRespForAdjacentColsSeed(
+        batch: StringKeyMap[], 
+        inputPropertyKeys: string[],
+        indexedPkConditions: StringKeyMap, 
+    ) {
+        const updateOps = []
+        for (const liveObjectData of batch) {
+            // Format a seed table record for this live object data.
+            const updates = {}
+            for (const property in liveObjectData) {
+                const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
+                const value = liveObjectData[property]
+                for (const { columnName } of colsWithThisPropertyAsDataSource) {
+                    if (this.seedColNames.has(columnName)) {
+                        updates[columnName] = value
+                    }
+                }
+            }
+
+            const liveObjectToPkConditionsKey = inputPropertyKeys.map(k => liveObjectData[k]).join(valueSep)
+            const primaryKeyConditions = indexedPkConditions[liveObjectToPkConditionsKey] || []
+            if (!primaryKeyConditions?.length) {
+                logger.error(`Could not find primary keys on ${this.seedTablePath} for value ${liveObjectToPkConditionsKey}`)
+                continue
+            }
+
+            for (const pkConditions of primaryKeyConditions) {
+                updateOps.push({
+                    type: OpType.Update,
+                    schema: this.seedSchemaName,
+                    table: this.seedTableName,
+                    where: pkConditions,
+                    data: updates,
+                })
+            }
+        }
 
         try {
             await db.transaction(async tx => {
-                await Promise.all(ops.map(op => new RunOpService(op, tx).perform()))
+                await Promise.all(updateOps.map(op => new RunOpService(op, tx).perform()))
             })
         } catch (err) {
-            logger.error(`Seed ops failed: ${err}`)
+            throw new QueryError('update', this.seedSchemaName, this.seedTableName, err)
         }
     }
-
-    _batchInputRecords() {
-        this.inputBatches = toChunks(this.inputRecords, constants.SEED_INPUT_BATCH_SIZE)
-    }   
 
     _transformRecordsIntoFunctionInputs(records: StringKeyMap[], primaryTablePath: string): StringKeyMap[] {
         const inputs = []
@@ -350,158 +418,7 @@ class SeedTableService {
         return inputs
     }
 
-    _generateUpdateOpsForSeedTableBatch(batch: StringKeyMap[], liveObjectsData: StringKeyMap[]): Op[] {
-        const ops = []
-        for (let i = 0; i < batch.length; i++) {
-            const record = batch[i]
-            const liveObjectData = liveObjectsData[i]
-
-            const recordUpdates = {}
-            for (const property in liveObjectData) {
-                const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
-                const value = liveObjectData[property]
-                for (const { columnName } of colsWithThisPropertyAsDataSource) {
-                    if (this.seedColNames.has(columnName)) {
-                        recordUpdates[columnName] = value
-                    }
-                }
-            }
-            if (!Object.keys(recordUpdates).length) continue
-
-            // Create the lookup/where conditions for the update.
-            // These will just be the primary keys / values of this record.
-            const whereConditions = {}
-            for (let primaryKey of this.seedTablePrimaryKeys) {
-                whereConditions[primaryKey] = record[primaryKey]
-            }
-
-            ops.push({
-                type: OpType.Update,
-                schema: this.seedSchemaName,
-                table: this.seedTableName,
-                where: whereConditions,
-                data: recordUpdates,
-            })
-        }
-
-        return ops
-    }
-
-    async _generateOpsToUpsertLiveObjectRecords(
-        foreignInputRecords: StringKeyMap[],
-        foreignRel: StringKeyMap,
-        liveObjectsData: StringKeyMap[],
-    ): Promise<Op[]> {
-        const existingLiveObjectRecords = await this._findExistingLiveObjectRecords(liveObjectsData.flat())
-        const properties = this.seedSpec.linkProperties
-        const sortedPropertyKeys: string[] = Object.keys(properties).sort()
-        const { foreignKey, referenceKey } = foreignRel
-
-        const existingRecordsByLinkedPropertyValues: { [key: string]: StringKeyMap[] } = {}
-        for (const record of existingLiveObjectRecords) {
-            const key = sortedPropertyKeys.map(property => {
-                const colPath = properties[property]
-                const [colSchemaName, colTableName, colName] = colPath.split('.')
-                const colTablePath = `${colSchemaName}.${colTableName}`
-                const colKey = (colTablePath === this.seedTablePath) ? colName : colPath
-                return record[colKey]
-            }).join(':')
-            if (!existingRecordsByLinkedPropertyValues.hasOwnProperty(key)) {
-                existingRecordsByLinkedPropertyValues[key] = []
-            }
-            existingRecordsByLinkedPropertyValues[key].push(record)
-        }
-
-        const ops = []
-        for (let i = 0; i < liveObjectsData.length; i++) {
-            const foreignInputRecord = foreignInputRecords[i]
-            const entry = liveObjectsData[i]
-            const liveObjectDataGroup = Array.isArray(entry) ? entry : [entry]
-
-            for (const liveObjectData of liveObjectDataGroup) {
-                const key = sortedPropertyKeys.map(property => liveObjectData[property]).join(':')
-                const existingRecords = existingRecordsByLinkedPropertyValues[key] || []
-    
-                if (existingRecords.length > 0) {
-                    for (const existingRecord of existingRecords) {
-                        const recordUpdates = {}
-                        for (const property in liveObjectData) {
-                            const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
-                            const value = liveObjectData[property]
-                            for (const { columnName } of colsWithThisPropertyAsDataSource) {
-                                if (this.seedColNames.has(columnName)) {
-                                    recordUpdates[columnName] = value
-                                }
-                            }
-                        }
-                        if (!Object.keys(recordUpdates).length) continue
-            
-                        // Create the lookup/where conditions for the update.
-                        // These will just be the primary keys / values of this record.
-                        const whereConditions = {}
-                        for (let primaryKey of this.seedTablePrimaryKeys) {
-                            whereConditions[primaryKey] = existingRecord[primaryKey]
-                        }
-                        ops.push({
-                            type: OpType.Update,
-                            schema: this.seedSchemaName,
-                            table: this.seedTableName,
-                            where: whereConditions,
-                            data: recordUpdates,
-                        })    
-                    }
-                } else {
-                    const newRecord = {}
-                    for (const property in liveObjectData) {
-                        const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
-                        const value = liveObjectData[property]
-                        for (const { columnName } of colsWithThisPropertyAsDataSource) {
-                            newRecord[columnName] = value
-                        }
-                    }
-
-                    newRecord[foreignKey] = foreignInputRecord[referenceKey]
-
-                    ops.push({
-                        type: OpType.Insert,
-                        schema: this.seedSchemaName,
-                        table: this.seedTableName,
-                        data: newRecord,
-                        uniqueColGroups: this.seedTableUniqueColGroups,
-                    })
-                }    
-            }
-        }
-
-        return ops
-    }
-
-    async _findRecords(tablePath: string, joinConditions: string[][], whereConditions: any[][]): Promise<StringKeyMap[]> {
-        let query = db.from(tablePath).select([`${tablePath}.*`])
-
-        // Add JOIN conditions.
-        for (let join of joinConditions) {
-            const [joinTable, joinRefKey, joinForeignKey] = join
-            query.innerJoin(joinTable, joinRefKey, joinForeignKey)
-        }
-
-        // Add WHERE conditions.
-        for (let i = 0; i < whereConditions.length; i++) {
-            const [col, val] = whereConditions[i]
-            i ? query.andWhere(col, val) : query.where(col, val)
-        }
-
-        try {
-            return await query
-        } catch (err) {
-            const [schema, table] = tablePath.split('.')
-            throw new QueryError('select', schema, table, err)
-        }
-    }
-
-    async _findInputRecordsFromAdjacentCols() {
-        const queryConditions = await this._getQueryConditionsForSeedTableInputRecords()
-
+    async _findInputRecordsFromAdjacentCols(queryConditions: StringKeyMap, offset: number): Promise<StringKeyMap[]> {
         // Start a new query on the table this live object is linked to.
         let query = db.from(this.seedTablePath)
 
@@ -511,8 +428,8 @@ class SeedTableService {
             query.innerJoin(joinTable, joinRefKey, joinForeignKey)
         }
 
-        // Add SELECT conditions.
-        query.select(queryConditions.select)
+        // Add SELECT conditions and order by primary keys.
+        query.select(queryConditions.select).orderBy(this.seedTablePrimaryKeys)
 
         // Add WHERE NOT NULL conditions.
         const whereNotNull = {}
@@ -521,35 +438,10 @@ class SeedTableService {
         }
         query.whereNot(whereNotNull)
 
+        // Add offset/limit for batching.
+        query.offset(offset).limit(constants.SEED_INPUT_BATCH_SIZE)
+
         // Perform the query.
-        try {
-            this.inputRecords = await query
-        } catch (err) {
-            throw new QueryError('select', this.seedSchemaName, this.seedTableName, err)
-        }
-    }
-
-    async _findExistingLiveObjectRecords(liveObjectsData: StringKeyMap[]): Promise<StringKeyMap[]> {
-        const queryConditions = await this._getQueryConditionsForExistingLiveObjectRecords(liveObjectsData)
-
-        // Start a new query on the table this live object is linked to.
-        let query = db.from(this.seedTablePath)
-
-        // Add JOIN conditions.
-        for (let join of queryConditions.join) {
-            const [joinTable, joinRefKey, joinForeignKey] = join
-            query.innerJoin(joinTable, joinRefKey, joinForeignKey)
-        }
-
-        // Add SELECT conditions.
-        query.select(queryConditions.select)
-
-        // Add WHERE conditions.
-        for (let i = 0; i < queryConditions.where.length; i++) {
-            const params = queryConditions.where[i]
-            i ? query.orWhere(params) : query.where(params)
-        }
-
         try {
             return await query
         } catch (err) {
@@ -557,7 +449,7 @@ class SeedTableService {
         }
     }
 
-    async _getQueryConditionsForSeedTableInputRecords(): Promise<StringKeyMap> {
+    async _buildQueryForSeedWithAdjacentCols(): Promise<StringKeyMap> {
         const queryConditions = { 
             join: [],
             select: [`${this.seedTablePath}.*`],
@@ -583,49 +475,6 @@ class SeedTableService {
             } else {
                 queryConditions.whereNotNull.push(colName)
             }
-        }
-
-        return queryConditions
-    }
-
-    async _getQueryConditionsForExistingLiveObjectRecords(liveObjectsData: StringKeyMap[]): Promise<StringKeyMap> {
-        const queryConditions = { 
-            join: [],
-            select: [`${this.seedTablePath}.*`],
-            where: [], 
-        }
-        const properties = this.seedSpec.linkProperties
-        const tablePath = this.seedTablePath
-
-        for (const property in properties) {
-            const colPath = properties[property]
-            const [colSchemaName, colTableName, _] = colPath.split('.')
-            const colTablePath = `${colSchemaName}.${colTableName}`
-    
-            // Handle foreign tables.
-            if (colTablePath !== tablePath) {
-                const rel = await this._getRel(tablePath, colTablePath)
-                if (!rel) throw `No rel from ${tablePath} -> ${colTablePath}`
-
-                queryConditions.join.push([
-                    colTableName,
-                    `${colTablePath}.${rel.referenceKey}`,
-                    `${tablePath}.${rel.foreignKey}`,
-                ])
-                queryConditions.select.push(`${colPath} as ${colPath}`)
-            }
-        }
-        
-        for (const liveObjectData of liveObjectsData) {
-            const whereConditions = {}
-            for (const property in properties) {
-                const colPath = properties[property]
-                const [colSchemaName, colTableName, colName] = colPath.split('.')
-                const colTablePath = `${colSchemaName}.${colTableName}`
-                const colKey = (colTablePath === this.seedTablePath) ? colName : colPath
-                whereConditions[colKey] = liveObjectData[property]
-            }
-            queryConditions.where.push(whereConditions)
         }
 
         return queryConditions
