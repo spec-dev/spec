@@ -1,6 +1,7 @@
 import { db } from './index'
 import { ConstraintType, Constraint, ForeignKeyConstraint, StringKeyMap, DBColumn } from '../types'
 import { numericColTypes } from '../utils/colTypes'
+import { QueryError } from '../errors'
 
 export async function doesSchemaExist(name: string): Promise<boolean> {
     const result = await db.raw(

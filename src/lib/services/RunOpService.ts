@@ -32,8 +32,6 @@ class RunOpService {
     }
 
     async _runInsert() {
-        logger.info(`Inserting new record to ${this.tablePath}`, this.op.data)
-
         // Start a new insert query for this table.
         let insertQuery = this.tx(this.tablePath).insert(this.op.data)
 
@@ -55,8 +53,6 @@ class RunOpService {
     }
 
     async _runUpdate() {
-        logger.info(`Updating record on ${this.tablePath} where`, this.op.where, this.op.data)
-
         const whereConditions = this._getWhereConditionsAsList()
 
         // Start a new update query for this table.

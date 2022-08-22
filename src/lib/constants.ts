@@ -19,6 +19,7 @@ const constants: StringKeyMap = {
 
     // TODO
     SEED_INPUT_BATCH_SIZE: Number(ev('SEED_INPUT_BATCH_SIZE', 1000)),
+    STREAMING_SEED_UPSERT_BATCH_SIZE: Number(ev('STREAMING_SEED_UPSERT_BATCH_SIZE', 1000)),
     
     // TODO
     DEBUG: ['true', true].includes(ev('DEBUG')),

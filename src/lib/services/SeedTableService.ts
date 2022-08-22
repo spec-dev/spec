@@ -1,5 +1,5 @@
 import logger from '../logger'
-import { SeedSpec, LiveObject, EdgeFunction, LiveObjectFunctionRole, StringKeyMap, TableDataSources, Op, OpType, ForeignKeyConstraint } from '../types'
+import { SeedSpec, StringMap, LiveObject, EdgeFunction, LiveObjectFunctionRole, StringKeyMap, TableDataSources, Op, OpType, ForeignKeyConstraint } from '../types'
 import { reverseMap, toChunks } from '../utils/formatters'
 import { areColumnsEmpty, getPrimaryKeys, getRelationshipBetweenTables, getUniqueColGroups } from '../db/ops'
 import RunOpService from './RunOpService'
@@ -8,6 +8,8 @@ import config from '../config'
 import { db } from '../db'
 import { QueryError } from '../errors'
 import constants from '../constants'
+
+const valueSep = '__:__'
 
 class SeedTableService {
 
@@ -47,6 +49,10 @@ class SeedTableService {
         return this.seedTablePath.split('.')[1]
     }
 
+    get reverseLinkProperties(): StringMap {
+        return reverseMap(this.seedSpec.linkProperties)
+    }
+
     constructor(seedSpec: SeedSpec, liveObject: LiveObject) {
         this.seedSpec = seedSpec
         this.liveObject = liveObject
@@ -65,35 +71,37 @@ class SeedTableService {
         if (!this.requiredArgColPaths.length) throw 'No required-arg col-paths found.'
 
         // TODO: Break out.
-        const linkPropertyTableColumns = {}
-        const linkPropertyColumnLocations = { onSeedTable: 0, onForeignTable: 0 }
+        const inputTableColumns = {}
+        const inputColumnLocations = { onSeedTable: 0, onForeignTable: 0 }
         const uniqueTablePaths = new Set<string>()
+
         for (const colPath of this.requiredArgColPaths) {
             const [schemaName, tableName, colName] = colPath.split('.')
             const tablePath = [schemaName, tableName].join('.')
             uniqueTablePaths.add(tablePath)
             
             tablePath === this.seedTablePath
-                ? linkPropertyColumnLocations.onSeedTable++
-                : linkPropertyColumnLocations.onForeignTable++
+                ? inputColumnLocations.onSeedTable++
+                : inputColumnLocations.onForeignTable++
 
-            if (!linkPropertyTableColumns.hasOwnProperty(tablePath)) {
-                linkPropertyTableColumns[tablePath] = []
+            if (!inputTableColumns.hasOwnProperty(tablePath)) {
+                inputTableColumns[tablePath] = []
             }
-            linkPropertyTableColumns[tablePath].push(colName)
+            inputTableColumns[tablePath].push(colName)
         }
 
         // TODO: Break out.
         const promises = []
-        for (const tablePath in linkPropertyTableColumns) {
-            const colNames = linkPropertyTableColumns[tablePath]
+        for (const tablePath in inputTableColumns) {
+            const colNames = inputTableColumns[tablePath]
             promises.push(areColumnsEmpty(tablePath, colNames))
         }
         const colsEmptyResults = await Promise.all(promises)
         const allRequiredInputColsAreEmpty = colsEmptyResults.filter(v => !v).length === 0
 
+        // Potentially seed completely from scratch.
         if (allRequiredInputColsAreEmpty) {
-            if (linkPropertyColumnLocations.onForeignTable > 0) {
+            if (inputColumnLocations.onForeignTable > 0) {
                 logger.warn(`${this.seedTablePath} - Can't seed a cross-table relationship from scratch.`)
                 return
             }
@@ -103,61 +111,63 @@ class SeedTableService {
             }
             await this._seedFromScratch()
         }
-        else if (linkPropertyColumnLocations.onSeedTable > 0) {
+        // Seed using the seed table as the target of the query.
+        else if (inputColumnLocations.onSeedTable > 0) {
             await this._seedWithAdjacentCols()
         } 
         // TODO: This is possible, just gonna take a lot more lookup work.
-        else if (linkPropertyColumnLocations.onForeignTable > 1 && uniqueTablePaths.size > 1) {
+        else if (inputColumnLocations.onForeignTable > 1 && uniqueTablePaths.size > 1) {
             logger.warn(`${this.seedTablePath} - Can't seed table using exclusively more than one foreign table.`)
         }
+        // Seed using the foreign table as the target of the query.
         else {
-            const tablePath = Object.keys(linkPropertyTableColumns)[0] as string
-            const colNames = linkPropertyTableColumns[tablePath] as string[]
-            await this._seedFromForeignTable(tablePath, colNames)
+            const tablePath = Object.keys(inputTableColumns)[0] as string
+            const colNames = inputTableColumns[tablePath] as string[]
+            await this._seedWithForeignTable(tablePath, colNames)
         }
     }
 
     async _seedFromScratch() {
         logger.info(`Seeding ${this.seedTablePath} from scratch...`)
 
-        // Pull all live objects for this seed.
-        const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunction, [])
-        if (error) throw error
-        if (!liveObjectsData.length) return
+        // // Pull all live objects for this seed.
+        // const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunction, [])
+        // if (error) throw error
+        // if (!liveObjectsData.length) return
         
-        // Create records data from live objects data.
-        const records = liveObjectsData.map(liveObjectData => {
-            const record = {}
-            for (const property in liveObjectData) {
-                const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
-                const value = liveObjectData[property]
-                for (const { columnName } of colsWithThisPropertyAsDataSource) {
-                    record[columnName] = value
-                }
-            }
-            return record
-        })
+        // // Create records data from live objects data.
+        // const records = liveObjectsData.map(liveObjectData => {
+        //     const record = {}
+        //     for (const property in liveObjectData) {
+        //         const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
+        //         const value = liveObjectData[property]
+        //         for (const { columnName } of colsWithThisPropertyAsDataSource) {
+        //             record[columnName] = value
+        //         }
+        //     }
+        //     return record
+        // })
 
-        // Chunk into batches.
-        const batches = toChunks(records, constants.SEED_INPUT_BATCH_SIZE)
+        // // Chunk into batches.
+        // const batches = toChunks(records, constants.SEED_INPUT_BATCH_SIZE)
 
-        // Get seed table's unique constraints (col groups).
-        await this._findSeedTableUniqueColGroups()
+        // // Get seed table's unique constraints (col groups).
+        // await this._findSeedTableUniqueColGroups()
 
-        // Insert records in batches.
-        for (let i = 0; i < batches.length; i++) {
-            const batch = batches[i]
-            const insertOp = {
-                type: OpType.Insert,
-                schema: this.seedSchemaName,
-                table: this.seedTableName,
-                data: batch,
-                uniqueColGroups: this.seedTableUniqueColGroups,
-            }
+        // // Insert records in batches.
+        // for (let i = 0; i < batches.length; i++) {
+        //     const batch = batches[i]
+        //     const insertOp = {
+        //         type: OpType.Insert,
+        //         schema: this.seedSchemaName,
+        //         table: this.seedTableName,
+        //         data: batch,
+        //         uniqueColGroups: this.seedTableUniqueColGroups,
+        //     }
 
-            // TODO: Figure out onConflict shit for upsertion using the unique columns of the seedTable.
-            await this._runOps([insertOp])
-        }
+        //     // TODO: Figure out onConflict shit for upsertion using the unique columns of the seedTable.
+        //     await this._runOps([insertOp])
+        // }
     }
 
     async _seedWithAdjacentCols() {
@@ -177,65 +187,134 @@ class SeedTableService {
 
         // Process each batch.
         for (let i = 0; i < this.inputBatches.length; i++) {
-            const batch = this.inputBatches[i]
+            // const batch = this.inputBatches[i]
 
-            // Transform the records into function input payloads.
-            const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(batch, this.seedTablePath)
+            // // Transform the records into function input payloads.
+            // const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(batch, this.seedTablePath)
 
-            // Use the seed function to fetch live objects data for the batch.
-            const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunction, batchFunctionInputs)
-            if (error || !liveObjectsData.length) continue
-            if (liveObjectsData.length !== batch.length) {
-                logger.error(`Seed function response length mismatch: ${liveObjectsData.length} vs. ${batch.length}`)
-                continue
-            }
+            // // Use the seed function to fetch live objects data for the batch.
+            // const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunction, batchFunctionInputs)
+            // if (error || !liveObjectsData.length) continue
+            // if (liveObjectsData.length !== batch.length) {
+            //     logger.error(`Seed function response length mismatch: ${liveObjectsData.length} vs. ${batch.length}`)
+            //     continue
+            // }
 
-            // Use the function response data (live objects data) to generate record-update ops.
-            const updateOps = this._generateUpdateOpsForSeedTableBatch(batch, liveObjectsData)
-            await this._runOps(updateOps)
+            // // Use the function response data (live objects data) to generate record-update ops.
+            // const updateOps = this._generateUpdateOpsForSeedTableBatch(batch, liveObjectsData)
+            // await this._runOps(updateOps)
         }
     }
 
-    async _seedFromForeignTable(foreignTablePath: string, linkColNames: string[]) {
-        logger.info(`Seeding ${this.seedTablePath} from foreign table ${foreignTablePath}...`)
+    async _seedWithForeignTable(foreignTablePath: string, inputColNames: string[]) {
+        logger.info(`Seeding ${this.seedTablePath} with foreign table ${foreignTablePath}...`)
 
         // Get seed table -> foreign table relationship.
         const rel = await this._getRel(this.seedTablePath, foreignTablePath)
         if (!rel) throw `No relationship ${this.seedTablePath} -> ${foreignTablePath} exists.`
 
-        // Get all records in the foreign table where each required link column is NOT NULL.
-        await this._findInputRecordsFromForeignTable(foreignTablePath, linkColNames)
-        if (!this.inputRecords.length) {
-            logger.info('Found no foreign table input records to seed with...')
-            return
-        }
+        // Get the live object property keys associated with each input column.
+        const reverseLinkProperties = this.reverseLinkProperties
+        const inputPropertyKeys = inputColNames.map(colName => reverseLinkProperties[`${foreignTablePath}.${colName}`])
 
-        // Group input records into batches.
-        this._batchInputRecords()
-
-        await Promise.all([
-            this._getSeedTablePrimaryKeys(),
+        // Get these once, up-front.
+        const [foreignTablePrimaryKeys, _] = await Promise.all([
+            getPrimaryKeys(foreignTablePath),
             this._findSeedTableUniqueColGroups(),
         ])
 
-        // Process each batch.
-        for (let i = 0; i < this.inputBatches.length; i++) {
-            const batch = this.inputBatches[i]
+        // Start seeding with batches of input records.
+        let offset = 0
+        while (true) {
+            logger.info('Running batch with offset', offset)
 
-            // Transform the records into function input payloads.
-            const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(batch, foreignTablePath)
+            // Get batch of input records from the foreign table.
+            const batchInputRecords = await this._getInputRecordsBatch(
+                foreignTablePath,
+                foreignTablePrimaryKeys as string[],
+                inputColNames,
+                offset,
+            )
+            if (batchInputRecords === null) {
+                // TODO: Handle seed failure at this input batch.
+                break
+            }
+            offset += batchInputRecords.length
+            const isLastBatch = batchInputRecords.length < constants.SEED_INPUT_BATCH_SIZE
 
-            // Use the seed function to fetch live objects data for the batch.
-            const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunction, batchFunctionInputs)
-            if (error || !liveObjectsData.length) continue
-            if (liveObjectsData.length !== batch.length) {
-                logger.error(`Seed function response length mismatch: ${liveObjectsData.length} vs. ${batch.length}`)
-                continue
+            // Map the input records to their reference key value, so that records being added
+            // to the seed table later can easily find/assign their foreign keys. 
+            const referenceKeyValues = {}
+            for (const record of batchInputRecords) {
+                const key = inputColNames.map(colName => record[colName]).join(valueSep)
+                if (referenceKeyValues.hasOwnProperty(key)) continue
+                referenceKeyValues[key] = record[rel.referenceKey]
+            }
+            
+            // Transform the records into seed-function inputs.
+            const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(batchInputRecords, foreignTablePath)
+
+            // Callback to use when a batch of response data is available.
+            const onFunctionRespData = async data => await this._onSpecFunctionRespData(data, {
+                rel,
+                inputPropertyKeys,
+                foreignTablePath,
+                referenceKeyValues,
+            })
+
+            // Call spec function and handle response data.
+            try {
+                await callSpecFunction(this.seedFunction, batchFunctionInputs, onFunctionRespData)
+            } catch (err) {
+                // TODO: Handle seed failure at this input batch.
+                break
             }
 
-            // Use the function response data (live objects data) to generate upsert ops.
-            const ops = await this._generateOpsToUpsertLiveObjectRecords(batch, rel, liveObjectsData)
-            await this._runOps(ops)
+            if (isLastBatch) break
+        }
+    }
+
+    async _onSpecFunctionRespData(liveObjectsData: StringKeyMap[], opts: StringKeyMap = {}) {
+        const upsertRecords = []
+        for (const liveObjectData of liveObjectsData) {
+            // Format a seed table record for this live object data.
+            const upsertRecord = {}
+            for (const property in liveObjectData) {
+                const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
+                const value = liveObjectData[property]
+                for (const { columnName } of colsWithThisPropertyAsDataSource) {
+                    upsertRecord[columnName] = value
+                }
+            }
+
+            if (opts.rel) {
+                const { inputPropertyKeys = [], foreignTablePath, referenceKeyValues = {} } = opts
+                // Find and set the reference key for the foreign table.
+                const uniqueInputRecordKey = inputPropertyKeys.map(propertyKey => liveObjectData[propertyKey]).join(valueSep)
+                if (!referenceKeyValues.hasOwnProperty(uniqueInputRecordKey)) {
+                    logger.error(`Could not find reference key on foreign table ${foreignTablePath} for value ${uniqueInputRecordKey}`)
+                    continue
+                }
+                const referenceKeyValue = referenceKeyValues[uniqueInputRecordKey]
+                upsertRecord[opts.rel.foreignKey] = referenceKeyValue
+                upsertRecords.push(upsertRecord)
+            }
+        }
+
+        const upsertBatchOp = {
+            type: OpType.Insert,
+            schema: this.seedSchemaName,
+            table: this.seedTableName,
+            data: upsertRecords,
+            uniqueColGroups: this.seedTableUniqueColGroups,
+        }
+
+        try {
+            await db.transaction(async tx => {
+                await new RunOpService(upsertBatchOp, tx).perform()
+            })
+        } catch (err) {
+            throw new QueryError('upsert', this.seedSchemaName, this.seedTableName, err)
         }
     }
 
@@ -552,21 +631,30 @@ class SeedTableService {
         return queryConditions
     }
 
-    async _findInputRecordsFromForeignTable(foreignTablePath: string, linkColNames: string[]) {
+    async _getInputRecordsBatch(
+        tablePath: string, 
+        primaryKeys: string[], 
+        tableInputColNames: string[], 
+        offset: number,
+    ): Promise<StringKeyMap[] | null> {
         // Map col names to null.
         const whereNotNull = {}
-        for (const colName of linkColNames) {
+        for (const colName of tableInputColNames) {
             whereNotNull[colName] = null
         }
 
-        // Find all where NOT null.
+        // Find all in batch where input cols names are NOT null.
         try {
-            this.inputRecords = await db.from(foreignTablePath)
+            return await db.from(tablePath)
                 .select('*')
+                .orderBy(primaryKeys)
                 .whereNot(whereNotNull)
+                .offset(offset)
+                .limit(constants.SEED_INPUT_BATCH_SIZE)
         } catch (err) {
-            const [schema, table] = foreignTablePath.split('.')
-            throw new QueryError('select', schema, table, err)
+            const [schema, table] = tablePath.split('.')
+            logger.error(new QueryError('select', schema, table, err).message)
+            return null
         }
     }
 
