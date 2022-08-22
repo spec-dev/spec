@@ -80,8 +80,6 @@ class SeedTableService {
                 ? inputColumnLocations.onSeedTable++
                 : inputColumnLocations.onForeignTable++
 
-
-
             if (!inputTableColumns.hasOwnProperty(tablePath)) {
                 inputTableColumns[tablePath] = []
             }
@@ -128,44 +126,20 @@ class SeedTableService {
     async _seedFromScratch() {
         logger.info(`Seeding ${this.seedTablePath} from scratch...`)
 
-        // // Pull all live objects for this seed.
-        // const { data: liveObjectsData, error } = await callSpecFunction(this.seedFunction, [])
-        // if (error) throw error
-        // if (!liveObjectsData.length) return
-        
-        // // Create records data from live objects data.
-        // const records = liveObjectsData.map(liveObjectData => {
-        //     const record = {}
-        //     for (const property in liveObjectData) {
-        //         const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
-        //         const value = liveObjectData[property]
-        //         for (const { columnName } of colsWithThisPropertyAsDataSource) {
-        //             record[columnName] = value
-        //         }
-        //     }
-        //     return record
-        // })
+        // Get seed table's unique constraints (col groups).
+        await this._findSeedTableUniqueColGroups()
 
-        // // Chunk into batches.
-        // const batches = toChunks(records, constants.SEED_INPUT_BATCH_SIZE)
-
-        // // Get seed table's unique constraints (col groups).
-        // await this._findSeedTableUniqueColGroups()
-
-        // // Insert records in batches.
-        // for (let i = 0; i < batches.length; i++) {
-        //     const batch = batches[i]
-        //     const insertOp = {
-        //         type: OpType.Insert,
-        //         schema: this.seedSchemaName,
-        //         table: this.seedTableName,
-        //         data: batch,
-        //         uniqueColGroups: this.seedTableUniqueColGroups,
-        //     }
-
-        //     // TODO: Figure out onConflict shit for upsertion using the unique columns of the seedTable.
-        //     await this._runOps([insertOp])
-        // }
+        // Call spec function and handle response data.
+        try {
+            await callSpecFunction(
+                this.seedFunction, 
+                [],
+                async data => await this._handleDataOnSeedFromScratch(data as StringKeyMap[])
+            )
+        } catch (err) {
+            // TODO: Handle seed failure at this input batch.
+            return
+        }
     }
 
     async _seedWithAdjacentCols() {
@@ -222,7 +196,7 @@ class SeedTableService {
             }
 
             // Callback to use when a batch of response data is available.
-            const onFunctionRespData = async data => await this._handleSpecFunctionRespForAdjacentColsSeed(
+            const onFunctionRespData = async data => await this._handleDataOnAdjacentColsSeed(
                 data,
                 inputPropertyKeys,
                 indexedPkConditions,
@@ -289,7 +263,7 @@ class SeedTableService {
             const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(batchInputRecords, foreignTablePath)
 
             // Callback to use when a batch of response data is available.
-            const onFunctionRespData = async data => await this._handleSpecFunctionRespForForeignTableSeed(
+            const onFunctionRespData = async data => await this._handleDataOnForeignTableSeed(
                 data,
                 rel,
                 inputPropertyKeys,
@@ -309,7 +283,39 @@ class SeedTableService {
         }
     }
 
-    async _handleSpecFunctionRespForForeignTableSeed(
+    async _handleDataOnSeedFromScratch(batch: StringKeyMap[]) {
+        const insertRecords = []
+        for (const liveObjectData of batch) {
+            // Format a seed table record for this live object data.
+            const insertRecord = {}
+            for (const property in liveObjectData) {
+                const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
+                const value = liveObjectData[property]
+                for (const { columnName } of colsWithThisPropertyAsDataSource) {
+                    insertRecord[columnName] = value
+                }
+            }
+            insertRecords.push(insertRecord)
+        }
+
+        const insertBatchOp = {
+            type: OpType.Insert,
+            schema: this.seedSchemaName,
+            table: this.seedTableName,
+            data: insertRecords,
+            uniqueColGroups: this.seedTableUniqueColGroups,
+        }
+
+        try {
+            await db.transaction(async tx => {
+                await new RunOpService(insertBatchOp, tx).perform()
+            })
+        } catch (err) {
+            throw new QueryError('insert', this.seedSchemaName, this.seedTableName, err)
+        }
+    }
+
+    async _handleDataOnForeignTableSeed(
         batch: StringKeyMap[], 
         rel: ForeignKeyConstraint,
         inputPropertyKeys: string[],
@@ -356,7 +362,7 @@ class SeedTableService {
         }
     }
 
-    async _handleSpecFunctionRespForAdjacentColsSeed(
+    async _handleDataOnAdjacentColsSeed(
         batch: StringKeyMap[], 
         inputPropertyKeys: string[],
         indexedPkConditions: StringKeyMap, 
