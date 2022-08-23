@@ -1,8 +1,8 @@
 import logger from '../logger'
 import { db } from './index'
 import { Trigger, TriggerEvent, StringKeyMap } from '../types'
-import { getPrimaryKeys } from './ops'
 import constants from '../constants'
+import { tablesMeta } from './tablesMeta'
 
 // Trigger name components.
 export const triggerName: StringKeyMap = {
@@ -83,7 +83,7 @@ export async function createTrigger(
     const withFunction = options.hasOwnProperty('withFunction') ? options.withFunction : true
 
     // Need primary keys of the table to serve as the suffix of the trigger name.
-    const primaryKeys = (options.primaryKeys || (await getPrimaryKeys(tablePath))) as string[]
+    const primaryKeys = tablesMeta[tablePath].primaryKey.map(pk => pk.name)
     if (!primaryKeys.length) {
         throw `Can't create trigger -- no primary keys found for table ${tablePath}`
     }

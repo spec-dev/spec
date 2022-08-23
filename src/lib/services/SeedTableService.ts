@@ -1,13 +1,14 @@
 import logger from '../logger'
 import { SeedSpec, StringMap, LiveObject, EdgeFunction, LiveObjectFunctionRole, StringKeyMap, TableDataSources, Op, OpType, ForeignKeyConstraint } from '../types'
 import { reverseMap } from '../utils/formatters'
-import { areColumnsEmpty, getPrimaryKeys, getRelationshipBetweenTables, getUniqueColGroups } from '../db/ops'
+import { areColumnsEmpty } from '../db/ops'
 import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
 import config from '../config'
 import { db } from '../db'
 import { QueryError } from '../errors'
 import constants from '../constants'
+import { tablesMeta, getRel } from '../db/tablesMeta'
 
 const valueSep = '__:__'
 
@@ -27,9 +28,7 @@ class SeedTableService {
 
     colPathToFunctionInputArg: { [key: string]: string } = {}
 
-    rels: { [key: string]: ForeignKeyConstraint | null } = {}
-
-    seedTableUniqueColGroups: string[][] = []
+    seedTableUniqueConstraint: string[] = []
 
     seedTablePrimaryKeys: string[] = []
 
@@ -52,9 +51,11 @@ class SeedTableService {
     constructor(seedSpec: SeedSpec, liveObject: LiveObject) {
         this.seedSpec = seedSpec
         this.liveObject = liveObject
-        this.tableDataSources = this._getLiveObjectTableDataSources()
+        this.tableDataSources = config.getLiveObjectTableDataSources(this.liveObject.id, this.seedTablePath)
         this.seedFunction = null
         this.seedColNames = new Set<string>(this.seedSpec.seedColNames)
+        this.seedTablePrimaryKeys = tablesMeta[this.seedTablePath].primaryKey.map(pk => pk.name)
+        this.seedTableUniqueConstraint = config.getUniqueConstraintForLink(this.liveObject.id, this.seedTablePath)
     }
 
     async perform() {
@@ -63,8 +64,8 @@ class SeedTableService {
         if (!this.seedFunction) throw 'Live object doesn\'t have an associated seed function.'
 
         // Find the required args for this function and their associated columns.
-        this._getRequiredArgColumns()
-        if (!this.requiredArgColPaths.length) throw 'No required-arg col-paths found.'
+        this._findRequiredArgColumns()
+        if (!this.requiredArgColPaths.length) throw 'No required arg column paths found.'
 
         // TODO: Break out.
         const inputTableColumns = {}
@@ -126,16 +127,10 @@ class SeedTableService {
     async _seedFromScratch() {
         logger.info(`Seeding ${this.seedTablePath} from scratch...`)
 
-        // Get seed table's unique constraints (col groups).
-        await this._findSeedTableUniqueColGroups()
-
-        // Call spec function and handle response data.
         try {
-            await callSpecFunction(
-                this.seedFunction, 
-                [],
-                async data => await this._handleDataOnSeedFromScratch(data as StringKeyMap[])
-            )
+            await callSpecFunction(this.seedFunction, [], async data => {
+                await this._handleDataOnSeedFromScratch(data as StringKeyMap[])
+            })
         } catch (err) {
             // TODO: Handle seed failure at this input batch.
             return
@@ -145,11 +140,7 @@ class SeedTableService {
     async _seedWithAdjacentCols() {
         logger.info(`Seeding ${this.seedTablePath} from adjacent columns...`)
 
-        // Get these once, up-front.
-        const [queryConditions, _] = await Promise.all([
-            this._buildQueryForSeedWithAdjacentCols(),
-            await this._getSeedTablePrimaryKeys(),
-        ])
+        const queryConditions = this._buildQueryForSeedWithAdjacentCols()
 
         // Get the live object property keys associated with each input column.
         const reverseLinkProperties = this.reverseLinkProperties
@@ -218,18 +209,13 @@ class SeedTableService {
         logger.info(`Seeding ${this.seedTablePath} with foreign table ${foreignTablePath}...`)
 
         // Get seed table -> foreign table relationship.
-        const rel = await this._getRel(this.seedTablePath, foreignTablePath)
+        const rel = getRel(this.seedTablePath, foreignTablePath)
         if (!rel) throw `No relationship ${this.seedTablePath} -> ${foreignTablePath} exists.`
+        const foreignTablePrimaryKeys = tablesMeta[foreignTablePath].primaryKey.map(pk => pk.name)
 
         // Get the live object property keys associated with each input column.
         const reverseLinkProperties = this.reverseLinkProperties
         const inputPropertyKeys = inputColNames.map(colName => reverseLinkProperties[`${foreignTablePath}.${colName}`])
-
-        // Get these once, up-front.
-        const [foreignTablePrimaryKeys, _] = await Promise.all([
-            getPrimaryKeys(foreignTablePath),
-            this._findSeedTableUniqueColGroups(),
-        ])
 
         // Start seeding with batches of input records.
         let offset = 0
@@ -303,7 +289,7 @@ class SeedTableService {
             schema: this.seedSchemaName,
             table: this.seedTableName,
             data: insertRecords,
-            uniqueColGroups: this.seedTableUniqueColGroups,
+            conflictTargets: this.seedTableUniqueConstraint,
         }
 
         try {
@@ -351,7 +337,7 @@ class SeedTableService {
             schema: this.seedSchemaName,
             table: this.seedTableName,
             data: upsertRecords,
-            uniqueColGroups: this.seedTableUniqueColGroups,
+            conflictTargets: this.seedTableUniqueConstraint,
         }
 
         try {
@@ -456,7 +442,7 @@ class SeedTableService {
         }
     }
 
-    async _buildQueryForSeedWithAdjacentCols(): Promise<StringKeyMap> {
+    _buildQueryForSeedWithAdjacentCols(): StringKeyMap {
         const queryConditions = { 
             join: [],
             select: [`${this.seedTablePath}.*`],
@@ -468,7 +454,7 @@ class SeedTableService {
             const colTablePath = [colSchemaName, colTableName].join('.')
 
             if (colTablePath !== this.seedTablePath) {
-                const rel = await this._getRel(this.seedTablePath, colTablePath)
+                const rel = getRel(this.seedTablePath, colTablePath)
                 if (!rel) throw `No rel from ${this.seedTablePath} -> ${colTablePath}`
 
                 queryConditions.join.push([
@@ -559,11 +545,7 @@ class SeedTableService {
         }
     }
 
-    async _findSeedTableUniqueColGroups() {
-        this.seedTableUniqueColGroups = await getUniqueColGroups(this.seedTablePath)
-    }
-
-    _getRequiredArgColumns() {
+    _findRequiredArgColumns() {
         const { argsMap, args } = this.seedFunction
         const reverseArgsMap = reverseMap(argsMap)
 
@@ -582,39 +564,6 @@ class SeedTableService {
 
         this.requiredArgColPaths = requiredArgColPaths
         this.colPathToFunctionInputArg = colPathToFunctionInputArg
-    }
-
-    _getLiveObjectTableDataSources(): TableDataSources {
-        const dataSourcesInTable = config.getDataSourcesForTable(this.seedSchemaName, this.seedTableName) || {}
-        const tableDataSourcesForThisLiveObject = {}
-
-        // Basically just recreate the map, but filtering out the data sources that 
-        // aren't associated with our live object. Additionally, use just the live 
-        // object property as the new key (removing the live object id).
-        for (let key in dataSourcesInTable) {
-            const [liveObjectId, property] = key.split(':')
-            if (liveObjectId !== this.liveObject.id) continue
-            tableDataSourcesForThisLiveObject[property] = dataSourcesInTable[key]
-        }
-
-        return tableDataSourcesForThisLiveObject
-    }
-
-    async _getRel(tablePath: string, foreignTablePath: string): Promise<ForeignKeyConstraint | null> {
-        const key = [tablePath, foreignTablePath].join(':')
-
-        if (this.rels.hasOwnProperty(key)) {
-            return this.rels[key]
-        }
-        
-        const rel = await getRelationshipBetweenTables(tablePath, foreignTablePath)
-        this.rels[key] = rel
-        return rel
-    }
-
-    async _getSeedTablePrimaryKeys() {
-        this.seedTablePrimaryKeys = await getPrimaryKeys(this.seedTablePath) as string[]
-        if (!this.seedTablePrimaryKeys.length) throw `Primary keys could not determined for ${this.seedTablePath}`
     }
 }
 

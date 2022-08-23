@@ -101,7 +101,7 @@ export interface EventSub {
     cursor: EventCursor
     cursorChanged: boolean
     shouldBuffer: boolean
-    buffer: SpecEvent<StringKeyMap>[]
+    buffer: SpecEvent<StringKeyMap | StringKeyMap[]>[]
 }
 
 export enum TableSubStatus {
@@ -139,7 +139,7 @@ export interface Op {
     table: string
     where?: StringKeyMap
     data?: StringKeyMap | StringKeyMap[]
-    uniqueColGroups?: string[][]
+    conflictTargets?: string[]
 }
 
 export enum LiveColumnSeedStatus {
@@ -207,4 +207,12 @@ export interface Trigger {
 export interface DBColumn {
     name: string
     type: string
+}
+
+export interface TablesMeta {
+    schema: string
+    table: string
+    primaryKey: DBColumn[]
+    uniqueColGroups: string[][]
+    foreignKeys: ForeignKeyConstraint[]
 }

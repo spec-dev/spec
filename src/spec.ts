@@ -6,7 +6,6 @@ import messageClient from './lib/rpcs/messageClient'
 import { LiveObject, StringKeyMap, EventSub, SeedSpec, TableSub, TableSubStatus, TriggerEvent, Trigger, TableSubEvent, DBColumn, StringMap } from './lib/types'
 import { ensureSpecSchemaIsReady, getEventCursorsForNames, saveEventCursors, seedFailed, seedSucceeded } from './lib/db/spec'
 import { SpecEvent } from '@spec.dev/event-client'
-import { getPrimaryKeys } from './lib/db/ops'
 import { tableSubscriber } from './lib/db'
 import { formatTriggerName, dropTrigger, createTrigger } from './lib/db/triggers'
 import LRU from 'lru-cache'
@@ -14,6 +13,7 @@ import ApplyEventService from './lib/services/ApplyEventService'
 import UpsertLiveColumnsService from './lib/services/UpsertLiveColumnsService'
 import SeedTableService from './lib/services/SeedTableService'
 import { getSpecTriggers } from './lib/db/triggers'
+import { tablesMeta } from './lib/db/tablesMeta'
 
 class Spec {
 
@@ -22,7 +22,7 @@ class Spec {
     eventSubs: { [key: string]: EventSub } = {}
 
     saveEventCursorsJob: any = null
-
+c
     isProcessingNewConfig: boolean = false
 
     hasPendingConfigUpdate: boolean = false
@@ -61,9 +61,10 @@ class Spec {
     async _onNewConfig() {
         this.isProcessingNewConfig = true
 
-        // Load and validate the project config file.
-        config.load()
-        config.validate()
+        // Load and validate project config file.
+        if (config.load()) {
+            await config.validate()
+        }
 
         // If the config is invalid, just wait until the next save to try again.
         if (!config.isValid) {
@@ -72,7 +73,7 @@ class Spec {
         }
 
         // Upsert table subscriptions (listen to data changes).
-        this._upsertTableSubs()
+        // this._upsertTableSubs()
 
         // Connect to event/rpc message client. 
         // Force run the onConnect handler if already connected.
@@ -81,7 +82,7 @@ class Spec {
 
     async _onMessageClientConnected() {
         // Resolve all live objects for the versions listed in the config file.
-        const newLiveObjects = await this._getLiveObjectsInConfig()
+        await this._getLiveObjectsInConfig()
         if (this.liveObjects === null) {
             logger.info('No live objects listed in config.')
             this._doneProcessingNewConfig()
@@ -116,7 +117,7 @@ class Spec {
         this._doneProcessingNewConfig()
     }
 
-    async _onEvent(event: SpecEvent<StringKeyMap>, options?: StringKeyMap) {
+    async _onEvent(event: SpecEvent<StringKeyMap | StringKeyMap[]>, options?: StringKeyMap) {
         // Ensure we're actually subscribed to this event.
         const sub = this.eventSubs[event.name]
         if (!sub) {
@@ -138,10 +139,12 @@ class Spec {
         }
 
         this._processEvent(event)
+
+        // TODO: Consider not running this until _processEvent executes without failure.
         this._updateEventCursor(event)
     }
 
-    async _processEvent(event: SpecEvent<StringKeyMap>) {
+    async _processEvent(event: SpecEvent<StringKeyMap | StringKeyMap[]>) {
         // Get sub for event.
         const sub = this.eventSubs[event.name]
         if (!sub) {
@@ -201,7 +204,7 @@ class Spec {
                 // Register event callback.
                 messageClient.on(
                     newEventName,
-                    (event: SpecEvent<StringKeyMap>) => this._onEvent(event),
+                    (event: SpecEvent<StringKeyMap | StringKeyMap[]>) => this._onEvent(event),
                 )
 
                 // Register sub.
@@ -249,7 +252,7 @@ class Spec {
 
         // Fetch any events that came after the following cursors.
         try {
-            await messageClient.fetchMissedEvents(cursors, (events: SpecEvent<StringKeyMap>[]) => {
+            await messageClient.fetchMissedEvents(cursors, (events: SpecEvent<StringKeyMap | StringKeyMap[]>[]) => {
                 events.forEach(event => this._onEvent(event, { forceToBuffer: true }))
             })
         } catch (error) {
@@ -459,7 +462,7 @@ class Spec {
         return subs
     }
 
-    _registerEventAsSeen(event: SpecEvent<StringKeyMap>) {
+    _registerEventAsSeen(event: SpecEvent<StringKeyMap | StringKeyMap[]>) {
         this.seenEvents.set(event.id, true)
     }
 
@@ -467,7 +470,7 @@ class Spec {
         return this.seenEvents.has(eventId)
     }
 
-    _updateEventCursor(event: SpecEvent<StringKeyMap>) {
+    _updateEventCursor(event: SpecEvent<StringKeyMap | StringKeyMap[]>) {
         this.eventSubs[event.name].cursor = {
             name: event.name,
             id: event.id,
@@ -601,61 +604,38 @@ class Spec {
         // Should create new triggers if they don't exist.
         let createUpdateTrigger = !updateTrigger
         let createInsertTrigger = !insertTrigger
-
-        let currentPrimaryKeyCols, currentPrimaryKeys
+        
+        const currentPrimaryKeyCols = tablesMeta[tablePath].primaryKey
+        const currentPrimaryKeys = currentPrimaryKeyCols.map(pk => pk.name)
 
         // If the insert trigger already exists, ensure the primary keys for the table haven't changed.
         if (insertTrigger) {
-            try {
-                currentPrimaryKeyCols = await getPrimaryKeys(tablePath, true)
-            } catch (err) {
-                logger.error(`Error fetching primary keys for ${tablePath}`)
-            }
-            if (currentPrimaryKeyCols) {
-                currentPrimaryKeys = currentPrimaryKeyCols.map(pk => pk.name)
-                // If the trigger name is different, it means the table's primary keys must have changed,
-                // so drop the existing triggers and we'll recreate them (+ the functions).
-                const expectedTriggerName = formatTriggerName(schema, table, insertTrigger.event, currentPrimaryKeys)
-                if (expectedTriggerName && (insertTrigger.name !== expectedTriggerName)) {
-                    try {
-                        await dropTrigger(insertTrigger)
-                        createInsertTrigger = true
-                    } catch (err) {
-                        logger.error(`Error dropping trigger: ${insertTrigger.name}`)
-                    }
+            // If the trigger name is different, it means the table's primary keys must have changed,
+            // so drop the existing triggers and we'll recreate them (+ the functions).
+            const expectedTriggerName = formatTriggerName(schema, table, insertTrigger.event, currentPrimaryKeys)
+            if (expectedTriggerName && (insertTrigger.name !== expectedTriggerName)) {
+                try {
+                    await dropTrigger(insertTrigger)
+                    createInsertTrigger = true
+                } catch (err) {
+                    logger.error(`Error dropping trigger: ${insertTrigger.name}`)
                 }
             }
         }
 
         // If the update trigger already exists, ensure the primary keys for the table haven't changed.
         if (updateTrigger) {
-            try {
-                currentPrimaryKeyCols = currentPrimaryKeyCols || (await getPrimaryKeys(tablePath, true))
-            } catch (err) {
-                logger.error(`Error fetching primary keys for ${tablePath}`)
-            }
-            if (currentPrimaryKeyCols) {
-                currentPrimaryKeys = currentPrimaryKeyCols.map(pk => pk.name)
-                // If the trigger name is different, it means the table's primary keys must have changed,
-                // so drop the existing trigger and we'll recreate it (+ upsert the function).
-                const expectedTriggerName = formatTriggerName(schema, table, updateTrigger.event, currentPrimaryKeys)
-                if (expectedTriggerName && (updateTrigger.name !== expectedTriggerName)) {
-                    try {
-                        await dropTrigger(updateTrigger)
-                        createUpdateTrigger = true
-                    } catch (err) {
-                        logger.error(`Error dropping trigger: ${updateTrigger.name}`)
-                    }
+            // If the trigger name is different, it means the table's primary keys must have changed,
+            // so drop the existing trigger and we'll recreate it (+ upsert the function).
+            const expectedTriggerName = formatTriggerName(schema, table, updateTrigger.event, currentPrimaryKeys)
+            if (expectedTriggerName && (updateTrigger.name !== expectedTriggerName)) {
+                try {
+                    await dropTrigger(updateTrigger)
+                    createUpdateTrigger = true
+                } catch (err) {
+                    logger.error(`Error dropping trigger: ${updateTrigger.name}`)
                 }
             }
-        }
-
-        try {
-            currentPrimaryKeyCols = currentPrimaryKeyCols || (await getPrimaryKeys(tablePath, true))
-            currentPrimaryKeys = currentPrimaryKeyCols.map(pk => pk.name)
-        } catch (err) {
-            logger.error(`Error fetching primary keys for ${tablePath}`)
-            return
         }
 
         // Jump to subscribing status if already created.

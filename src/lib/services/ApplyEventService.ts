@@ -1,13 +1,13 @@
 import { LiveObject, LiveObjectLink, StringKeyMap, Op } from '../types'
 import { SpecEvent } from '@spec.dev/event-client'
-import ApplyDiffService from './ApplyDiffService'
+import ApplyDiffsService from './ApplyDiffsService'
 import logger from '../logger'
 import { db } from '../db'
 import RunOpService from './RunOpService'
 
 class ApplyEventService {
 
-    event: SpecEvent<StringKeyMap>
+    event: SpecEvent<StringKeyMap | StringKeyMap[]>
 
     liveObject: LiveObject
 
@@ -15,8 +15,9 @@ class ApplyEventService {
 
     ops: Op[] = []
 
-    get liveObjectDiff(): StringKeyMap {
-        return this.event.object
+    get liveObjectDiffs(): StringKeyMap[] {
+        const data = this.event.data
+        return Array.isArray(data) ? data : [data]
     }
 
     get links(): LiveObjectLink[] {
@@ -36,8 +37,8 @@ class ApplyEventService {
     }
 
     async getOps(): Promise<Op[]> {
-        // Get links this diff applies to (all links who have all of 
-        // their "uniqueBy" property keys included in this diff).
+        // Get all links this diff applies to (i.e. the links 
+        // who have all of their property keys included in this diff).
         this.linksToApplyDiffTo = this._getLinksToApplyDiffTo()
         if (!this.linksToApplyDiffTo.length) {
             logger.info('Live object diff didn\'t satisfy any configured links')
@@ -45,10 +46,10 @@ class ApplyEventService {
         }
 
         // Get ops to apply the diffs for each link.
-        const diff = this.liveObjectDiff
+        const diffs = this.liveObjectDiffs
         let promises = []
         for (let link of this.linksToApplyDiffTo) {
-            promises.push(new ApplyDiffService(diff, link, this.liveObject.id).getOps())
+            promises.push(new ApplyDiffsService(diffs, link, this.liveObject).getOps())
         }
 
         this.ops = (await Promise.all(promises)).flat()
@@ -64,14 +65,17 @@ class ApplyEventService {
 
     _getLinksToApplyDiffTo(): LiveObjectLink[] {
         const linksToApplyDiffTo = []
-        const liveObjectDiff = this.liveObjectDiff
+        const liveObjectDiffs = this.liveObjectDiffs
         for (const link of this.links) {
             let allUniquePropertiesIncludedInDiff = true
-            for (const property of link.uniqueBy) {
-                if (!liveObjectDiff.hasOwnProperty(property)) {
-                    allUniquePropertiesIncludedInDiff = false
-                    break
+            for (const property in link.properties) {
+                for (const diff of liveObjectDiffs) {
+                    if (!diff.hasOwnProperty(property)) {
+                        allUniquePropertiesIncludedInDiff = false
+                        break
+                    }
                 }
+                if (!allUniquePropertiesIncludedInDiff) break
             }
             if (allUniquePropertiesIncludedInDiff) {
                 linksToApplyDiffTo.push(link)
