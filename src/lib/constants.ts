@@ -27,7 +27,9 @@ const constants: StringKeyMap = {
     // TODO: 
     SAVE_EVENT_CURSORS_INTERVAL: 1000,
 
-    TABLE_SUBS_CHANNEL: 'spec_data_change_notifications'
+    TABLE_SUBS_CHANNEL: 'spec_data_change_notifications',
+    TABLE_SUB_BUFFER_INTERVAL: 1000,
+    TABLE_SUB_BUFFER_MAX_SIZE: 1000,
 }
 
 constants.PROJECT_CONFIG_PATH = path.join(constants.SPEC_CONFIG_DIR, 'project.toml')

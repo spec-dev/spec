@@ -16,9 +16,9 @@ export const db = knex({
     connection: connectionConfig,
 })
 
-export const tableSubscriber = createSubscriber(connectionConfig)
+export const pgListener = createSubscriber(connectionConfig)
 
-tableSubscriber.events.on('error', async err => {
+pgListener.events.on('error', async err => {
     logger.error(`Table Subscriber Error: ${err}`)
 
     // TODO: Attempt reconnection with debouncing and exponential backoff.

@@ -138,6 +138,7 @@ export async function createInsertFunction(name: string, schema: string) {
             column_name TEXT;
             column_value TEXT;
             primary_key_data TEXT[];
+            col_names_with_values TEXT;
         BEGIN
             rec := NEW;
 
@@ -151,13 +152,18 @@ export async function createInsertFunction(name: string, schema: string) {
                 );
             END LOOP;
             
+            col_names_with_values := (SELECT json_agg(key)::text
+                FROM json_each_text(to_json(NEW)) n
+                WHERE n.value IS NOT NULL);
+
             payload := ''
                 || '{'
-                || '"timestamp":"'   || CURRENT_TIMESTAMP                      || '",'
-                || '"operation":"'   || TG_OP                                  || '",'
-                || '"schema":"'      || TG_TABLE_SCHEMA                        || '",'
-                || '"table":"'       || TG_TABLE_NAME                          || '",'
-                || '"primaryKeys":{' || array_to_string(primary_key_data, ',') || '}'
+                || '"timestamp":"'         || CURRENT_TIMESTAMP                      || '",'
+                || '"operation":"'         || TG_OP                                  || '",'
+                || '"schema":"'            || TG_TABLE_SCHEMA                        || '",'
+                || '"table":"'             || TG_TABLE_NAME                          || '",'
+                || '"primaryKeys":{'       || array_to_string(primary_key_data, ',') || '},'
+                || '"colNamesWithValues":' || col_names_with_values                  || ''
                 || '}';
 
             PERFORM pg_notify('${constants.TABLE_SUBS_CHANNEL}', payload);
@@ -179,7 +185,7 @@ export async function createUpdateFunction(name: string, schema: string) {
             column_name TEXT;
             column_value TEXT;
             primary_key_data TEXT[];
-            colNamesChanged TEXT;
+            col_names_changed TEXT;
         BEGIN
             rec := NEW;
 
@@ -193,7 +199,7 @@ export async function createUpdateFunction(name: string, schema: string) {
                 );
             END LOOP;
 
-            colNamesChanged := (SELECT json_agg(key)::text
+            col_names_changed := (SELECT json_agg(key)::text
                 FROM json_each_text(to_json(OLD)) o
                 JOIN json_each_text(to_json(NEW)) n USING (key)
                 WHERE n.value IS DISTINCT FROM o.value);
@@ -205,7 +211,7 @@ export async function createUpdateFunction(name: string, schema: string) {
                 || '"schema":"'         || TG_TABLE_SCHEMA                        || '",'
                 || '"table":"'          || TG_TABLE_NAME                          || '",'
                 || '"primaryKeys":{'    || array_to_string(primary_key_data, ',') || '},'
-                || '"colNamesChanged":' || colNamesChanged                        || ''
+                || '"colNamesChanged":' || col_names_changed                      || ''
                 || '}';
 
             PERFORM pg_notify('${constants.TABLE_SUBS_CHANNEL}', payload);

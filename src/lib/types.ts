@@ -112,19 +112,22 @@ export enum TableSubStatus {
 }
 
 export interface TableSub {
-    schema: string,
-    table: string,
-    status: TableSubStatus,
-    primaryKeyTypes?: StringMap,
+    schema: string
+    table: string
+    status: TableSubStatus
+    primaryKeyTypes?: StringMap
+    buffer: TableSubEvent[]
+    processEvents: any
 }
 
 export interface TableSubEvent {
     timestamp: string,
-    operation: TriggerEvent,
-    schema: string,
-    table: string,
-    primaryKeys: StringKeyMap,
-    colNamesChanged?: string[],
+    operation: TriggerEvent
+    schema: string
+    table: string
+    primaryKeys: StringKeyMap
+    colNamesChanged?: string[]
+    colNamesWithValues?: string[]
 }
 
 export enum OpType {
@@ -177,18 +180,18 @@ export enum ConstraintType {
 }
 
 export interface Constraint {
-    type: ConstraintType,
-    raw: string,
-    parsed: StringKeyMap,
+    type: ConstraintType
+    raw: string
+    parsed: StringKeyMap
 }
 
 export interface ForeignKeyConstraint {
-    schema: string,
-    table: string,
-    foreignSchema: string,
-    foreignTable: string,
-    foreignKey: string,
-    referenceKey: string,
+    schema: string
+    table: string
+    foreignSchema: string
+    foreignTable: string
+    foreignKey: string
+    referenceKey: string
 }
 
 export enum TriggerEvent {
@@ -197,11 +200,11 @@ export enum TriggerEvent {
 }
 
 export interface Trigger {
-    schema: string,
-    table: string,
-    event: TriggerEvent,
-    name: string,
-    joinedPrimaryKeys?: string,
+    schema: string
+    table: string
+    event: TriggerEvent
+    name: string
+    joinedPrimaryKeys?: string
 }
 
 export interface DBColumn {
@@ -215,4 +218,14 @@ export interface TablesMeta {
     primaryKey: DBColumn[]
     uniqueColGroups: string[][]
     foreignKeys: ForeignKeyConstraint[]
+}
+
+export interface TableLink {
+    liveObjectId: string
+    link: LiveObjectLink
+}
+
+export interface TableLinkDataChanges {
+    tableLink: TableLink
+    events: TableSubEvent[]
 }

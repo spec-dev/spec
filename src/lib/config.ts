@@ -14,6 +14,7 @@ import {
     StringMap,
     TableDataSources,
     LiveObjectLink,
+    TableLink,
 } from './types'
 
 class Config {
@@ -94,6 +95,49 @@ class Config {
             }
         }
         return null
+    }
+
+    getLinksForTable(tablePath: string): TableLink[] {
+        const tableLinks = []
+        const objects = this.liveObjects
+        for (const configName in objects) {
+            const obj = objects[configName]
+            for (const link of obj.links) {
+                if (link.table === tablePath) {
+                    tableLinks.push({
+                        liveObjectId: obj.id,
+                        link,
+                    })
+                }
+            }
+        }
+        return tableLinks
+    }
+
+    getExternalTableLinksDependentOnTableForSeed(tablePath: string): TableLink[] {
+        const depTableLinks = []
+        const objects = this.liveObjects
+        for (const configName in objects) {
+            const obj = objects[configName]
+
+            for (const link of obj.links) {
+                if (link.table === tablePath) continue
+
+                for (const property in link.properties) {
+                    const colPath = link.properties[property]
+                    const [colSchema, colTable, colName] = colPath.split('.')
+                    const colTablePath = [colSchema, colTable].join('.')       
+                    if (colTablePath === tablePath && link.seedWith.includes(property)) {
+                        depTableLinks.push({
+                            liveObjectId: obj.id,
+                            link,
+                        })
+                        break
+                    } 
+                }
+            }
+        }
+        return depTableLinks
     }
 
     getTable(schemaName: string, tableName: string): TableConfig {
@@ -265,6 +309,7 @@ class Config {
             }
         }
 
+        this.linkUniqueConstraints = linkUniqueConstraints
         return true
     }
 
