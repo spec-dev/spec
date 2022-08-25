@@ -28,7 +28,7 @@ const constants: StringKeyMap = {
     SAVE_EVENT_CURSORS_INTERVAL: 1000,
 
     TABLE_SUBS_CHANNEL: 'spec_data_change_notifications',
-    TABLE_SUB_BUFFER_INTERVAL: 1000,
+    TABLE_SUB_BUFFER_INTERVAL: 200,
     TABLE_SUB_BUFFER_MAX_SIZE: 1000,
 }
 

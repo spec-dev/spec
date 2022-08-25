@@ -1,16 +1,20 @@
-
-import { pgListener } from '.'
+import { pgListener, db } from '.'
 import { getSpecTriggers, formatTriggerName, dropTrigger, createTrigger } from './triggers'
-import { TableSub, TableSubStatus, TableSubEvent, StringKeyMap, StringMap, Trigger, TriggerEvent, TableLinkDataChanges } from '../types'
+import { TableSub, TableSubStatus, TableSubEvent, StringKeyMap, StringMap, Trigger, TriggerEvent, TableLinkDataChanges, LiveObject } from '../types'
 import { tablesMeta, getRel } from './tablesMeta'
 import config from '../config'
 import logger from '../logger'
+import SeedTableService from '../services/SeedTableService'
+import ResolveRecordsService from '../services/ResolveRecordsService'
 import constants from '../constants'
 import debounce from 'lodash.debounce'
+import { QueryError } from '../errors'
 
 export class TableSubscriber {
 
     tableSubs: { [key: string]: TableSub } = {}
+
+    getLiveObject: (id: string) => LiveObject
 
     async upsertTableSubs() {
         // Create a map of table subs from the tables mentioned in the config.
@@ -94,8 +98,10 @@ export class TableSubscriber {
             return
         }
 
-        // Ensure event meets processing criteria.
-        if (!this._shouldProcessEvent(event)) return
+        // Ensure event record isn't blacklisted.
+        if (tableSub.blacklist.has(this._primaryKeysToBlacklistKey(event.primaryKeys))) {
+            return
+        }
         
         // Immediately process events if buffer hits max capacity.
         this.tableSubs[tablePath].buffer.push(event)
@@ -108,10 +114,26 @@ export class TableSubscriber {
         this.tableSubs[tablePath].processEvents()
     }
 
-    _shouldProcessEvent(event: TableSubEvent): boolean {
-        return true
+    _primaryKeysToBlacklistKey(primaryKeys: StringKeyMap) {
+        return Object.keys(primaryKeys).sort().map(k => primaryKeys[k]).join(':')
     }
 
+    _blacklistRecords(tablePath: string, events: TableSubEvent[]): string[] {
+        const keysAdded = []
+        events.forEach(event => {
+            const key = this._primaryKeysToBlacklistKey(event.primaryKeys)
+            this.tableSubs[tablePath].blacklist.add(key)
+            keysAdded.push(key)
+        })
+        return keysAdded
+    }
+
+    _unblacklistRecords(tablePath: string, keys: string[]) {
+        keys.forEach(key => {
+            this.tableSubs[tablePath].blacklist.delete(key)
+        })
+    }
+    
     async _processTableSubEvents(tablePath: string) {
         // Get table sub for path.
         const tableSub = this.tableSubs[tablePath]
@@ -121,45 +143,99 @@ export class TableSubscriber {
         const events = [...tableSub.buffer]
         this.tableSubs[tablePath].buffer = []
 
-        // Fill out yourself.
-        await this._resolveInternalRecords(tablePath, events)
+        logger.info(`Processing ${events.length} data-change event(s) on ${tablePath}...`)
 
-        // Fill out those dependent on you.
-        await this._resolveExternalRecords(tablePath, events)
+        // Blacklist table events for the records associated with these events.
+        const blacklistKeys = this._blacklistRecords(tablePath, events)
+
+        // Populate any live columns on these records.
+        try {
+            await this._resolveInternalRecords(tableSub, tablePath, events)
+        } catch (err) {
+            logger.error(err)
+        } finally {
+            // Unblacklist records now that records are fully resolved.
+            this._unblacklistRecords(tablePath, blacklistKeys)
+        }
+
+        // Populate other tables dependent on these records for live data.
+        await this._resolveExternalRecords(tableSub, tablePath, events)
     }
 
-    async _resolveInternalRecords(tablePath: string, events: TableSubEvent[]) {
+    async _resolveInternalRecords(tableSub: TableSub, tablePath: string, events: TableSubEvent[]) {
         for (const changes of this._getInternalTableLinkDataChanges(tablePath, events)) {
-            await this._processInternalTableLinkDataChanges(changes)
+            await this._processInternalTableLinkDataChanges(tableSub, changes)
         }
     }
 
-    async _resolveExternalRecords(tablePath: string, events: TableSubEvent[]) {
+    async _resolveExternalRecords(tableSub: TableSub, tablePath: string, events: TableSubEvent[]) {
         await Promise.all(this._getExternalTableLinkDataChanges(tablePath, events).map(changes => 
-            this._processExternalTableLinkDataChanges(changes)
+            this._processExternalTableLinkDataChanges(tableSub, changes)
         ))
     }
 
-    async _processInternalTableLinkDataChanges(tableLinkDataChanges: TableLinkDataChanges) {
+    async _processInternalTableLinkDataChanges(tableSub: TableSub, tableLinkDataChanges: TableLinkDataChanges) {
         const { tableLink, events } = tableLinkDataChanges
-
-        // Primary keys --> Record Batch --> Function Args --> Edge Function --> Live Objects --> Merge back with Primary Keys --> Update Ops
-
+        const { liveObjectId, link } = tableLink
+        const tablePath = [tableSub.schema, tableSub.table].join('.')
         
-        
-        // TODO: Do this later when you actually need it
         // Parse/update primary keys in case of numerics.
-        // event.primaryKeys = this._parsePrimaryKeys(event.primaryKeys, tableSub.primaryKeyTypes)
+        const primaryKeyData = events.map(e => this._parsePrimaryKeys(e.primaryKeys, tableSub.primaryKeyTypes))
+        
+        // Get full live object associated with table link.
+        const liveObject = this.getLiveObject(liveObjectId)
+        if (!liveObject) {
+            logger.error(`No live object currently registered for: ${liveObjectId}.`)
+            return
+        }
+
+        // Auto fetch and populate in any live columns on these records.
+        try {
+            await new ResolveRecordsService(tablePath, liveObject, link, primaryKeyData).perform()
+        } catch (err) {
+            logger.error(`Failed to auto-resolve live columns on records in ${link.table}: ${err}`)
+        }
     }
 
-    async _processExternalTableLinkDataChanges(tableLinkDataChanges: TableLinkDataChanges) {
+    async _processExternalTableLinkDataChanges(tableSub: TableSub, tableLinkDataChanges: TableLinkDataChanges) {
         const { tableLink, events } = tableLinkDataChanges
+        const { liveObjectId, link } = tableLink
+        const tablePath = [tableSub.schema, tableSub.table].join('.')
 
-        // Primary keys --> Record Batch --> Function Args --> Edge Function --> Live Objects --> Merge back with Primary Keys --> Update Ops
-        
-        // TODO: Do this later when you actually need it
         // Parse/update primary keys in case of numerics.
-        // event.primaryKeys = this._parsePrimaryKeys(event.primaryKeys, tableSub.primaryKeyTypes)
+        const primaryKeyData = events.map(e => this._parsePrimaryKeys(e.primaryKeys, tableSub.primaryKeyTypes))
+        
+        // Get all records for primary keys.
+        let records: StringKeyMap[]
+        try {
+            records = await this._getRecordsForPrimaryKeys(tablePath, primaryKeyData)
+        } catch (err) {
+            logger.error(err)
+            return
+        }
+
+        // Get full live object associated with table link.
+        const liveObject = this.getLiveObject(liveObjectId)
+        if (!liveObject) {
+            logger.error(`No live object currently registered for: ${liveObjectId}.`)
+            return
+        }
+
+        // Auto-seed this link's table using the given foreign records as batch input.
+        const seedSpec = {
+            liveObjectId,
+            tablePath: link.table,
+            linkProperties: link.properties,
+            seedWith: link.seedWith,
+            uniqueBy: link.uniqueBy,
+            seedColNames: [], // not used with foreign seeds
+            seedIfEmpty: link.seedIfEmpty || false,
+        }
+        try {
+            await new SeedTableService(seedSpec, liveObject).seedWithForeignRecords(tablePath, records)
+        } catch (err) {
+            logger.error(`Failed to auto-seed ${link.table} using ${tablePath}: ${err}`)
+        }
     }
 
     _getInternalTableLinkDataChanges(tablePath: string, events: TableSubEvent[]): TableLinkDataChanges[] {
@@ -197,6 +273,8 @@ export class TableSubscriber {
                 }
             }
 
+            if (!eventsAffectingLinkedCols.length) continue
+
             internalLinksToProcess.push({
                 tableLink: tableLink,
                 events: eventsAffectingLinkedCols,
@@ -207,8 +285,7 @@ export class TableSubscriber {
     }
 
     _getExternalTableLinkDataChanges(tablePath: string, events: TableSubEvent[]): TableLinkDataChanges[] {
-        // Get all links where this table is NOT the target BUT 
-        // is used to seed another table (i.e. dependent tables).
+        // Get all links where this table is NOT the target BUT IS USED to seed another table.
         const depTableLinks = config.getExternalTableLinksDependentOnTableForSeed(tablePath)
 
         const externalLinksToProcess = []
@@ -239,6 +316,34 @@ export class TableSubscriber {
         }
 
         return externalLinksToProcess
+    }
+
+    async _getRecordsForPrimaryKeys(tablePath: string, primaryKeyData: StringKeyMap[]): Promise<StringKeyMap[]> {
+        // Group primary keys into arrays of values for the same key.
+        const primaryKeys = {}
+        Object.keys(primaryKeyData[0]).forEach(key => {
+            primaryKeys[key] = []
+        })
+        for (const pkData of primaryKeyData) {
+            for (const key in pkData) {
+                const val = pkData[key]
+                primaryKeys[key].push(val)
+            }
+        }
+
+        // Build query for all records associated with the array of primary keys.
+        let query = db.from(tablePath).select('*')
+        for (const key in primaryKeys) {
+            query.whereIn(key, primaryKeys[key])
+        }
+        query.limit(primaryKeyData.length)
+
+        try {
+            return await query
+        } catch (err) {
+            const [schema, table] = tablePath.split('.')
+            throw new QueryError('select', schema, table, err)
+        }
     }
 
     _getColNamesAffectedByEvent(event: TableSubEvent): string[] {
@@ -366,7 +471,8 @@ export class TableSubscriber {
                 processEvents: debounce(
                     () => this._processTableSubEvents(tablePath),
                     constants.TABLE_SUB_BUFFER_INTERVAL,
-                )
+                ),
+                blacklist: new Set<string>(),
             }
         })
     }

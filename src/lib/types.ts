@@ -118,6 +118,7 @@ export interface TableSub {
     primaryKeyTypes?: StringMap
     buffer: TableSubEvent[]
     processEvents: any
+    blacklist: Set<string>
 }
 
 export interface TableSubEvent {

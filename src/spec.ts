@@ -68,6 +68,7 @@ class Spec {
         }
 
         // Upsert table subscriptions (listen to data changes).
+        tableSubscriber.getLiveObject = id => this.liveObjects[id]
         tableSubscriber.upsertTableSubs()
 
         // Connect to event/rpc message client. 
@@ -164,29 +165,24 @@ class Spec {
         }
     }
 
-    async _getLiveObjectsInConfig(): Promise<LiveObject[]> {
+    async _getLiveObjectsInConfig() {
         // Get the list of live object version ids that haven't already been fetched.
         const newlyDetectedLiveObjectVersionIds = config.liveObjectIds.filter(
             id => !this.liveObjects.hasOwnProperty(id)
         )
-        if (!newlyDetectedLiveObjectVersionIds.length) {
-            logger.info('No new live objects detected.')
-            return []
-        }
+        if (!newlyDetectedLiveObjectVersionIds.length) return
         
         // Fetch the newly detected live objects via rpc.
         const newLiveObjects = await resolveLiveObjects(newlyDetectedLiveObjectVersionIds)
         if (newLiveObjects === null) {
             logger.error(`Failed to fetch new live objects: ${newlyDetectedLiveObjectVersionIds.join(', ')}.`)
-            return []
+            return
         }
 
         // Add them to the live objects map.
         for (let liveObject of newLiveObjects) {
             this.liveObjects[liveObject.id] = liveObject
         }
-
-        return newLiveObjects
     }
 
     _subscribeToLiveObjectEvents(): string[] {

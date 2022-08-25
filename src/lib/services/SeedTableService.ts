@@ -124,6 +124,35 @@ class SeedTableService {
         }
     }
 
+    async seedWithForeignRecords(foreignTablePath: string, records: StringKeyMap[]) {
+        // Find seed function to use.
+        this._findSeedFunction()
+        if (!this.seedFunction) throw 'Live object doesn\'t have an associated seed function.'
+
+        // Find the required args for this function and their associated columns.
+        this._findRequiredArgColumns()
+        if (!this.requiredArgColPaths.length) throw 'No required arg column paths found.'
+
+        // Get input column names and ensure all belong to the given foreign table.
+        const inputColNames = []
+        for (const colPath of this.requiredArgColPaths) {
+            const [schemaName, tableName, colName] = colPath.split('.')
+            const tablePath = [schemaName, tableName].join('.')
+
+            if (tablePath !== foreignTablePath) {
+                const err = `seedWithForeignRecords can only be used if all 
+                required arg cols exist on the given foreign table: ${foreignTablePath}; 
+                requiredArgColPaths: ${this.requiredArgColPaths}.`
+                throw err
+            }
+
+            inputColNames.push(colName)
+        }
+        
+        // Seed with the explicitly given foreign input records.
+        await this._seedWithForeignTable(foreignTablePath, inputColNames, records)
+    }
+
     async _seedFromScratch() {
         logger.info(`Seeding ${this.seedTablePath} from scratch...`)
 
@@ -149,8 +178,6 @@ class SeedTableService {
         // Start seeding with batches of input records.
         let offset = 0
         while (true) {
-            logger.info('Running batch with offset', offset)
-
             // Get batch of input records from the seed table.
             const batchInputRecords = await this._findInputRecordsFromAdjacentCols(queryConditions, offset)
             if (batchInputRecords === null) {
@@ -178,7 +205,7 @@ class SeedTableService {
                 const key = keyComps.join(valueSep)
                 if (!indexedPkConditions.hasOwnProperty(key)) {
                     indexedPkConditions[key] = []
-                } 
+                }
                 const recordPrimaryKeys = {}
                 for (const pk of this.seedTablePrimaryKeys) {
                     recordPrimaryKeys[pk] = record[pk]
@@ -205,7 +232,7 @@ class SeedTableService {
         }
     }
 
-    async _seedWithForeignTable(foreignTablePath: string, inputColNames: string[]) {
+    async _seedWithForeignTable(foreignTablePath: string, inputColNames: string[], inputRecords?: StringKeyMap[]) {
         logger.info(`Seeding ${this.seedTablePath} with foreign table ${foreignTablePath}...`)
 
         // Get seed table -> foreign table relationship.
@@ -220,21 +247,19 @@ class SeedTableService {
         // Start seeding with batches of input records.
         let offset = 0
         while (true) {
-            logger.info('Running batch with offset', offset)
-
             // Get batch of input records from the foreign table.
-            const batchInputRecords = await this._getInputRecordsBatch(
+            const batchInputRecords = inputRecords || (await this._getInputRecordsBatch(
                 foreignTablePath,
                 foreignTablePrimaryKeys as string[],
                 inputColNames,
                 offset,
-            )
+            ))
             if (batchInputRecords === null) {
                 // TODO: Handle seed failure at this input batch.
                 break
             }
             offset += batchInputRecords.length
-            const isLastBatch = batchInputRecords.length < constants.SEED_INPUT_BATCH_SIZE
+            const isLastBatch = !!inputRecords || (batchInputRecords.length < constants.SEED_INPUT_BATCH_SIZE)
 
             // Map the input records to their reference key value, so that records being added
             // to the seed table later can easily find/assign their foreign keys. 
@@ -354,6 +379,7 @@ class SeedTableService {
         inputPropertyKeys: string[],
         indexedPkConditions: StringKeyMap, 
     ) {
+        logger.info(`Updating batch of length ${batch.length}...`)
         const updateOps = []
         for (const liveObjectData of batch) {
             // Format a seed table record for this live object data.

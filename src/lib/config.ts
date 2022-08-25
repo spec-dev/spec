@@ -123,17 +123,23 @@ class Config {
             for (const link of obj.links) {
                 if (link.table === tablePath) continue
 
-                for (const property in link.properties) {
-                    const colPath = link.properties[property]
-                    const [colSchema, colTable, colName] = colPath.split('.')
-                    const colTablePath = [colSchema, colTable].join('.')       
-                    if (colTablePath === tablePath && link.seedWith.includes(property)) {
-                        depTableLinks.push({
-                            liveObjectId: obj.id,
-                            link,
-                        })
+                let allSeedColsOnTable = true
+                for (const seedProperty of link.seedWith) {
+                    const seedColPath = link.properties[seedProperty]
+                    const [seedColSchema, seedColTable, _] = seedColPath.split('.')
+                    const seedColTablePath = [seedColSchema, seedColTable].join('.')    
+
+                    if (seedColTablePath !== tablePath) {
+                        allSeedColsOnTable = false
                         break
-                    } 
+                    }
+                }
+
+                if (allSeedColsOnTable) {
+                    depTableLinks.push({
+                        liveObjectId: obj.id,
+                        link,
+                    })
                 }
             }
         }
@@ -176,8 +182,8 @@ class Config {
 
         // Basically just recreate the map, but filtering out the data sources that 
         // aren't associated with our live object. Additionally, use just the live 
-        const tableDataSourcesForThisLiveObject = {}
         // object property as the new key (removing the live object id).
+        const tableDataSourcesForThisLiveObject = {}
         for (let key in dataSourcesInTable) {
             const [liveObjectId, property] = key.split(':')
             if (liveObjectId !== matchliveObjectId) continue
