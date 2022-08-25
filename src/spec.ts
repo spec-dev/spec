@@ -324,19 +324,36 @@ class Spec {
             }
         })
 
-        // Seed tables.
-        seedSpecs.map(seedSpec => this._seedTable(seedSpec))
+        // Create seed table services and determine the seed strategies up-front for each.
+        const seedTableJobs = []
+        for (const seedSpec of seedSpecs) {
+            const { liveObjectId, seedColNames, tablePath } = seedSpec
+            try {
+                const liveObject = this.liveObjects[liveObjectId]
+                if (!liveObject) throw `No live object found for id ${liveObjectId}`
+                const seedTableService = new SeedTableService(seedSpec, liveObject)
+                await seedTableService.determineSeedStrategy()
+                seedTableJobs.push([seedTableService, seedSpec])
+            } catch (err) {
+                logger.error(`Creating seed table service for ${tablePath} failed: ${err}`)
+                seedFailed(seedColNames.map(colName => [tablePath, colName].join('.')))
+            }
+        }
+
+        // Seed tables in parallel.
+        seedTableJobs.forEach(seedTableJob => {
+            const [seedTableService, seedSpec] = seedTableJob
+            this._seedTable(seedTableService, seedSpec)
+        })
     }
 
-    async _seedTable(seedSpec: SeedSpec) {
+    async _seedTable(seedTableService: SeedTableService, seedSpec: SeedSpec) {
         const { liveObjectId, seedColNames, tablePath } = seedSpec
 
         try {
-            const liveObject = this.liveObjects[liveObjectId]
-            if (!liveObject) throw `No live object found for id ${liveObjectId}`
-            await new SeedTableService(seedSpec, liveObject).perform()
+            await seedTableService.executeSeedStrategy()
         } catch (err) {
-            logger.error(`Seed failed - ${err}`)
+            logger.error(`Seed failed for table ${tablePath}: ${err}`)
             seedFailed(seedColNames.map(colName => [tablePath, colName].join('.')))
             return
         }

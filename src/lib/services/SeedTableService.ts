@@ -32,6 +32,8 @@ class SeedTableService {
 
     seedTablePrimaryKeys: string[] = []
 
+    seedStrategy: () => void | null
+
     get seedTablePath(): string {
         return this.seedSpec.tablePath
     }
@@ -56,9 +58,15 @@ class SeedTableService {
         this.seedColNames = new Set<string>(this.seedSpec.seedColNames)
         this.seedTablePrimaryKeys = tablesMeta[this.seedTablePath].primaryKey.map(pk => pk.name)
         this.seedTableUniqueConstraint = config.getUniqueConstraintForLink(this.liveObject.id, this.seedTablePath)
+        this.seedStrategy = null
     }
 
     async perform() {
+        await this.determineSeedStrategy()
+        await this.executeSeedStrategy()
+    }
+
+    async determineSeedStrategy() {
         // Find seed function to use.
         this._findSeedFunction()
         if (!this.seedFunction) throw 'Live object doesn\'t have an associated seed function.'
@@ -106,11 +114,11 @@ class SeedTableService {
                 logger.warn(`${this.seedTablePath} - Table not configured to seed -- seedIfEmpty isn't truthy.`)
                 return
             }
-            await this._seedFromScratch()
+            this.seedStrategy = async () => await this._seedFromScratch()
         }
         // Seed using the seed table as the target of the query.
         else if (inputColumnLocations.onSeedTable > 0) {
-            await this._seedWithAdjacentCols()
+            this.seedStrategy = async () => await this._seedWithAdjacentCols()
         } 
         // TODO: This is possible, just gonna take a lot more lookup work.
         else if (inputColumnLocations.onForeignTable > 1 && uniqueTablePaths.size > 1) {
@@ -120,8 +128,12 @@ class SeedTableService {
         else {
             const tablePath = Object.keys(inputTableColumns)[0] as string
             const colNames = inputTableColumns[tablePath] as string[]
-            await this._seedWithForeignTable(tablePath, colNames)
+            this.seedStrategy = async () => await this._seedWithForeignTable(tablePath, colNames)
         }
+    }
+
+    async executeSeedStrategy() {
+        this.seedStrategy && (await this.seedStrategy())
     }
 
     async seedWithForeignRecords(foreignTablePath: string, records: StringKeyMap[]) {
