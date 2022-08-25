@@ -242,6 +242,10 @@ export class TableSubscriber {
         // Get all links where this table is the target.
         const tableLinks = config.getLinksForTable(tablePath)
 
+        // Get names of all live columns in the table.
+        const [schema, table] = tablePath.split('.')
+        const liveColumnNames = Object.keys(config.getTable(schema, table) || {}) || []
+
         const internalLinksToProcess = []
         for (const tableLink of tableLinks) {
             const linkColPaths = Object.values(tableLink.link.properties)
@@ -250,19 +254,33 @@ export class TableSubscriber {
             for (const event of events) {
                 const colNamesAffected = new Set<string>(this._getColNamesAffectedByEvent(event))
 
+                // There's no need to "resolve" records that either...
+                // (1) Are newly inserted records with values already assigned to each live column
+                // (2) Are updated records where all live columns were updated simultaneously.
+                let allLiveColsWereAffectedSimultaneously = true
+                for (const liveColName of liveColumnNames) {
+                    if (!colNamesAffected.has(liveColName)) {
+                        allLiveColsWereAffectedSimultaneously = false
+                        break
+                    }
+                }
+                if (allLiveColsWereAffectedSimultaneously) {
+                    continue
+                }
+
                 const resolvedLinkColNames = []
                 for (const colPath of linkColPaths) {
                     const [colSchema, colTable, colName] = colPath.split('.')
                     const colTablePath = [colSchema, colTable].join('.')
-                    let resolvedColNamae = colName
+                    let resolvedColName = colName
 
                     if (colTablePath !== tablePath) {
                         const foreignKeyConstraint = getRel(tablePath, colTablePath)
                         if (!foreignKeyConstraint) continue
-                        resolvedColNamae = foreignKeyConstraint.foreignKey
+                        resolvedColName = foreignKeyConstraint.foreignKey
                     }
 
-                    resolvedLinkColNames.push(resolvedColNamae)        
+                    resolvedLinkColNames.push(resolvedColName)        
                 }
 
                 for (const colName of resolvedLinkColNames) {

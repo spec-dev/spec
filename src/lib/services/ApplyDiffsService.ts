@@ -168,8 +168,6 @@ class ApplyDiffsService {
             upsertRecords.push(upsertRecord)
         }
 
-        console.log('Upserting records', upsertRecords)
-
         // Perform all upserts in a single, bulk insert operation.
         this.ops = [{
             type: OpType.Insert,

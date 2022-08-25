@@ -25,12 +25,3 @@ export function toMap(obj): AnyMap {
     }
     return newObj
 }
-
-export function toChunks(arr: any[], chunkSize: number = 1): any[][] {
-    const res = []
-    for (let i = 0; i < arr.length; i += chunkSize) {
-        const chunk = arr.slice(i, i + chunkSize)
-        res.push(chunk)
-    }
-    return res
-}

@@ -10,6 +10,7 @@ export const triggerName: StringKeyMap = {
     UPDATE_PREFIX: 'spec_update',
     PK_SEP: '__pk__',
 }
+
 triggerName.prefixForEvent = (triggerEvent: TriggerEvent): string | null => ({
     [TriggerEvent.INSERT]: triggerName.INSERT_PREFIX,
     [TriggerEvent.UPDATE]: triggerName.UPDATE_PREFIX,
@@ -20,6 +21,7 @@ export const functionName: StringKeyMap = {
     INSERT_PREFIX: 'spec_insert_notify',
     UPDATE_PREFIX: 'spec_update_notify',
 }
+
 functionName.prefixForEvent = (triggerEvent: TriggerEvent): string | null => ({
     [TriggerEvent.INSERT]: functionName.INSERT_PREFIX,
     [TriggerEvent.UPDATE]: functionName.UPDATE_PREFIX,

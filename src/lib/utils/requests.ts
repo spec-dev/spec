@@ -13,10 +13,8 @@ export async function callSpecFunction(
     payload: StringKeyMap | StringKeyMap[],
     onData: onDataCallbackType,
 ) {
-    // Make initial POST request.
     const resp = await makeRequest(edgeFunction, payload)
 
-    // Handle response based on streaming or not.
     await (isStreamingResp(resp)
         ? handleStreamingResp(resp, onData)
         : handleJSONResp(resp, edgeFunction, onData))

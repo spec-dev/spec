@@ -150,7 +150,8 @@ class Config {
         const tables = this.tables
         const schema = tables[schemaName]
         if (!schema) return null
-        return schema[tableName] || null
+        const table = schema[tableName]
+        return table ? toMap(table) : null
     }
 
     getDataSourcesForTable(schemaName: string, tableName: string): TableDataSources | null {
