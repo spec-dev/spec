@@ -43,7 +43,8 @@ class ApplyDiffsService {
     }
 
     get canInsertRecords(): boolean {
-        return !!this.link.eventsCanInsert
+        const link = toMap(this.link)
+        return link.hasOwnProperty('eventsCanInsert') ? !!link.eventsCanInsert : true
     }
 
     constructor(diffs: StringKeyMap[], link: LiveObjectLink, liveObject: LiveObject) {
