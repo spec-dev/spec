@@ -219,6 +219,7 @@ export interface TablesMeta {
     primaryKey: DBColumn[]
     uniqueColGroups: string[][]
     foreignKeys: ForeignKeyConstraint[]
+    colTypes: StringMap,
 }
 
 export interface TableLink {

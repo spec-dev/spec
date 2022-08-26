@@ -48,14 +48,21 @@ export async function pullTableMeta(tablePath: string) {
         getRelationshipBetweenTables(tablePath, foreignTablePath, foreignKeyConstraints)
     ))
 
-    // Get primary key and unique column groups.
     const [
         primaryKey,
         uniqueColGroups,
+        colTypes,
     ] = await Promise.all([
         getPrimaryKeys(tablePath, true, primaryKeyConstraint),
         getUniqueColGroups(tablePath, uniqueConstraints),
+        getColTypes(tablePath, [], false),
     ])
+
+    // Convert col types from array to map.
+    const colTypesMap = {}
+    for (const colType of colTypes) {
+        colTypesMap[colType.name] = colType.type
+    }
 
     // Register table metadata for path.
     tablesMeta[tablePath] = {
@@ -64,6 +71,7 @@ export async function pullTableMeta(tablePath: string) {
         primaryKey: primaryKey as DBColumn[],
         foreignKeys,
         uniqueColGroups,
+        colTypes: colTypesMap,
     }
 }
 
@@ -235,10 +243,10 @@ export async function getUniqueColGroups(tablePath: string, constraints?: Constr
 export async function getColTypes(
     tablePath: string, 
     colNames: string[], 
-    groupNumerics: boolean = true,
+    groupNumericTypes: boolean = true,
 ): Promise<DBColumn[]> {
     const [schema, table] = tablePath.split('.')
-    const { rows } = await db.raw(
+    let query = (    
         `SELECT
             column_name as name,
             data_type as type
@@ -246,11 +254,18 @@ export async function getColTypes(
             information_schema.columns
         WHERE
             table_schema = ? AND
-            table_name = ? AND
-            column_name in (${colNames.map(c => '?').join(', ')});`,
-        [schema, table, ...colNames],
+            table_name = ?`
     )
-    if (!groupNumerics) return rows || []
+    let bindings = [schema, table]
+    if (colNames?.length) {
+        query += `AND column_name in (${colNames.map(c => '?').join(', ')})`
+        bindings = [...bindings, ...colNames]
+    }
+
+    const { rows } = await db.raw(query, bindings)
+    if (!groupNumericTypes) {
+        return rows || []
+    }
 
     return rows.map(col => {
         const type = numericColTypes.has(col.type) ? 'number' : col.type

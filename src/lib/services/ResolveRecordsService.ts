@@ -114,6 +114,7 @@ class ResolveRecordsService {
                     }
                 }
             }
+            if (!Object.keys(recordUpdates).length) continue
 
             const liveObjectToPkConditionsKey = this.inputPropertyKeys.map(k => liveObjectData[k]).join(valueSep)
             const primaryKeyConditions = this.indexedPkConditions[liveObjectToPkConditionsKey] || []
@@ -143,21 +144,21 @@ class ResolveRecordsService {
             }
         }
 
-        // Single bulk update op.
-        if (useBulkUpdate) {
-            updateOps.push({
-                type: OpType.Update,
-                schema: this.schemaName,
-                table: this.tableName,
-                where,
-                data: updates,
-            })
-        }
-
         try {
-            await db.transaction(async tx => {
-                await Promise.all(updateOps.map(op => new RunOpService(op, tx).perform()))
-            })
+            if (useBulkUpdate) {
+                const op = {
+                    type: OpType.Update,
+                    schema: this.schemaName,
+                    table: this.tableName,
+                    where,
+                    data: updates,
+                }
+                await new RunOpService(op).perform()
+            } else {
+                await db.transaction(async tx => {
+                    await Promise.all(updateOps.map(op => new RunOpService(op, tx).perform()))
+                })    
+            }
         } catch (err) {
             throw new QueryError('update', this.schemaName, this.tableName, err)
         }

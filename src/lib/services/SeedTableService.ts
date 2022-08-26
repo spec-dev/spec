@@ -1,6 +1,6 @@
 import logger from '../logger'
 import { SeedSpec, StringMap, LiveObject, EdgeFunction, LiveObjectFunctionRole, StringKeyMap, TableDataSources, Op, OpType, ForeignKeyConstraint } from '../types'
-import { reverseMap } from '../utils/formatters'
+import { reverseMap, toMap } from '../utils/formatters'
 import { areColumnsEmpty } from '../db/ops'
 import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
@@ -44,6 +44,10 @@ class SeedTableService {
 
     get seedTableName(): string {
         return this.seedTablePath.split('.')[1]
+    }
+
+    get linkProperties(): StringMap {
+        return toMap(this.seedSpec.linkProperties)
     }
 
     get reverseLinkProperties(): StringMap {
@@ -174,6 +178,7 @@ class SeedTableService {
             })
         } catch (err) {
             // TODO: Handle seed failure at this input batch.
+            logger.error(err)
             return
         }
     }
@@ -237,6 +242,7 @@ class SeedTableService {
                 await callSpecFunction(this.seedFunction, batchFunctionInputs, onFunctionRespData)
             } catch (err) {
                 // TODO: Handle seed failure at this input batch.
+                logger.error(err)
                 break
             }
 
@@ -299,6 +305,7 @@ class SeedTableService {
                 await callSpecFunction(this.seedFunction, batchFunctionInputs, onFunctionRespData)
             } catch (err) {
                 // TODO: Handle seed failure at this input batch.
+                logger.error(err)
                 break
             }
 
@@ -307,6 +314,8 @@ class SeedTableService {
     }
 
     async _handleDataOnSeedFromScratch(batch: StringKeyMap[]) {
+        logger.info(`Inserting batch of length ${batch.length}...`)
+
         const insertRecords = []
         for (const liveObjectData of batch) {
             // Format a seed table record for this live object data.
@@ -346,6 +355,7 @@ class SeedTableService {
         referenceKeyValues: StringKeyMap,
     ) {
         logger.info(`Upserting batch of length ${batch.length}...`)
+
         const upsertRecords = []
         for (const liveObjectData of batch) {
             // Format a seed table record for this live object data.
@@ -393,6 +403,7 @@ class SeedTableService {
     ) {
         logger.info(`Updating batch of length ${batch.length}...`)
 
+        const linkProperties = this.linkProperties
         const useBulkUpdate = batch.length > constants.MAX_UPDATES_BEFORE_BULK_UPDATE_USED
         const updateOps = []
         const where = []
@@ -401,6 +412,7 @@ class SeedTableService {
             // Format a seed table record for this live object data.
             const recordUpdates = {}
             for (const property in liveObjectData) {
+                if (linkProperties.hasOwnProperty(property)) continue;
                 const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
                 const value = liveObjectData[property]
                 for (const { columnName } of colsWithThisPropertyAsDataSource) {
@@ -409,6 +421,7 @@ class SeedTableService {
                     }
                 }
             }
+            if (!Object.keys(recordUpdates).length) continue
 
             const liveObjectToPkConditionsKey = inputPropertyKeys.map(k => liveObjectData[k]).join(valueSep)
             const primaryKeyConditions = indexedPkConditions[liveObjectToPkConditionsKey] || []
@@ -438,21 +451,21 @@ class SeedTableService {
             }
         }
 
-        // Single bulk update op.
-        if (useBulkUpdate) {
-            updateOps.push({
-                type: OpType.Update,
-                schema: this.seedSchemaName,
-                table: this.seedTableName,
-                where,
-                data: updates,
-            })
-        }
-
         try {
-            await db.transaction(async tx => {
-                await Promise.all(updateOps.map(op => new RunOpService(op, tx).perform()))
-            })
+            if (useBulkUpdate) {
+                const op = {
+                    type: OpType.Update,
+                    schema: this.seedSchemaName,
+                    table: this.seedTableName,
+                    where,
+                    data: updates,
+                }
+                await new RunOpService(op).perform()
+            } else {
+                await db.transaction(async tx => {
+                    await Promise.all(updateOps.map(op => new RunOpService(op, tx).perform()))
+                })    
+            }
         } catch (err) {
             throw new QueryError('update', this.seedSchemaName, this.seedTableName, err)
         }
