@@ -2,6 +2,7 @@ import { pgListener, db } from '.'
 import { getSpecTriggers, formatTriggerName, dropTrigger, createTrigger } from './triggers'
 import { TableSub, TableSubStatus, TableSubEvent, StringKeyMap, StringMap, Trigger, TriggerEvent, TableLinkDataChanges, LiveObject } from '../types'
 import { tablesMeta, getRel } from './tablesMeta'
+import { unique } from '../utils/formatters'
 import config from '../config'
 import logger from '../logger'
 import SeedTableService from '../services/SeedTableService'
@@ -352,7 +353,7 @@ export class TableSubscriber {
         // Build query for all records associated with the array of primary keys.
         let query = db.from(tablePath).select('*')
         for (const key in primaryKeys) {
-            query.whereIn(key, primaryKeys[key])
+            query.whereIn(key, unique(primaryKeys[key]))
         }
         query.limit(primaryKeyData.length)
 

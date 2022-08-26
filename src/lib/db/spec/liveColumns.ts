@@ -2,6 +2,7 @@ import { schema } from '..'
 import { LiveColumn, LiveColumnSeedStatus } from '../../types'
 import { SPEC_SCHEMA_NAME } from '.'
 import logger from '../../logger'
+import { unique } from '../../utils/formatters'
 
 export const LIVE_COLUMNS_TABLE_NAME = 'live_columns'
 
@@ -12,7 +13,7 @@ export async function getLiveColumnsForColPaths(columnPaths: string[]): Promise<
     try {
         records = await liveColumns()
             .select('*')
-            .whereIn('column_path', columnPaths)
+            .whereIn('column_path', unique(columnPaths))
     } catch (err) {
         logger.error(`Error getting live_columns for column_paths: ${columnPaths.join(', ')}: ${err}`)
         throw err
@@ -56,7 +57,7 @@ export async function updateSeedStatus(columnPaths: string | string[], seedStatu
     try {
         await liveColumns()
             .update('seed_status', seedStatus)
-            .whereIn('column_path', columnPaths)
+            .whereIn('column_path', unique(columnPaths))
     } catch (err) {
         logger.error(`Error updating live column seed status to ${seedStatus}: ${err}`)
     }

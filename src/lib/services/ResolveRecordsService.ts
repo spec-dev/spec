@@ -1,5 +1,5 @@
 import { OpType, LiveObject, LiveObjectLink, StringKeyMap, TableDataSources, EdgeFunction, StringMap, LiveObjectFunctionRole } from '../types'
-import { reverseMap, toMap } from '../utils/formatters'
+import { reverseMap, toMap, unique } from '../utils/formatters'
 import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
 import config from '../config'
@@ -267,7 +267,7 @@ class ResolveRecordsService {
         for (const colName in primaryKeys) {
             const vals = primaryKeys[colName]
             const colPath = [this.tablePath, colName].join('.')
-            queryConditions.whereIn.push([colPath, vals])
+            queryConditions.whereIn.push([colPath, unique(vals)])
         }
         
         return queryConditions

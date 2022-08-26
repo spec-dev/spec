@@ -25,3 +25,7 @@ export function toMap(obj): AnyMap {
     }
     return newObj
 }
+
+export function unique(arr: any[]): any[] {
+    return Array.from(new Set(arr))
+}

@@ -1,7 +1,7 @@
 import { LiveObjectLink, LiveObject, StringKeyMap, StringMap, Op, OpType, TableDataSources, ForeignKeyConstraint } from '../types'
 import config from '../config'
 import { db } from '../db'
-import { toMap } from '../utils/formatters'
+import { toMap, unique } from '../utils/formatters'
 import { QueryError } from '../errors'
 import RunOpService from './RunOpService'
 import { getRel, tablesMeta } from '../db/tablesMeta'
@@ -109,7 +109,7 @@ class ApplyDiffsService {
             foreignTableQueryConditions[colTablePath].colNames.push(colName)
             foreignTableQueryConditions[colTablePath].whereIn.push([
                 colName,
-                this.liveObjectDiffs.map(diff => diff[property]),
+                unique(this.liveObjectDiffs.map(diff => diff[property])),
             ])
         }
 
@@ -217,7 +217,7 @@ class ApplyDiffsService {
             foreignTableQueryConditions[colTablePath].colNames.push(colName)
             foreignTableQueryConditions[colTablePath].whereIn.push([
                 colName,
-                this.liveObjectDiffs.map(diff => diff[property]),
+                unique(this.liveObjectDiffs.map(diff => diff[property])),
             ])
         }
 
@@ -410,7 +410,7 @@ class ApplyDiffsService {
             if (colTablePath === tablePath) {
                 queryConditions.whereIn.push([
                     colName,
-                    this.liveObjectDiffs.map(diff => diff[property]),
+                    unique(this.liveObjectDiffs.map(diff => diff[property])),
                 ])
             } else {
                 const rel = getRel(tablePath, colTablePath)
@@ -425,7 +425,7 @@ class ApplyDiffsService {
                 queryConditions.select.push(`${colPath} as ${colPath}`)
                 queryConditions.whereIn.push([
                     colPath,
-                    this.liveObjectDiffs.map(diff => diff[property]),
+                    unique(this.liveObjectDiffs.map(diff => diff[property])),
                 ])
             }
         }

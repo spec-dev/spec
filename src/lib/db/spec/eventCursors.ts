@@ -2,6 +2,7 @@ import { schema } from '..'
 import { EventCursor } from '../../types'
 import { SPEC_SCHEMA_NAME } from '.'
 import logger from '../../logger'
+import { unique } from '../../utils/formatters'
 
 export const EVENT_CURSORS_TABLE_NAME = 'event_cursors'
 
@@ -12,7 +13,7 @@ export async function getEventCursorsForNames(names: string[]): Promise<EventCur
     try {
         records = await eventCursors()
             .select('*')
-            .whereIn('name', names)
+            .whereIn('name', unique(names))
     } catch (err) {
         logger.error(`Error getting event_cursors for names: ${names.join(', ')}: ${err}`)
         return []
