@@ -392,16 +392,20 @@ class SeedTableService {
         indexedPkConditions: StringKeyMap, 
     ) {
         logger.info(`Updating batch of length ${batch.length}...`)
+
+        const useBulkUpdate = batch.length > constants.MAX_UPDATES_BEFORE_BULK_UPDATE_USED
         const updateOps = []
+        const where = []
+        const updates = []
         for (const liveObjectData of batch) {
             // Format a seed table record for this live object data.
-            const updates = {}
+            const recordUpdates = {}
             for (const property in liveObjectData) {
                 const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
                 const value = liveObjectData[property]
                 for (const { columnName } of colsWithThisPropertyAsDataSource) {
                     if (this.seedColNames.has(columnName)) {
-                        updates[columnName] = value
+                        recordUpdates[columnName] = value
                     }
                 }
             }
@@ -413,15 +417,36 @@ class SeedTableService {
                 continue
             }
 
-            for (const pkConditions of primaryKeyConditions) {
-                updateOps.push({
-                    type: OpType.Update,
-                    schema: this.seedSchemaName,
-                    table: this.seedTableName,
-                    where: pkConditions,
-                    data: updates,
-                })
+            // Bulk update.
+            if (useBulkUpdate) {
+                for (const pkConditions of primaryKeyConditions) {
+                    where.push(pkConditions)
+                    updates.push(recordUpdates)
+                }
             }
+            // Individual updates.
+            else {
+                for (const pkConditions of primaryKeyConditions) {
+                    updateOps.push({
+                        type: OpType.Update,
+                        schema: this.seedSchemaName,
+                        table: this.seedTableName,
+                        where: pkConditions,
+                        data: recordUpdates,
+                    })
+                }
+            }
+        }
+
+        // Single bulk update op.
+        if (useBulkUpdate) {
+            updateOps.push({
+                type: OpType.Update,
+                schema: this.seedSchemaName,
+                table: this.seedTableName,
+                where,
+                data: updates,
+            })
         }
 
         try {

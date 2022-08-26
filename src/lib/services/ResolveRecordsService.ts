@@ -5,6 +5,7 @@ import { callSpecFunction } from '../utils/requests'
 import config from '../config'
 import { db } from '../db'
 import { QueryError } from '../errors'
+import constants from '../constants'
 import logger from '../logger'
 import { tablesMeta, getRel } from '../db/tablesMeta'
 
@@ -97,15 +98,19 @@ class ResolveRecordsService {
     async _handleFunctionRespData(batch: StringKeyMap[]) {
         logger.info(`Updating batch of length ${batch.length}...`)
 
+        const useBulkUpdate = batch.length > constants.MAX_UPDATES_BEFORE_BULK_UPDATE_USED
         const updateOps = []
+        const where = []
+        const updates = []
+        
         for (const liveObjectData of batch) {
-            const updates = {}
+            const recordUpdates = {}
             for (const property in liveObjectData) {
                 const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
                 const value = liveObjectData[property]
                 for (const { columnName } of colsWithThisPropertyAsDataSource) {
                     if (this.updateableColNames.has(columnName)) {
-                        updates[columnName] = value
+                        recordUpdates[columnName] = value
                     }
                 }
             }
@@ -117,15 +122,36 @@ class ResolveRecordsService {
                 continue
             }
 
-            for (const pkConditions of primaryKeyConditions) {
-                updateOps.push({
-                    type: OpType.Update,
-                    schema: this.schemaName,
-                    table: this.tableName,
-                    where: pkConditions,
-                    data: updates,
-                })
+            // Bulk update.
+            if (useBulkUpdate) {
+                for (const pkConditions of primaryKeyConditions) {
+                    where.push(pkConditions)
+                    updates.push(recordUpdates)
+                }
             }
+            // Individual updates.
+            else {
+                for (const pkConditions of primaryKeyConditions) {
+                    updateOps.push({
+                        type: OpType.Update,
+                        schema: this.schemaName,
+                        table: this.tableName,
+                        where: pkConditions,
+                        data: recordUpdates,
+                    })
+                }    
+            }
+        }
+
+        // Single bulk update op.
+        if (useBulkUpdate) {
+            updateOps.push({
+                type: OpType.Update,
+                schema: this.schemaName,
+                table: this.tableName,
+                where,
+                data: updates,
+            })
         }
 
         try {

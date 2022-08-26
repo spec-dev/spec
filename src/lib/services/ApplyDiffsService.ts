@@ -4,8 +4,9 @@ import { db } from '../db'
 import { toMap } from '../utils/formatters'
 import { QueryError } from '../errors'
 import RunOpService from './RunOpService'
-import { getRel } from '../db/tablesMeta'
+import { getRel, tablesMeta } from '../db/tablesMeta'
 import logger from '../logger'
+import constants from '../constants'
 
 const valueSep = '__:__'
 
@@ -22,6 +23,8 @@ class ApplyDiffsService {
     ops: Op[] = []
 
     tableDataSources: TableDataSources
+
+    tablePrimaryKeys: string[] = []
 
     get linkTablePath(): string {
         return this.link.table
@@ -49,6 +52,7 @@ class ApplyDiffsService {
         this.liveObject = liveObject
         this.tableDataSources = config.getLiveObjectTableDataSources(this.liveObject.id, this.linkTablePath)
         this.linkTableUniqueConstraint = config.getUniqueConstraintForLink(this.liveObject.id, this.linkTablePath)
+        this.tablePrimaryKeys = tablesMeta[this.linkTablePath].primaryKey.map(pk => pk.name)
     }
 
     async perform() {
@@ -179,6 +183,12 @@ class ApplyDiffsService {
     }
 
     async _createUpdateOps() {
+        await (this.liveObjectDiffs > constants.MAX_UPDATES_BEFORE_BULK_UPDATE_USED
+            ? this._createBulkUpdateOp() 
+            : this._createIndividualUpdateOps())
+    }
+
+    async _createIndividualUpdateOps() {
         const properties = this.linkProperties
         const tablePath = this.linkTablePath
 
@@ -211,7 +221,7 @@ class ApplyDiffsService {
             ])
         }
 
-        // Find foreign table records potentially needed for reference during inserts.
+        // Find foreign table records potentially needed for reference.
         const referenceKeyValues = {}
         for (const foreignTablePath in foreignTableQueryConditions) {
             const queryConditions = foreignTableQueryConditions[foreignTablePath]
@@ -277,17 +287,149 @@ class ApplyDiffsService {
                 where[queryConditions.rel.foreignKey] = referenceKeyValue
             }
             if (ignoreDiff) continue
-
-            console.log('Updating records', updates, where)
             
             this.ops.push({
                 type: OpType.Update,
                 schema: this.linkSchemaName,
                 table: this.linkTableName,
-                where: where,
+                where,
                 data: updates,
             })
         }
+    }
+
+    async _createBulkUpdateOp() {
+        const queryConditions = this._getExistingRecordQueryConditions()
+
+        // Start a new query on the linked table.
+        let query = db.from(this.linkTablePath)
+
+        // Add JOIN conditions.
+        for (let join of queryConditions.join) {
+            const [joinTable, joinRefKey, joinForeignKey] = join
+            query.innerJoin(joinTable, joinRefKey, joinForeignKey)
+        }
+
+        // Add SELECT conditions.
+        query.select(queryConditions.select)
+
+        // Add WHERE-IN conditions.
+        for (let i = 0; i < queryConditions.whereIn.length; i++) {
+            const [col, vals] = queryConditions.whereIn[i]
+            query.whereIn(col, vals)
+        }
+
+        let records = []
+        try {
+            records = await query
+        } catch (err) {
+            throw new QueryError('select', this.linkSchemaName, this.linkTableName, err)
+        }
+        if (!records.length) return
+
+        const uniqueDiffs = {}
+        for (const diff of this.liveObjectDiffs) {
+            const uniqueKeyComps = []
+            for (const linkPropertyKey of this.link.uniqueBy) {
+                const value = diff[linkPropertyKey] || ''
+                uniqueKeyComps.push(value)
+            }
+            const uniqueKey = uniqueKeyComps.join(valueSep)
+            uniqueDiffs[uniqueKey] = { ...(uniqueDiffs[uniqueKey] || {}), ...diff }
+        }
+
+        const linkProperties = this.linkProperties
+        const where = []
+        const updates = []
+
+        for (const record of records) {
+            // Get the diff associated with this record (if exists).
+            const uniqueKeyComps = []
+            let ignoreRecord = false
+            for (const linkPropertyKey of this.link.uniqueBy) {
+                const colPath = linkProperties[linkPropertyKey]
+                if (!colPath) {
+                    ignoreRecord = true
+                    break
+                }
+                const [colSchemaName, colTableName, colName] = colPath.split('.')
+                const colTablePath = `${colSchemaName}.${colTableName}`    
+                const value = record[colTablePath === this.linkTablePath ? colName : colPath] || ''
+                uniqueKeyComps.push(value)
+            }
+            if (ignoreRecord) continue
+            const uniqueKey = uniqueKeyComps.join(valueSep)
+            const diff = uniqueDiffs[uniqueKey]
+            if (!diff) continue
+
+            // Build a record updates map using the diff, ignoring any linked properties.
+            const recordUpdates = {}
+            for (const property in this.tableDataSources) {
+                if (linkProperties.hasOwnProperty(property) || !diff.hasOwnProperty(property)) continue
+                const colNames = this.tableDataSources[property].map(ds => ds.columnName)
+                for (const colName of colNames) {
+                    recordUpdates[colName] = diff[property]
+                }
+            }
+            if (!Object.keys(recordUpdates).length) continue
+
+            // Create the lookup/where conditions for the update.
+            // These will just be the primary keys / values of this record.
+            const pkConditions = {}
+            for (let primaryKey of this.tablePrimaryKeys) {
+                pkConditions[primaryKey] = record[primaryKey]
+            }
+
+            updates.push(recordUpdates)
+            where.push(pkConditions)
+        }
+
+        this.ops.push({
+            type: OpType.Update,
+            schema: this.linkSchemaName,
+            table: this.linkTableName,
+            where,
+            data: updates,
+        })
+    }
+
+    _getExistingRecordQueryConditions(): StringKeyMap {
+        const queryConditions = { 
+            join: [],
+            select: [`${this.linkTablePath}.*`],
+            whereIn: [],
+        }
+        const properties = this.linkProperties
+        const tablePath = this.linkTablePath
+
+        for (const property in properties) {
+            const colPath = properties[property]
+            const [colSchemaName, colTableName, colName] = colPath.split('.')
+            const colTablePath = `${colSchemaName}.${colTableName}`
+
+            if (colTablePath === tablePath) {
+                queryConditions.whereIn.push([
+                    colName,
+                    this.liveObjectDiffs.map(diff => diff[property]),
+                ])
+            } else {
+                const rel = getRel(tablePath, colTablePath)
+                if (!rel) throw `No rel from ${tablePath} -> ${colTablePath}`
+
+                queryConditions.join.push([
+                    colTableName,
+                    `${colTablePath}.${rel.referenceKey}`,
+                    `${tablePath}.${rel.foreignKey}`,
+                ])
+                
+                queryConditions.select.push(`${colPath} as ${colPath}`)
+                queryConditions.whereIn.push([
+                    colPath,
+                    this.liveObjectDiffs.map(diff => diff[property]),
+                ])
+            }
+        }
+        return queryConditions
     }
 }
 

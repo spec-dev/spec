@@ -49,6 +49,10 @@ class RunOpService {
     }
 
     async _runUpdate() {
+        await (Array.isArray(this.op.where) ? this._runIndividualUpdate() : this._runBulkUpdate())
+    }
+
+    async _runIndividualUpdate() {
         const whereConditions = this._getWhereConditionsAsList()
 
         // Start a new update query for this table.
@@ -66,6 +70,10 @@ class RunOpService {
         } catch (err) {
             throw new QueryError('update', this.op.schema, this.op.table, err)
         }
+    }
+
+    async _runBulkUpdate() {
+        // TODO! Will need not just types of primary key columns but ALSO the types of the columns included in the update.
     }
 
     _getWhereConditionsAsList(): string[][] {

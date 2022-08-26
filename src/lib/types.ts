@@ -141,7 +141,7 @@ export interface Op {
     type: OpType
     schema: string
     table: string
-    where?: StringKeyMap
+    where?: StringKeyMap | StringKeyMap[]
     data?: StringKeyMap | StringKeyMap[]
     conflictTargets?: string[]
 }
