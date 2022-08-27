@@ -182,6 +182,9 @@ export class TableSubscriber {
 
         logger.info(`Processing ${events.length} data-change event(s) on ${tablePath}...`)
 
+        // TODO: Update spec.table_sub_cursors.timestamp to NOW() where table_path = tablePath
+        // Don't await either
+
         // Blacklist table events for the records associated with these events.
         const blacklistKeys = this._blacklistRecords(tablePath, events)
 
@@ -230,6 +233,10 @@ export class TableSubscriber {
         try {
             await new ResolveRecordsService(tablePath, liveObject, link, primaryKeyData).perform()
         } catch (err) {
+            if (err.message && err.message.includes('associated resolve function')) {
+                logger.info(`No resolve function exists for live object ${liveObject.id}.`)
+                return
+            }
             logger.error(`Failed to auto-resolve live columns on records in ${link.table}: ${err}`)
         }
     }
