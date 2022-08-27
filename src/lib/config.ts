@@ -5,6 +5,7 @@ import { ConfigError } from './errors'
 import { noop, toMap } from './utils/formatters'
 import logger from './logger'
 import { tablesMeta, pullTableMeta, getRel } from './db/tablesMeta'
+import { cloneDeep } from 'lodash'
 import {
     ProjectConfig, 
     LiveObjectsConfig, 
@@ -16,6 +17,7 @@ import {
     LiveObjectLink,
     TableLink,
 } from './types'
+import { tableSubscriber } from './db/subscriber'
 
 class Config {
 
@@ -24,6 +26,8 @@ class Config {
     isValid: boolean
 
     linkUniqueConstraints: { [key: string]: string[] } = {}
+
+    checkTablesTimer: any = null
 
     onUpdate: () => void
 
@@ -267,14 +271,8 @@ class Config {
     }
 
     async validate() {
-        // Get table metadata for all tables referenced in config file.
-        if (!(await this._pullMetaForAllTablesInConfig())) {
-            this.isValid = false
-            return
-        }
-
-        // Ensure each link's uniqueBy array has a matching unique constraint.
-        if (!this._getUniqueConstraintsForAllLinks()) {
+        // Validate table schema / meta / constraints.
+        if (!(await this._checkTableStructures())) {
             this.isValid = false
             return
         }
@@ -283,19 +281,85 @@ class Config {
     }
 
     watch() {
+        // Watch config file for any changes.
         fs.watch(constants.PROJECT_CONFIG_PATH, () => {
             logger.info('New config file detected.')
             this.onUpdate()
         })
+
+        // Refresh table metadata on an interval to catch 
+        // any table schema changes as best as possible.
+        this._checkTablesOnInterval()
+    }
+
+    _checkTablesOnInterval() {
+        if (this.checkTablesTimer !== null) return
+
+        this.checkTablesTimer = setInterval(async () => {
+            // Clone tablesMeta deep.
+            const prevTablesMeta = cloneDeep(tablesMeta)
+
+            // Update tables meta and uniqueBy constraints cache.
+            if (!(await this._checkTableStructures())) return
+
+            // Check each table to see if primary keys have changed.
+            const tablePathsWherePrimaryKeysChanged = []
+            for (const tablePath in tablesMeta) {
+                const currentTableMeta = tablesMeta[tablePath]
+                const prevTableMeta = prevTablesMeta[tablePath]
+                if (!prevTableMeta) continue
+
+                const prevPkColNames = prevTableMeta.primaryKey.map(pk => pk.name).sort().join(',')
+                const currentPkColNames = currentTableMeta.primaryKey.map(pk => pk.name).sort().join(',')
+
+                if (currentPkColNames !== prevPkColNames) {
+                    tablePathsWherePrimaryKeysChanged.push(tablePath)
+                }
+            }
+            if (!tablePathsWherePrimaryKeysChanged.length) return
+
+            // For tables where primary keys have changed, 
+            // update their table sub triggers.
+            tableSubscriber.upsertTableSubsWithTriggers(
+                tablePathsWherePrimaryKeysChanged
+            )
+        }, constants.ANALYZE_TABLES_INTERVAL)
+    }
+
+    async _checkTableStructures(): Promise<boolean> {
+        // Get table metadata for all tables referenced in config file.
+        if (!(await this._pullMetaForAllTablesInConfig())) {
+            return false
+        }
+
+        // Ensure each link's uniqueBy array has a matching unique constraint.
+        if (!this._getUniqueConstraintsForAllLinks()) {
+            return false
+        }
+
+        return true
     }
 
     async _pullMetaForAllTablesInConfig(): Promise<boolean> {
+        const priorTablePaths = Object.keys(tablesMeta)
+        const allTablePathsReferencedInConfig = this.getAllReferencedTablePaths()
+
         try {
-            await Promise.all(this.getAllReferencedTablePaths().map(tablePath => pullTableMeta(tablePath)))
+            await Promise.all(allTablePathsReferencedInConfig.map(tablePath => pullTableMeta(tablePath)))
         } catch (err) {
             logger.error(`Error pulling metadata for tables in config: ${err}`)
             return false
         }
+
+        // Remove any tablesMeta entries that aren't referenced in config anymore.
+        const newTablePaths = new Set(allTablePathsReferencedInConfig)
+        for (const priorTablePath of priorTablePaths) {
+            if (!newTablePaths.has(priorTablePath)) {
+                delete tablesMeta[priorTablePath]
+                tableSubscriber.deleteTableSub(priorTablePath)
+            }
+        }
+
         return true
     }
 

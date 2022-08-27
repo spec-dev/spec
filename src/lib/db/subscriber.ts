@@ -8,7 +8,7 @@ import logger from '../logger'
 import SeedTableService from '../services/SeedTableService'
 import ResolveRecordsService from '../services/ResolveRecordsService'
 import constants from '../constants'
-import debounce from 'lodash.debounce'
+import { debounce } from 'lodash'
 import { QueryError } from '../errors'
 
 export class TableSubscriber {
@@ -27,6 +27,23 @@ export class TableSubscriber {
         ))
         if (!pendingSubs.length) return
 
+        // Upsert all pending subs (with their Postgres triggers and functions).
+        await this.upsertTableSubsWithTriggers(pendingSubs)
+
+        // All subs that were successfully upserted in the previous step should now be in the subscribing state.
+        const subsThatNeedSubscribing = Object.values(this.tableSubs).filter(ts => (
+            ts.status === TableSubStatus.Subscribing
+        ))
+        if (!subsThatNeedSubscribing.length) {
+            logger.warn('Not all pending table subs moved to the subscribing status...')
+            return
+        }
+
+        // Subscribe to tables (listen for trigger notifications).
+        await this._subscribeToTables(subsThatNeedSubscribing)
+    }
+
+    async upsertTableSubsWithTriggers(tableSubs: TableSub[]) {
         // Get all existing spec triggers.
         let triggers
         try {
@@ -44,20 +61,12 @@ export class TableSubscriber {
             existingTriggersMap[key] = trigger
         }
         
-        // Upsert all pending subs (their Postgres triggers and functions).
-        await Promise.all(pendingSubs.map(ts => this._upsertTableSub(ts, existingTriggersMap)))
+        // Upsert table subs with their Postgres triggers and functions.
+        await Promise.all(tableSubs.map(ts => this._upsertTableSub(ts, existingTriggersMap)))
+    }
 
-        // All subs that were successfully upserted in the previous step should now be in the subscribing state.
-        const subsThatNeedSubscribing = Object.values(this.tableSubs).filter(ts => (
-            ts.status === TableSubStatus.Subscribing
-        ))
-        if (!subsThatNeedSubscribing.length) {
-            logger.warn('Not all pending table subs moved to the subscribing status...')
-            return
-        }
-
-        // Subscribe to tables (listen for trigger notifications).
-        await this._subscribeToTables(subsThatNeedSubscribing)
+    deleteTableSub(tablePath: string) {
+        delete this.tableSubs[tablePath]
     }
 
     async _subscribeToTables(subsThatNeedSubscribing: TableSub[]) {
@@ -65,7 +74,7 @@ export class TableSubscriber {
         for (const { schema, table } of subsThatNeedSubscribing) {
             const tablePath = [schema, table].join('.')
             this.tableSubs[tablePath].status = TableSubStatus.Subscribed
-            logger.info(`Listening for changes on table ${tablePath}...`)
+            logger.info(`Listening for changes on ${tablePath}...`)
         }
 
         // Ensure we're not already subscribed to the table subs channel.
@@ -99,6 +108,11 @@ export class TableSubscriber {
             return
         }
 
+        // Make sure the primary keys for this table haven't changed....
+        if (!this._ensurePrimaryKeysMatchTableSub(event.primaryKeys, tablePath)) {
+            return
+        }
+
         // Ensure event record isn't blacklisted.
         if (tableSub.blacklist.has(this._primaryKeysToBlacklistKey(event.primaryKeys))) {
             return
@@ -113,6 +127,28 @@ export class TableSubscriber {
 
         // Debounce.
         this.tableSubs[tablePath].processEvents()
+    }
+
+    _ensurePrimaryKeysMatchTableSub(eventPrimaryKeys: StringKeyMap, tablePath: string): boolean {
+        const tableMeta = tablesMeta[tablePath]
+        if (!tableMeta) {
+            logger.error(`No meta registered for table ${tablePath}`)
+            return
+        }
+
+        const eventPrimaryKeysId = Object.keys(eventPrimaryKeys).sort().join(',')
+        const primaryKeyId = tableMeta.primaryKey.map(pk => pk.name).sort().join(',')
+
+        if (eventPrimaryKeysId !== primaryKeyId) {
+            logger.error(
+                `Primary key columns given in data-change event don't 
+                match the current primary keys for the table ${tablePath}: 
+                ${eventPrimaryKeysId} <> ${primaryKeyId}`
+            )
+            return false
+        }
+
+        return true
     }
 
     _primaryKeysToBlacklistKey(primaryKeys: StringKeyMap) {
@@ -387,7 +423,7 @@ export class TableSubscriber {
             newPrimaryKeys[key] = val
         }
         return newPrimaryKeys
-     }
+    }
 
     async _upsertTableSub(tableSub: TableSub, existingTriggersMap: { [key: string]: Trigger }) {
         const { schema, table } = tableSub

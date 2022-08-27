@@ -107,8 +107,8 @@ class RunOpService {
             colName => `${this.tablePath}.${colName} = ${tempTableName}.${colName}`
         ).join(' AND ')
 
-        // Since knex.js is fucking trash and can't understand how 
-        // to work with temp tables, acquire a connection from 'pg' directly.
+        // Since knex.js is FUCKING trash and can't understand how to
+        // work with temp tables, acquire a connection from 'pg' directly.
         const client = await pool.connect()
 
         try {

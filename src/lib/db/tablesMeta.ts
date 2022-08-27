@@ -48,23 +48,19 @@ export async function pullTableMeta(tablePath: string) {
         getRelationshipBetweenTables(tablePath, foreignTablePath, foreignKeyConstraints)
     ))
 
-    const [
-        primaryKey,
-        uniqueColGroups,
-        colTypes,
-    ] = await Promise.all([
+    const [primaryKey, uniqueColGroups, colTypes] = await Promise.all([
         getPrimaryKeys(tablePath, true, primaryKeyConstraint),
         getUniqueColGroups(tablePath, uniqueConstraints),
         getColTypes(tablePath, [], false),
     ])
 
-    // Convert col types from array to map.
+    // Map col types by name.
     const colTypesMap = {}
     for (const colType of colTypes) {
         colTypesMap[colType.name] = colType.type
     }
 
-    // Register table metadata for path.
+    // Register table with the global metadata holder.
     tablesMeta[tablePath] = {
         schema,
         table,

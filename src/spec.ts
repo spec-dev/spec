@@ -27,7 +27,7 @@ class Spec {
     liveObjectsToIgnoreEventsFrom: Set<string> = new Set()
     
     seenEvents: LRU<string, boolean> = new LRU({
-        max: 5000, // TODO: Move to constants and potentially make configurable via env vars
+        max: constants.SEEN_EVENTS_CACHE_SIZE,
     })
     
     async start() {
@@ -434,12 +434,12 @@ class Spec {
     }
 
     _createSaveCursorsJob() {
-        if (this.saveEventCursorsJob === null) {
-            this.saveEventCursorsJob = setInterval(
-                () => this._saveEventCursors(),
-                constants.SAVE_EVENT_CURSORS_INTERVAL,
-            )
-        }
+        if (this.saveEventCursorsJob !== null) return
+        
+        this.saveEventCursorsJob = setInterval(
+            () => this._saveEventCursors(),
+            constants.SAVE_EVENT_CURSORS_INTERVAL,
+        )
     }
 
     _removeUselessSubs(liveObjectsByEvent: { [key: string]: string[] }) {

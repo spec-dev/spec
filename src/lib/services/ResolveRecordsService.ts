@@ -23,17 +23,9 @@ class ResolveRecordsService {
 
     resolveFunction: EdgeFunction | null
 
-    tableDataSources: TableDataSources
-
     inputArgColPaths: string[] = []
 
     colPathToFunctionInputArg: { [key: string]: string } = {}
-
-    tableUniqueConstraint: string[] = []
-
-    tablePrimaryKeys: string[] = []
-
-    updateableColNames: Set<string> = new Set()
 
     inputRecords: StringKeyMap[] = []
 
@@ -59,16 +51,41 @@ class ResolveRecordsService {
         return reverseMap(this.link.properties)
     }
 
+    get tableDataSources(): TableDataSources {
+        return config.getLiveObjectTableDataSources(this.liveObject.id, this.tablePath)
+    }
+
+    get tablePrimaryKeys(): string[] {
+        const meta = tablesMeta[this.tablePath]
+        if (!meta) throw `No meta registered for table ${this.tablePath}`
+        return meta.primaryKey.map(pk => pk.name)
+    }
+
+    get tableUniqueConstraint(): string[] {
+        const uniqueConstaint = config.getUniqueConstraintForLink(this.liveObject.id, this.tablePath)
+        if (!uniqueConstaint) throw `No unique constraint for link ${this.liveObject.id} <-> ${this.tablePath}`
+        return uniqueConstaint
+    }
+
+    get updateableColNames(): Set<string> {
+        const updateableColNames = []
+        const linkProperties = this.linkProperties
+        const tableDataSources = this.tableDataSources
+        for (const property in tableDataSources) {
+            if (linkProperties.hasOwnProperty(property)) continue
+            for (const colName of tableDataSources[property]) {
+                updateableColNames.push(colName.columnName)
+            }
+        }
+        return new Set(updateableColNames)
+    }
+
     constructor(tablePath: string, liveObject: LiveObject, link: LiveObjectLink, primaryKeyData: StringKeyMap[]) {
         this.tablePath = tablePath
         this.liveObject = liveObject
         this.link = link
         this.primaryKeyData = primaryKeyData
-        this.tableDataSources = config.getLiveObjectTableDataSources(this.liveObject.id, this.tablePath)
         this.resolveFunction = null
-        this.tablePrimaryKeys = tablesMeta[this.tablePath].primaryKey.map(pk => pk.name)
-        this.tableUniqueConstraint = config.getUniqueConstraintForLink(this.liveObject.id, this.tablePath)
-        this._setUpdateableColNames()
     }
 
     async perform() {
@@ -98,18 +115,19 @@ class ResolveRecordsService {
     async _handleFunctionRespData(batch: StringKeyMap[]) {
         logger.info(`Updating batch of length ${batch.length}...`)
 
+        const tableDataSources = this.tableDataSources
+        const updateableColNames = this.updateableColNames
         const useBulkUpdate = batch.length > constants.MAX_UPDATES_BEFORE_BULK_UPDATE_USED
         const updateOps = []
         const where = []
         const updates = []
-        
         for (const liveObjectData of batch) {
             const recordUpdates = {}
             for (const property in liveObjectData) {
-                const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
+                const colsWithThisPropertyAsDataSource = tableDataSources[property] || []
                 const value = liveObjectData[property]
                 for (const { columnName } of colsWithThisPropertyAsDataSource) {
-                    if (this.updateableColNames.has(columnName)) {
+                    if (updateableColNames.has(columnName)) {
                         recordUpdates[columnName] = value
                     }
                 }
@@ -271,18 +289,6 @@ class ResolveRecordsService {
         }
         
         return queryConditions
-    }
-
-    _setUpdateableColNames() {
-        const updateableColNames = []
-        const linkProperties = this.linkProperties
-        for (const property in this.tableDataSources) {
-            if (linkProperties.hasOwnProperty(property)) continue
-            for (const colName of this.tableDataSources[property]) {
-                updateableColNames.push(colName.columnName)
-            }
-        }
-        this.updateableColNames = new Set(updateableColNames)
     }
 
     _findResolveFunction() {

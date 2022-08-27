@@ -9,6 +9,7 @@ const constants: StringKeyMap = {
     // TODO
     EVENTS_HOSTNAME: ev('EVENTS_HOSTNAME', 'events.spec.dev'),
     EVENTS_PORT: Number(ev('EVENTS_PORT', 8888)),
+    SEEN_EVENTS_CACHE_SIZE: Number(ev('SEEN_EVENTS_CACHE_SIZE', 300)),
 
     // TODO
     DB_HOST: ev('DB_HOST', 'localhost'),
@@ -26,6 +27,7 @@ const constants: StringKeyMap = {
 
     // TODO: 
     SAVE_EVENT_CURSORS_INTERVAL: 1000,
+    ANALYZE_TABLES_INTERVAL: 30000,
 
     TABLE_SUBS_CHANNEL: 'spec_data_change_notifications',
     TABLE_SUB_BUFFER_INTERVAL: 100,

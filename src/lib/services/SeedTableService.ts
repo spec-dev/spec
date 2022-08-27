@@ -22,15 +22,9 @@ class SeedTableService {
 
     seedColNames: Set<string>
 
-    tableDataSources: TableDataSources
-
     requiredArgColPaths: string[] = []
 
     colPathToFunctionInputArg: { [key: string]: string } = {}
-
-    seedTableUniqueConstraint: string[] = []
-
-    seedTablePrimaryKeys: string[] = []
 
     seedStrategy: () => void | null
 
@@ -54,14 +48,27 @@ class SeedTableService {
         return reverseMap(this.seedSpec.linkProperties)
     }
 
+    get tableDataSources(): TableDataSources {
+        return config.getLiveObjectTableDataSources(this.liveObject.id, this.seedTablePath)
+    }
+
+    get seedTablePrimaryKeys(): string[] {
+        const meta = tablesMeta[this.seedTablePath]
+        if (!meta) throw `No meta registered for table ${this.seedTablePath}`
+        return meta.primaryKey.map(pk => pk.name)
+    }
+
+    get seedTableUniqueConstraint(): string[] {
+        const uniqueConstaint = config.getUniqueConstraintForLink(this.liveObject.id, this.seedTablePath)
+        if (!uniqueConstaint) throw `No unique constraint for link ${this.liveObject.id} <-> ${this.seedTablePath}`
+        return uniqueConstaint
+    }
+
     constructor(seedSpec: SeedSpec, liveObject: LiveObject) {
         this.seedSpec = seedSpec
         this.liveObject = liveObject
-        this.tableDataSources = config.getLiveObjectTableDataSources(this.liveObject.id, this.seedTablePath)
         this.seedFunction = null
         this.seedColNames = new Set<string>(this.seedSpec.seedColNames)
-        this.seedTablePrimaryKeys = tablesMeta[this.seedTablePath].primaryKey.map(pk => pk.name)
-        this.seedTableUniqueConstraint = config.getUniqueConstraintForLink(this.liveObject.id, this.seedTablePath)
         this.seedStrategy = null
     }
 
@@ -316,12 +323,13 @@ class SeedTableService {
     async _handleDataOnSeedFromScratch(batch: StringKeyMap[]) {
         logger.info(`Inserting batch of length ${batch.length}...`)
 
+        const tableDataSources = this.tableDataSources
         const insertRecords = []
         for (const liveObjectData of batch) {
             // Format a seed table record for this live object data.
             const insertRecord = {}
             for (const property in liveObjectData) {
-                const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
+                const colsWithThisPropertyAsDataSource = tableDataSources[property] || []
                 const value = liveObjectData[property]
                 for (const { columnName } of colsWithThisPropertyAsDataSource) {
                     insertRecord[columnName] = value
@@ -356,12 +364,13 @@ class SeedTableService {
     ) {
         logger.info(`Upserting batch of length ${batch.length}...`)
 
+        const tableDataSources = this.tableDataSources
         const upsertRecords = []
         for (const liveObjectData of batch) {
             // Format a seed table record for this live object data.
             const upsertRecord = {}
             for (const property in liveObjectData) {
-                const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
+                const colsWithThisPropertyAsDataSource = tableDataSources[property] || []
                 const value = liveObjectData[property]
                 for (const { columnName } of colsWithThisPropertyAsDataSource) {
                     upsertRecord[columnName] = value
@@ -403,6 +412,7 @@ class SeedTableService {
     ) {
         logger.info(`Updating batch of length ${batch.length}...`)
 
+        const tableDataSources = this.tableDataSources
         const linkProperties = this.linkProperties
         const useBulkUpdate = batch.length > constants.MAX_UPDATES_BEFORE_BULK_UPDATE_USED
         const updateOps = []
@@ -413,7 +423,7 @@ class SeedTableService {
             const recordUpdates = {}
             for (const property in liveObjectData) {
                 if (linkProperties.hasOwnProperty(property)) continue;
-                const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
+                const colsWithThisPropertyAsDataSource = tableDataSources[property] || []
                 const value = liveObjectData[property]
                 for (const { columnName } of colsWithThisPropertyAsDataSource) {
                     if (this.seedColNames.has(columnName)) {

@@ -18,13 +18,7 @@ class ApplyDiffsService {
 
     liveObject: LiveObject
 
-    linkTableUniqueConstraint: string[] = []
-
     ops: Op[] = []
-
-    tableDataSources: TableDataSources
-
-    tablePrimaryKeys: string[] = []
 
     get linkTablePath(): string {
         return this.link.table
@@ -47,13 +41,26 @@ class ApplyDiffsService {
         return link.hasOwnProperty('eventsCanInsert') ? !!link.eventsCanInsert : true
     }
 
+    get tableDataSources(): TableDataSources {
+        return config.getLiveObjectTableDataSources(this.liveObject.id, this.linkTablePath)
+    }
+
+    get tablePrimaryKeys(): string[] {
+        const meta = tablesMeta[this.linkTablePath]
+        if (!meta) throw `No meta registered for table ${this.linkTablePath}`
+        return meta.primaryKey.map(pk => pk.name)
+    }
+
+    get linkTableUniqueConstraint(): string[] {
+        const uniqueConstaint = config.getUniqueConstraintForLink(this.liveObject.id, this.linkTablePath)
+        if (!uniqueConstaint) throw `No unique constraint for link ${this.liveObject.id} <-> ${this.linkTablePath}`
+        return uniqueConstaint
+    }
+
     constructor(diffs: StringKeyMap[], link: LiveObjectLink, liveObject: LiveObject) {
         this.liveObjectDiffs = diffs
         this.link = link
         this.liveObject = liveObject
-        this.tableDataSources = config.getLiveObjectTableDataSources(this.liveObject.id, this.linkTablePath)
-        this.linkTableUniqueConstraint = config.getUniqueConstraintForLink(this.liveObject.id, this.linkTablePath)
-        this.tablePrimaryKeys = tablesMeta[this.linkTablePath].primaryKey.map(pk => pk.name)
     }
 
     async perform() {
@@ -84,6 +91,7 @@ class ApplyDiffsService {
     async _createUpsertOps() {
         const properties = this.linkProperties
         const tablePath = this.linkTablePath
+        const tableDataSources = this.tableDataSources
 
         // Get query conditions for the linked foreign tables.
         const foreignTableQueryConditions = {}
@@ -150,7 +158,7 @@ class ApplyDiffsService {
         for (const diff of this.liveObjectDiffs) {
             const upsertRecord = {}
             for (const property in diff) {
-                const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
+                const colsWithThisPropertyAsDataSource = tableDataSources[property] || []
                 const value = diff[property]
                 for (const { columnName } of colsWithThisPropertyAsDataSource) {
                     upsertRecord[columnName] = value
@@ -192,6 +200,7 @@ class ApplyDiffsService {
     async _createIndividualUpdateOps() {
         const properties = this.linkProperties
         const tablePath = this.linkTablePath
+        const tableDataSources = this.tableDataSources
 
         // Get query conditions for the linked foreign tables.
         const foreignTableQueryConditions = {}
@@ -268,7 +277,7 @@ class ApplyDiffsService {
                         where[colName] = value
                     }
                 } else {
-                    const colsWithThisPropertyAsDataSource = this.tableDataSources[property] || []
+                    const colsWithThisPropertyAsDataSource = tableDataSources[property] || []
                     for (const { columnName } of colsWithThisPropertyAsDataSource) {
                         updates[columnName] = value
                     }
@@ -301,7 +310,7 @@ class ApplyDiffsService {
 
     async _createBulkUpdateOp() {
         const queryConditions = this._getExistingRecordQueryConditions()
-
+        
         // Start a new query on the linked table.
         let query = db.from(this.linkTablePath)
 
@@ -342,6 +351,8 @@ class ApplyDiffsService {
         const linkProperties = this.linkProperties
         const where = []
         const updates = []
+        const tablePrimaryKeys = this.tablePrimaryKeys
+        const tableDataSources = this.tableDataSources
 
         for (const record of records) {
             // Get the diff associated with this record (if exists).
@@ -365,9 +376,9 @@ class ApplyDiffsService {
 
             // Build a record updates map using the diff, ignoring any linked properties.
             const recordUpdates = {}
-            for (const property in this.tableDataSources) {
+            for (const property in tableDataSources) {
                 if (linkProperties.hasOwnProperty(property) || !diff.hasOwnProperty(property)) continue
-                const colNames = this.tableDataSources[property].map(ds => ds.columnName)
+                const colNames = tableDataSources[property].map(ds => ds.columnName)
                 for (const colName of colNames) {
                     recordUpdates[colName] = diff[property]
                 }
@@ -377,7 +388,7 @@ class ApplyDiffsService {
             // Create the lookup/where conditions for the update.
             // These will just be the primary keys / values of this record.
             const pkConditions = {}
-            for (let primaryKey of this.tablePrimaryKeys) {
+            for (let primaryKey of tablePrimaryKeys) {
                 pkConditions[primaryKey] = record[primaryKey]
             }
 
