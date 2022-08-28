@@ -1,6 +1,6 @@
 import { pgListener, db } from '.'
 import { getSpecTriggers, formatTriggerName, dropTrigger, createTrigger } from './triggers'
-import { TableSub, TableSubStatus, TableSubEvent, StringKeyMap, StringMap, Trigger, TriggerEvent, TableLinkDataChanges, LiveObject } from '../types'
+import { TableSub, TableSubStatus, TableSubEvent, StringKeyMap, StringMap, Trigger, TriggerEvent, TableLinkDataChanges, LiveObject, TableSubCursor } from '../types'
 import { tablesMeta, getRel } from './tablesMeta'
 import { unique } from '../utils/formatters'
 import config from '../config'
@@ -10,11 +10,13 @@ import ResolveRecordsService from '../services/ResolveRecordsService'
 import constants from '../constants'
 import { debounce } from 'lodash'
 import { QueryError } from '../errors'
+import { getTableSubCursorsForPaths, upsertTableSubCursor } from './spec/tableSubCursors'
 
 export class TableSubscriber {
 
     tableSubs: { [key: string]: TableSub } = {}
 
+    // Set dynamically from the Spec class.
     getLiveObject: (id: string) => LiveObject
 
     async upsertTableSubs() {
@@ -38,6 +40,9 @@ export class TableSubscriber {
             logger.warn('Not all pending table subs moved to the subscribing status...')
             return
         }
+
+        // If Spec was down during any data changes that would have been caught, play catch-up.
+        await this._detectAndProcessAnyMissedTableSubEvents()
 
         // Subscribe to tables (listen for trigger notifications).
         await this._subscribeToTables(subsThatNeedSubscribing)
@@ -67,6 +72,8 @@ export class TableSubscriber {
 
     deleteTableSub(tablePath: string) {
         delete this.tableSubs[tablePath]
+
+        // TODO: Delete the spec.table_sub_cursor for this tablePath
     }
 
     async _subscribeToTables(subsThatNeedSubscribing: TableSub[]) {
@@ -170,7 +177,57 @@ export class TableSubscriber {
             this.tableSubs[tablePath].blacklist.delete(key)
         })
     }
+
+    async _detectAndProcessAnyMissedTableSubEvents() {
+        // Get table paths referenced in the config file that have an 'updated_at' timestamp column.
+        const tablePathsWithUpdatedAtCols = config.getAllReferencedTablePathsTrackingRecordUpdates()
+        if (!tablePathsWithUpdatedAtCols.length) return
+
+        // Get the associated table_sub_cursors (if any).
+        const tableSubCursors = await getTableSubCursorsForPaths(tablePathsWithUpdatedAtCols)
+        if (!tableSubCursors.length) return
+
+        // Process any missed events for these tables in parallel.
+        tableSubCursors.forEach(t => this._processMissedEventsForTableSubCursor(t))
+    }
     
+    async _processMissedEventsForTableSubCursor(tableSubCursor: TableSubCursor) {
+        const { tablePath, timestamp } = tableSubCursor
+        const [schema, table] = tablePath.split('.')
+        const meta = tablesMeta[tablePath]
+        if (!meta) return
+        const primaryKeyColNames = meta.primaryKey.map(pk => pk.name)
+
+        // Find records that were updated after the last registered cursor for this table.
+        let recordsUpdatedAfterLastCursor = []
+        try {
+            recordsUpdatedAfterLastCursor = await db.from(tablePath)
+                .select('*')
+                .where(db.raw(`timezone('UTC', ${constants.TABLE_SUB_UPDATED_AT_COL_NAME}) > ?`, [timestamp]))
+        } catch (err) {
+            logger.error(`Error finding missed events for table sub cursor for ${tablePath}: ${err}`)
+            return
+        }
+        if (!recordsUpdatedAfterLastCursor?.length) return  
+
+        // Register missed table data-change events for each of these records.
+        recordsUpdatedAfterLastCursor.forEach(record => {
+            const primaryKeys = {}
+            for (const key of primaryKeyColNames) {
+                primaryKeys[key] = record[key]
+            }
+
+            this._onTableDataChange({
+                timestamp: '', // doesn't matter
+                operation: TriggerEvent.MISSED,
+                schema,
+                table,
+                primaryKeys,
+                record,
+            })
+        })
+    }
+
     async _processTableSubEvents(tablePath: string) {
         // Get table sub for path.
         const tableSub = this.tableSubs[tablePath]
@@ -182,8 +239,8 @@ export class TableSubscriber {
 
         logger.info(`Processing ${events.length} data-change event(s) on ${tablePath}...`)
 
-        // TODO: Update spec.table_sub_cursors.timestamp to NOW() where table_path = tablePath
-        // Don't await either
+        // Mark new timestamp for table sub cursor.
+        upsertTableSubCursor(tablePath)
 
         // Blacklist table events for the records associated with these events.
         const blacklistKeys = this._blacklistRecords(tablePath, events)
@@ -251,11 +308,28 @@ export class TableSubscriber {
         
         // Get all records for primary keys.
         let records: StringKeyMap[]
-        try {
-            records = await this._getRecordsForPrimaryKeys(tablePath, primaryKeyData)
-        } catch (err) {
-            logger.error(err)
-            return
+
+        // Check if all events in this batch are missed events.
+        let allEventsAreMissedEvents = true
+        let missedEventRecords = []
+        for (const event of events) {
+            if (event.operation !== TriggerEvent.MISSED) {
+                allEventsAreMissedEvents = false
+                break
+            }
+            missedEventRecords.push(event.record)
+        }
+
+        // If only processing missed events, we already have the records.
+        if (allEventsAreMissedEvents) {
+            records = missedEventRecords
+        } else {
+            try {
+                records = await this._getRecordsForPrimaryKeys(tablePath, primaryKeyData)
+            } catch (err) {
+                logger.error(err)
+                return
+            }
         }
 
         // Get full live object associated with table link.
@@ -285,6 +359,7 @@ export class TableSubscriber {
     _getInternalTableLinkDataChanges(tablePath: string, events: TableSubEvent[]): TableLinkDataChanges[] {
         // Get all links where this table is the target.
         const tableLinks = config.getLinksForTable(tablePath)
+        if (!tableLinks.length) return
 
         // Get names of all live columns in the table.
         const [schema, table] = tablePath.split('.')
@@ -293,7 +368,7 @@ export class TableSubscriber {
         const internalLinksToProcess = []
         for (const tableLink of tableLinks) {
             const linkColPaths = Object.values(tableLink.link.properties)
-            
+
             const eventsAffectingLinkedCols = []
             for (const event of events) {
                 const colNamesAffected = new Set<string>(this._getColNamesAffectedByEvent(event))
@@ -308,7 +383,7 @@ export class TableSubscriber {
                         break
                     }
                 }
-                if (allLiveColsWereAffectedSimultaneously) {
+                if (allLiveColsWereAffectedSimultaneously && event.operation !== TriggerEvent.MISSED) {
                     continue
                 }
 
@@ -327,6 +402,7 @@ export class TableSubscriber {
                     resolvedLinkColNames.push(resolvedColName)        
                 }
 
+                // Process the event if any linked columns were affected.
                 for (const colName of resolvedLinkColNames) {
                     if (colNamesAffected.has(colName)) {
                         eventsAffectingLinkedCols.push(event)
@@ -334,7 +410,6 @@ export class TableSubscriber {
                     }
                 }
             }
-
             if (!eventsAffectingLinkedCols.length) continue
 
             internalLinksToProcess.push({
@@ -354,10 +429,11 @@ export class TableSubscriber {
         for (const depTableLink of depTableLinks) {            
             const insertsCausingDownstreamSeeds = []
             for (const event of events) {
-                // We only care about inserts for dependent table reactions.
-                if (event.operation !== TriggerEvent.INSERT) continue
+                // We only care about inserts and missed events for dependent table reactions.
+                if (![TriggerEvent.INSERT, TriggerEvent.MISSED].includes(event.operation)) continue
 
-                const colPathsWithValues = new Set<string>((event.colNamesWithValues || []).map(colName => (
+                const colNamesWithValues = this._getColNamesAffectedByEvent(event)
+                const colPathsWithValues = new Set<string>((colNamesWithValues).map(colName => (
                     [tablePath, colName].join('.')
                 )))
     
@@ -414,6 +490,15 @@ export class TableSubscriber {
                 return event.colNamesWithValues || []
             case TriggerEvent.UPDATE:
                 return event.colNamesChanged || []
+            case TriggerEvent.MISSED:
+                const colNamesWithValues = []
+                for (const colName in event.record) {
+                    const val = event.record[colName]
+                    if (val !== null) {
+                        colNamesWithValues.push(colName)
+                    }
+                }
+                return colNamesWithValues
             default:
                 return []
         }

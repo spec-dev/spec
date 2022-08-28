@@ -10,3 +10,5 @@ export const numericColTypes = new Set([
     'serial',
     'bigserial',
 ])
+
+export const isTimestampColType = (colType: string): boolean => !!colType.match(/timestamp/gi)

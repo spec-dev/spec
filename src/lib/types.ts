@@ -92,7 +92,7 @@ export interface EventCursor {
     name: string
     id: string
     nonce: number
-    timestamp: number
+    timestamp: string | Date
 }
 
 export interface EventSub {
@@ -127,8 +127,14 @@ export interface TableSubEvent {
     schema: string
     table: string
     primaryKeys: StringKeyMap
+    record?: StringKeyMap
     colNamesChanged?: string[]
     colNamesWithValues?: string[]
+}
+
+export interface TableSubCursor {
+    tablePath: string
+    timestamp: Date
 }
 
 export enum OpType {
@@ -198,6 +204,7 @@ export interface ForeignKeyConstraint {
 export enum TriggerEvent {
     INSERT = 'INSERT',
     UPDATE = 'UPDATE',
+    MISSED = 'MISSED'
 }
 
 export interface Trigger {

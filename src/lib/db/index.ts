@@ -28,7 +28,6 @@ export const pgListener = createSubscriber(connectionConfig)
 
 pgListener.events.on('error', async err => {
     logger.error(`Table Subscriber Error: ${err}`)
-
     // TODO: Attempt reconnection with debouncing and exponential backoff.
 })
 

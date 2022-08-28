@@ -3,6 +3,7 @@ import { LiveColumn, LiveColumnSeedStatus } from '../../types'
 import { SPEC_SCHEMA_NAME } from '.'
 import logger from '../../logger'
 import { unique } from '../../utils/formatters'
+import { camelizeKeys, decamelizeKeys } from 'humps'
 
 export const LIVE_COLUMNS_TABLE_NAME = 'live_columns'
 
@@ -19,21 +20,13 @@ export async function getLiveColumnsForColPaths(columnPaths: string[]): Promise<
         throw err
     }
 
-    return (records || []).map(record => ({
-        columnPath: record.column_path,
-        liveProperty: record.live_property,
-        seedStatus: record.seed_status as LiveColumnSeedStatus,
-    })) as LiveColumn[]
+    return camelizeKeys(records || []) as LiveColumn[]
 }
 
 export async function saveLiveColumns(records: LiveColumn[]) {
     try {
         await liveColumns()
-            .insert(records.map(record => ({ // TODO: Just use an auto camel-to-snake case converter.
-                column_path: record.columnPath,
-                live_property: record.liveProperty,
-                seed_status: record.seedStatus,
-            })))
+            .insert(decamelizeKeys(records))
             .onConflict('column_path')
             .merge()
     } catch (err) {

@@ -240,7 +240,6 @@ class Spec {
         if (!cursors.length) return
 
         logger.info('Fetching any missed events...')
-
         // Fetch any events that came after the following cursors.
         try {
             await messageClient.fetchMissedEvents(cursors, (events: SpecEvent<StringKeyMap | StringKeyMap[]>[]) => {

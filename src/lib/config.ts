@@ -6,6 +6,7 @@ import { noop, toMap } from './utils/formatters'
 import logger from './logger'
 import { tablesMeta, pullTableMeta, getRel } from './db/tablesMeta'
 import { cloneDeep } from 'lodash'
+import { isTimestampColType } from './utils/colTypes'
 import {
     ProjectConfig, 
     LiveObjectsConfig, 
@@ -216,6 +217,18 @@ class Config {
         }
 
         return Array.from(tablePaths)
+    }
+
+    getAllReferencedTablePathsTrackingRecordUpdates(): string[] {
+        return this.getAllReferencedTablePaths().filter(tablePath => {
+            const meta = tablesMeta[tablePath]
+            if (!meta) return false
+
+            const updatedAtColType = meta.colTypes[constants.TABLE_SUB_UPDATED_AT_COL_NAME]
+            if (!updatedAtColType) return false
+
+            return isTimestampColType(updatedAtColType)
+        })
     }
 
     getUniqueConstraintForLink(liveObjectId: string, tablePath: string, useCache: boolean = true): string[] | null {

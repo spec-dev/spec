@@ -6,7 +6,7 @@ import { unique } from '../../utils/formatters'
 
 export const EVENT_CURSORS_TABLE_NAME = 'event_cursors'
 
-const eventCursors = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(EVENT_CURSORS_TABLE_NAME)
+export const eventCursors = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(EVENT_CURSORS_TABLE_NAME)
 
 export async function getEventCursorsForNames(names: string[]): Promise<EventCursor[]> {
     let records
@@ -22,7 +22,7 @@ export async function getEventCursorsForNames(names: string[]): Promise<EventCur
     return (records || []).map(record => ({
         ...record,
         nonce: Number(record.nonce),
-        timestamp: Number(record.timestamp),
+        timestamp: (record.timestamp as Date).toISOString(),
     })) as EventCursor[]
 }
 

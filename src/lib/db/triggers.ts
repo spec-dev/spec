@@ -160,7 +160,7 @@ export async function createInsertFunction(name: string, schema: string) {
 
             payload := ''
                 || '{'
-                || '"timestamp":"'         || CURRENT_TIMESTAMP                      || '",'
+                || '"timestamp":"'         || CURRENT_TIMESTAMP at time zone 'UTC'   || '",'
                 || '"operation":"'         || TG_OP                                  || '",'
                 || '"schema":"'            || TG_TABLE_SCHEMA                        || '",'
                 || '"table":"'             || TG_TABLE_NAME                          || '",'
@@ -208,7 +208,7 @@ export async function createUpdateFunction(name: string, schema: string) {
             
             payload := ''
                 || '{'
-                || '"timestamp":"'      || CURRENT_TIMESTAMP                      || '",'
+                || '"timestamp":"'      || CURRENT_TIMESTAMP at time zone 'UTC'   || '",'
                 || '"operation":"'      || TG_OP                                  || '",'
                 || '"schema":"'         || TG_TABLE_SCHEMA                        || '",'
                 || '"table":"'          || TG_TABLE_NAME                          || '",'

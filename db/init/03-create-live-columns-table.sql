@@ -8,4 +8,4 @@ create table if not exists spec.live_columns (
 );
 comment on table spec.live_columns is 'Spec: Stores the current live columns.';
 
-alter table "spec".live_columns owner to spec;
+alter table spec.live_columns owner to spec;

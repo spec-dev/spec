@@ -32,6 +32,7 @@ const constants: StringKeyMap = {
     TABLE_SUBS_CHANNEL: 'spec_data_change_notifications',
     TABLE_SUB_BUFFER_INTERVAL: 100,
     TABLE_SUB_BUFFER_MAX_SIZE: 1000,
+    TABLE_SUB_UPDATED_AT_COL_NAME: 'updated_at',
 
     MAX_UPDATES_BEFORE_BULK_UPDATE_USED: 10,
 }

@@ -1,7 +1,11 @@
 #!/bin/bash
 
-DB_NAME="$1"
 DB_INIT_DIR="./db/init"
+
+if [ -z "$DB_NAME" ]; then
+    echo "Please set your \"DB_NAME\" environment variable and try again."
+    exit 1
+fi
 
 for file in "$DB_INIT_DIR"/*; do
     psql -d "$DB_NAME" -f "${file}"
