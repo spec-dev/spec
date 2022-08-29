@@ -246,6 +246,7 @@ class Spec {
                 events.forEach(event => this._onEvent(event, { forceToBuffer: true }))
             })
         } catch (error) {
+            logger.error(error)
             // TODO: Retry a few times...
         }
 

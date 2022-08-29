@@ -1,10 +1,8 @@
 import { schema } from '..'
 import { EventCursor } from '../../types'
-import { SPEC_SCHEMA_NAME } from '.'
+import { SPEC_SCHEMA_NAME, EVENT_CURSORS_TABLE_NAME } from './names'
 import logger from '../../logger'
 import { unique } from '../../utils/formatters'
-
-export const EVENT_CURSORS_TABLE_NAME = 'event_cursors'
 
 export const eventCursors = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(EVENT_CURSORS_TABLE_NAME)
 

@@ -1,11 +1,9 @@
-import { schema } from '..'
+import { schema, db } from '..'
 import { TableSubCursor } from '../../types'
-import { SPEC_SCHEMA_NAME } from '.'
+import { SPEC_SCHEMA_NAME, TABLE_SUB_CURSORS_TABLE_NAME } from './names'
 import logger from '../../logger'
 import { unique } from '../../utils/formatters'
-import { db } from '..'
-
-export const TABLE_SUB_CURSORS_TABLE_NAME = 'table_sub_cursors'
+import { camelizeKeys } from 'humps'
 
 const tableSubCursors = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(TABLE_SUB_CURSORS_TABLE_NAME)
 
@@ -19,7 +17,7 @@ export async function getTableSubCursorsForPaths(tablePaths: string[]): Promise<
         logger.error(`Error getting table_sub_cursors for table_paths: ${tablePaths.join(', ')}: ${err}`)
         return []
     }
-    return records || []
+    return camelizeKeys(records || [])
 }
 
 export async function upsertTableSubCursor(tablePath: string) {

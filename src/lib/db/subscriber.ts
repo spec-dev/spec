@@ -203,7 +203,7 @@ export class TableSubscriber {
         try {
             recordsUpdatedAfterLastCursor = await db.from(tablePath)
                 .select('*')
-                .where(db.raw(`timezone('UTC', ${constants.TABLE_SUB_UPDATED_AT_COL_NAME}) > ?`, [timestamp]))
+                .where(db.raw(`timezone('UTC', ${constants.TABLE_SUB_UPDATED_AT_COL_NAME}) > ?`, [timestamp.toISOString()]))
         } catch (err) {
             logger.error(`Error finding missed events for table sub cursor for ${tablePath}: ${err}`)
             return
@@ -359,7 +359,7 @@ export class TableSubscriber {
     _getInternalTableLinkDataChanges(tablePath: string, events: TableSubEvent[]): TableLinkDataChanges[] {
         // Get all links where this table is the target.
         const tableLinks = config.getLinksForTable(tablePath)
-        if (!tableLinks.length) return
+        if (!tableLinks.length) return []
 
         // Get names of all live columns in the table.
         const [schema, table] = tablePath.split('.')

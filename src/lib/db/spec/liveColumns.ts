@@ -1,11 +1,9 @@
 import { schema } from '..'
 import { LiveColumn, LiveColumnSeedStatus } from '../../types'
-import { SPEC_SCHEMA_NAME } from '.'
+import { SPEC_SCHEMA_NAME, LIVE_COLUMNS_TABLE_NAME } from './names'
 import logger from '../../logger'
 import { unique } from '../../utils/formatters'
 import { camelizeKeys, decamelizeKeys } from 'humps'
-
-export const LIVE_COLUMNS_TABLE_NAME = 'live_columns'
 
 const liveColumns = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(LIVE_COLUMNS_TABLE_NAME)
 
