@@ -60,6 +60,10 @@ class ApplyDiffsService {
     get defaultFilters(): StringKeyMap {
         return this.liveObject.filterBy || {}
     }
+
+    get linkUniqueByProperties(): string[] {
+        return this.link.uniqueBy || Object.keys(this.linkProperties)
+    }
     
     constructor(diffs: StringKeyMap[], link: LiveObjectLink, liveObject: LiveObject) {
         this.liveObjectDiffs = diffs
@@ -341,10 +345,11 @@ class ApplyDiffsService {
         }
         if (!records.length) return
 
+        const uniqeByProperties = this.linkUniqueByProperties
         const uniqueDiffs = {}
         for (const diff of this.liveObjectDiffs) {
             const uniqueKeyComps = []
-            for (const linkPropertyKey of this.link.uniqueBy) {
+            for (const linkPropertyKey of uniqeByProperties) {
                 const value = diff[linkPropertyKey] || ''
                 uniqueKeyComps.push(value)
             }
@@ -362,7 +367,7 @@ class ApplyDiffsService {
             // Get the diff associated with this record (if exists).
             const uniqueKeyComps = []
             let ignoreRecord = false
-            for (const linkPropertyKey of this.link.uniqueBy) {
+            for (const linkPropertyKey of uniqeByProperties) {
                 const colPath = linkProperties[linkPropertyKey]
                 if (!colPath) {
                     ignoreRecord = true

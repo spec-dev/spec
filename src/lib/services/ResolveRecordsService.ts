@@ -84,6 +84,10 @@ class ResolveRecordsService {
         return this.liveObject.filterBy || {}
     }
 
+    get linkUniqueByProperties(): string[] {
+        return this.link.uniqueBy || Object.keys(this.linkProperties)
+    }
+
     constructor(tablePath: string, liveObject: LiveObject, link: LiveObjectLink, primaryKeyData: StringKeyMap[]) {
         this.tablePath = tablePath
         this.liveObject = liveObject
@@ -304,8 +308,9 @@ class ResolveRecordsService {
 
             const { argsMap, args } = edgeFunction
  
+            const uniqeByProperties = this.linkUniqueByProperties
             let allUniqueByPropertiesAcceptedAsFunctionInput = true
-            for (let propertyKey of this.link.uniqueBy) {
+            for (let propertyKey of uniqeByProperties) {
                 propertyKey = argsMap[propertyKey] || propertyKey
 
                 if (!args.hasOwnProperty(propertyKey)) {
@@ -324,7 +329,7 @@ class ResolveRecordsService {
                 const propertyKey = reverseArgsMap[inputKey] || inputKey
                 const isRequiredInput = args[inputKey]
 
-                if (isRequiredInput && !this.link.uniqueBy.includes(propertyKey)) {
+                if (isRequiredInput && !uniqeByProperties.includes(propertyKey)) {
                     allRequiredInputPropertiesSatisfied = false
                     break
                 }

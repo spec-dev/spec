@@ -308,7 +308,7 @@ class Spec {
                 tablePath,
                 linkProperties: link.linkOn,
                 seedWith: link.seedWith,
-                uniqueBy: link.uniqueBy,
+                uniqueBy: link.uniqueBy || null,
                 seedColNames,
                 seedIfEmpty: link.seedIfEmpty || false,
             })

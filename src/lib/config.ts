@@ -18,6 +18,7 @@ import {
     TableDataSources,
     LiveObjectLink,
     TableLink,
+    ColumnConfig,
 } from './types'
 import { tableSubscriber } from './db/subscriber'
 
@@ -168,10 +169,13 @@ class Config {
 
         const dataSources = {}
         for (const columnName in table) {
-            const source = table[columnName].source
-            if (!source) continue
+            const dataSource = table[columnName]
+            const { object, property } = this._parseDataSourceForColumn(dataSource)
+            if (!object || !property) {
+                logger.error(`Invalid data source for ${tableName}.${columnName}:`, dataSource)
+                continue
+            }
             
-            const { object, property } = source
             const liveObject = this.getLiveObject(object)
             if (!liveObject) continue
 
@@ -183,6 +187,29 @@ class Config {
         }
 
         return dataSources
+    }
+
+    // TODO: Clean this up with recursion.
+    _parseDataSourceForColumn(colDataSource: ColumnConfig | string): StringKeyMap {
+        if (typeof colDataSource === 'string') {
+            const propertyPath = colDataSource.split('.')
+            return propertyPath.length === 2
+                ? { object: propertyPath[0], property: propertyPath[1] }
+                : {}
+        }
+    
+        if (typeof colDataSource === 'object') {
+            const source = colDataSource.source
+            if (typeof source === 'string') {
+                const propertyPath = source.split('.')
+                return propertyPath.length === 2
+                    ? { object: propertyPath[0], property: propertyPath[1] }
+                    : {}
+            }
+            return typeof source === 'object' ? source : {}
+        }
+
+        return {}
     }
 
     getLiveObjectTableDataSources(matchliveObjectId: string, tablePath: string): TableDataSources {
@@ -244,7 +271,7 @@ class Config {
         const link = this.getLink(liveObjectId, tablePath)
         if (!link) return null
 
-        const uniqueBy = link.uniqueBy || []
+        const uniqueBy = link.uniqueBy || Object.keys(link.linkOn) || []
         if (!uniqueBy.length) return null
 
         const { uniqueColGroups } = tablesMeta[tablePath]
@@ -402,7 +429,8 @@ class Config {
 
     _logMissingUniqueConstraint(link: LiveObjectLink) {
         const uniqueByColNames = []
-        for (const property of link.uniqueBy) {
+        const uniqeByProperties = link.uniqueBy || Object.keys(toMap(link.linkOn))
+        for (const property of uniqeByProperties) {
             const colPath = link.linkOn[property]
             if (!colPath) return null
             const [colSchema, colTable, colName] = colPath.split('.')

@@ -12,10 +12,10 @@ export interface ColumnSourceConfig {
 }
 
 export interface ColumnConfig {
-    source: ColumnSourceConfig
+    source: ColumnSourceConfig | string
 }
 
-export type TableConfig = { [key: string]: ColumnConfig }
+export type TableConfig = { [key: string]: ColumnConfig | string }
 
 export type SchemaConfig = { [key: string]: TableConfig }
 
@@ -176,7 +176,7 @@ export interface SeedSpec {
     tablePath: string
     linkProperties: StringMap
     seedWith: string[]
-    uniqueBy: string[]
+    uniqueBy: string[] | null
     seedColNames: string[]
     seedIfEmpty?: boolean
 }

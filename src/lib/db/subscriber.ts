@@ -345,7 +345,7 @@ export class TableSubscriber {
             tablePath: link.table,
             linkProperties: link.linkOn,
             seedWith: link.seedWith,
-            uniqueBy: link.uniqueBy,
+            uniqueBy: link.uniqueBy || null,
             seedColNames: [], // not used with foreign seeds
             seedIfEmpty: link.seedIfEmpty || false,
         }
