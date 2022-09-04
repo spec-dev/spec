@@ -33,7 +33,7 @@ class ApplyDiffsService {
     }
 
     get linkProperties(): StringMap {
-        return toMap(this.link.properties || {})
+        return toMap(this.link.linkOn || {})
     }
 
     get canInsertRecords(): boolean {
@@ -57,6 +57,10 @@ class ApplyDiffsService {
         return uniqueConstaint
     }
 
+    get defaultFilters(): StringKeyMap {
+        return this.liveObject.filterBy || {}
+    }
+    
     constructor(diffs: StringKeyMap[], link: LiveObjectLink, liveObject: LiveObject) {
         this.liveObjectDiffs = diffs
         this.link = link

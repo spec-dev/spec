@@ -44,11 +44,11 @@ class ResolveRecordsService {
     }
 
     get linkProperties(): StringMap {
-        return toMap(this.link.properties)
+        return toMap(this.link.linkOn)
     }
 
     get reverseLinkProperties(): StringMap {
-        return reverseMap(this.link.properties)
+        return reverseMap(this.link.linkOn)
     }
 
     get tableDataSources(): TableDataSources {
@@ -78,6 +78,10 @@ class ResolveRecordsService {
             }
         }
         return new Set(updateableColNames)
+    }
+
+    get defaultFilters(): StringKeyMap {
+        return this.liveObject.filterBy || {}
     }
 
     constructor(tablePath: string, liveObject: LiveObject, link: LiveObjectLink, primaryKeyData: StringKeyMap[]) {
@@ -197,7 +201,7 @@ class ResolveRecordsService {
                 input[inputArg] = value
                 keyComps.push(value)
             }
-            batchFunctionInputs.push(input)
+            batchFunctionInputs.push({ ...this.defaultFilters, ...input })
             const key = keyComps.join(valueSep)
             if (!indexedPkConditions.hasOwnProperty(key)) {
                 indexedPkConditions[key] = []

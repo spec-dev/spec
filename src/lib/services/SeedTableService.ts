@@ -64,6 +64,10 @@ class SeedTableService {
         return uniqueConstaint
     }
 
+    get defaultFilters(): StringKeyMap {
+        return this.liveObject.filterBy || {}
+    }
+
     constructor(seedSpec: SeedSpec, liveObject: LiveObject) {
         this.seedSpec = seedSpec
         this.liveObject = liveObject
@@ -180,7 +184,7 @@ class SeedTableService {
         logger.info(`Seeding ${this.seedTablePath} from scratch...`)
 
         try {
-            await callSpecFunction(this.seedFunction, [], async data => {
+            await callSpecFunction(this.seedFunction, this.defaultFilters, async data => {
                 await this._handleDataOnSeedFromScratch(data as StringKeyMap[])
             })
         } catch (err) {
@@ -225,7 +229,7 @@ class SeedTableService {
                     input[inputArg] = value
                     keyComps.push(value)
                 }
-                batchFunctionInputs.push(input)
+                batchFunctionInputs.push({ ...this.defaultFilters, ...input})
                 const key = keyComps.join(valueSep)
                 if (!indexedPkConditions.hasOwnProperty(key)) {
                     indexedPkConditions[key] = []
@@ -492,7 +496,7 @@ class SeedTableService {
                 const recordColKey = (colTablePath === primaryTablePath) ? colName : colPath
                 input[inputArg] = record[recordColKey]
             }
-            inputs.push(input)
+            inputs.push({ ...this.defaultFilters, ...input})
         }
         return inputs
     }

@@ -9,7 +9,7 @@ type onDataCallbackType = (data: StringKeyMap | StringKeyMap[]) => Promise<void>
 const isStreamingResp = (resp: Response): boolean => resp.headers?.get('Transfer-Encoding') === 'chunked'
 
 export async function callSpecFunction(
-    edgeFunction: EdgeFunction, 
+    edgeFunction: EdgeFunction,
     payload: StringKeyMap | StringKeyMap[],
     onData: onDataCallbackType,
 ) {

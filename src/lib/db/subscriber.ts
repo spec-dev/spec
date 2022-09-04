@@ -343,7 +343,7 @@ export class TableSubscriber {
         const seedSpec = {
             liveObjectId,
             tablePath: link.table,
-            linkProperties: link.properties,
+            linkProperties: link.linkOn,
             seedWith: link.seedWith,
             uniqueBy: link.uniqueBy,
             seedColNames: [], // not used with foreign seeds
@@ -367,7 +367,7 @@ export class TableSubscriber {
 
         const internalLinksToProcess = []
         for (const tableLink of tableLinks) {
-            const linkColPaths = Object.values(tableLink.link.properties)
+            const linkColPaths = Object.values(tableLink.link.linkOn)
 
             const eventsAffectingLinkedCols = []
             for (const event of events) {
@@ -438,7 +438,7 @@ export class TableSubscriber {
                 )))
     
                 for (const seedWithProperty of depTableLink.link.seedWith) {
-                    const seedWithColPath = depTableLink.link.properties[seedWithProperty]
+                    const seedWithColPath = depTableLink.link.linkOn[seedWithProperty]
                     if (!seedWithColPath) continue
                     if (colPathsWithValues.has(seedWithColPath)) {
                         insertsCausingDownstreamSeeds.push(event)

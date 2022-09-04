@@ -11,14 +11,11 @@ class ApplyEventService {
 
     liveObject: LiveObject
 
-    linksToApplyDiffTo: LiveObjectLink[] = []
+    liveObjectDiffs: StringKeyMap[] = []
+
+    linksToApplyDiffsTo: LiveObjectLink[] = []
 
     ops: Op[] = []
-
-    get liveObjectDiffs(): StringKeyMap[] {
-        const data = this.event.data
-        return Array.isArray(data) ? data : [data]
-    }
 
     get links(): LiveObjectLink[] {
         return this.liveObject.links || []
@@ -32,24 +29,24 @@ class ApplyEventService {
 
     async perform() {
         logger.info('Applying event...', this.event)
+        this._filterLiveObjectDiffs()
         await this.getOps()
         await this.runOps()
     }
 
     async getOps(): Promise<Op[]> {
-        // Get all links this diff applies to (i.e. the links 
-        // who have all of their property keys included in this diff).
-        this.linksToApplyDiffTo = this._getLinksToApplyDiffTo()
-        if (!this.linksToApplyDiffTo.length) {
+        // Get all links these diffs apply to (i.e. the links who have 
+        // all of their property keys included in the diff structure).
+        this.linksToApplyDiffsTo = this._getLinksToApplyDiffTo()
+        if (!this.linksToApplyDiffsTo.length) {
             logger.info('Live object diff didn\'t satisfy any configured links')
             return this.ops
         }
 
         // Get ops to apply the diffs for each link.
-        const diffs = this.liveObjectDiffs
         let promises = []
-        for (let link of this.linksToApplyDiffTo) {
-            promises.push(new ApplyDiffsService(diffs, link, this.liveObject).getOps())
+        for (let link of this.linksToApplyDiffsTo) {
+            promises.push(new ApplyDiffsService(this.liveObjectDiffs, link, this.liveObject).getOps())
         }
 
         this.ops = (await Promise.all(promises)).flat()
@@ -63,25 +60,63 @@ class ApplyEventService {
         })
     }
 
+    _filterLiveObjectDiffs() {
+        const data = this.event.data
+        const allDiffs = Array.isArray(data) ? data : [data]
+
+        const liveObjectFilters = this.liveObject.filterBy || {}
+        if (!Object.keys(liveObjectFilters).length) {
+            this.liveObjectDiffs = allDiffs
+            return
+        }
+
+        const diffsToProcess = []
+        for (const diff of allDiffs) {
+            let processDiff = true
+
+            for (const property in liveObjectFilters) {
+                if (!diff.hasOwnProperty(property)) {
+                    processDiff = false
+                    break
+                }
+
+                const acceptedValue = liveObjectFilters[property]
+                const acceptedValueIsArray = Array.isArray(acceptedValue)
+                const givenValue = diff[property]
+
+                if ((acceptedValueIsArray && !acceptedValue.includes(givenValue)) || 
+                    (!acceptedValueIsArray && givenValue !== acceptedValue)) {
+                    processDiff = false
+                    break
+                }
+            }
+            processDiff && diffsToProcess.push(diff)
+        }
+        
+        this.liveObjectDiffs = diffsToProcess
+    }
+
     _getLinksToApplyDiffTo(): LiveObjectLink[] {
-        const linksToApplyDiffTo = []
-        const liveObjectDiffs = this.liveObjectDiffs
+        const linksToApplyDiffsTo = []
+
         for (const link of this.links) {
-            let allUniquePropertiesIncludedInDiff = true
-            for (const property in link.properties) {
-                for (const diff of liveObjectDiffs) {
+            let allLinkPropertiesIncludedInDiff = true
+
+            for (const property in link.linkOn) {
+                for (const diff of this.liveObjectDiffs) {
                     if (!diff.hasOwnProperty(property)) {
-                        allUniquePropertiesIncludedInDiff = false
+                        allLinkPropertiesIncludedInDiff = false
                         break
                     }
                 }
-                if (!allUniquePropertiesIncludedInDiff) break
+                if (!allLinkPropertiesIncludedInDiff) break
             }
-            if (allUniquePropertiesIncludedInDiff) {
-                linksToApplyDiffTo.push(link)
+            if (allLinkPropertiesIncludedInDiff) {
+                linksToApplyDiffsTo.push(link)
             }
         }
-        return linksToApplyDiffTo
+
+        return linksToApplyDiffsTo
     }    
 }
 

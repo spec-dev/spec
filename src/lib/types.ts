@@ -23,6 +23,7 @@ export type TablesConfig = { [key: string]: SchemaConfig }
 
 export interface LiveObjectConfig {
     id: string
+    filterBy?: StringKeyMap
     links: LiveObjectLink[]
 }
 
@@ -61,9 +62,9 @@ export interface EdgeFunction {
 
 export interface LiveObjectLink {
     table: string
-    properties: StringMap
+    linkOn: StringMap
     seedWith: string[]
-    uniqueBy: string[]
+    uniqueBy?: string[]
     seedIfEmpty?: boolean
     eventsCanInsert?: boolean
 }
@@ -71,6 +72,7 @@ export interface LiveObjectLink {
 export interface LiveObject {
     id: string // i.e. "compound.CompoundMarketAPY@0.0.1"
     configName: string // i.e. "CompoundMarketAPY"
+    filterBy?: StringKeyMap
     links: LiveObjectLink[]
     events: Event[]
     edgeFunctions: EdgeFunction[]

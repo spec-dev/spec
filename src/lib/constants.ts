@@ -8,7 +8,7 @@ const constants: StringKeyMap = {
 
     // TODO
     EVENTS_HOSTNAME: ev('EVENTS_HOSTNAME', 'events.spec.dev'),
-    EVENTS_PORT: Number(ev('EVENTS_PORT', 8888)),
+    EVENTS_PORT: Number(ev('EVENTS_PORT', 443)),
     SEEN_EVENTS_CACHE_SIZE: Number(ev('SEEN_EVENTS_CACHE_SIZE', 300)),
 
     // TODO
