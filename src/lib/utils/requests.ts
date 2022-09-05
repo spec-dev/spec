@@ -61,11 +61,9 @@ async function handleStreamingResp(resp: Response, onData: onDataCallbackType) {
         throw `Error iterating response stream on chunk ${chunk.toString()}: ${err?.message || err}`
     }
     
-    // Trailing results in partial batch.
-    if (batch.length) {
-        promises.push(onData(batch))
-    }
-
+    // Trailing results in partial batch (or no results).
+    promises.push(onData(batch))
+    
     await Promise.all(promises)
 }
 
