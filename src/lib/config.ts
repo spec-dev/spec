@@ -429,8 +429,8 @@ class Config {
 
     _logMissingUniqueConstraint(link: LiveObjectLink) {
         const uniqueByColNames = []
-        const uniqeByProperties = link.uniqueBy || Object.keys(toMap(link.linkOn))
-        for (const property of uniqeByProperties) {
+        const uniqueByProperties = link.uniqueBy || Object.keys(toMap(link.linkOn))
+        for (const property of uniqueByProperties) {
             const colPath = link.linkOn[property]
             if (!colPath) return null
             const [colSchema, colTable, colName] = colPath.split('.')

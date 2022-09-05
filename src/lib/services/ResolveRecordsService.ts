@@ -308,9 +308,9 @@ class ResolveRecordsService {
 
             const { argsMap, args } = edgeFunction
  
-            const uniqeByProperties = this.linkUniqueByProperties
+            const uniqueByProperties = this.linkUniqueByProperties
             let allUniqueByPropertiesAcceptedAsFunctionInput = true
-            for (let propertyKey of uniqeByProperties) {
+            for (let propertyKey of uniqueByProperties) {
                 propertyKey = argsMap[propertyKey] || propertyKey
 
                 if (!args.hasOwnProperty(propertyKey)) {
@@ -329,7 +329,7 @@ class ResolveRecordsService {
                 const propertyKey = reverseArgsMap[inputKey] || inputKey
                 const isRequiredInput = args[inputKey]
 
-                if (isRequiredInput && !uniqeByProperties.includes(propertyKey)) {
+                if (isRequiredInput && !uniqueByProperties.includes(propertyKey)) {
                     allRequiredInputPropertiesSatisfied = false
                     break
                 }

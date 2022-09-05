@@ -345,11 +345,11 @@ class ApplyDiffsService {
         }
         if (!records.length) return
 
-        const uniqeByProperties = this.linkUniqueByProperties
+        const uniqueByProperties = this.linkUniqueByProperties
         const uniqueDiffs = {}
         for (const diff of this.liveObjectDiffs) {
             const uniqueKeyComps = []
-            for (const linkPropertyKey of uniqeByProperties) {
+            for (const linkPropertyKey of uniqueByProperties) {
                 const value = diff[linkPropertyKey] || ''
                 uniqueKeyComps.push(value)
             }
@@ -367,7 +367,7 @@ class ApplyDiffsService {
             // Get the diff associated with this record (if exists).
             const uniqueKeyComps = []
             let ignoreRecord = false
-            for (const linkPropertyKey of uniqeByProperties) {
+            for (const linkPropertyKey of uniqueByProperties) {
                 const colPath = linkProperties[linkPropertyKey]
                 if (!colPath) {
                     ignoreRecord = true
