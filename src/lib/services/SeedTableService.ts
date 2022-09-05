@@ -384,7 +384,7 @@ class SeedTableService {
             // Find and set the reference key for the foreign table.
             const uniqueInputRecordKey = inputPropertyKeys.map(propertyKey => liveObjectData[propertyKey]).join(valueSep)
             if (!referenceKeyValues.hasOwnProperty(uniqueInputRecordKey)) {
-                logger.error(`Could not find reference key on foreign table ${foreignTablePath} for value ${uniqueInputRecordKey}`)
+                logger.warn(`Could not find reference key on foreign table ${foreignTablePath} for value ${uniqueInputRecordKey}`)
                 continue
             }
             const referenceKeyValue = referenceKeyValues[uniqueInputRecordKey]
@@ -440,7 +440,7 @@ class SeedTableService {
             const liveObjectToPkConditionsKey = inputPropertyKeys.map(k => liveObjectData[k]).join(valueSep)
             const primaryKeyConditions = indexedPkConditions[liveObjectToPkConditionsKey] || []
             if (!primaryKeyConditions?.length) {
-                logger.error(`Could not find primary keys on ${this.seedTablePath} for value ${liveObjectToPkConditionsKey}`)
+                logger.warn(`Could not find primary keys on ${this.seedTablePath} for value ${liveObjectToPkConditionsKey}`)
                 continue
             }
 
@@ -638,6 +638,7 @@ class SeedTableService {
     _findRequiredArgColumns() {
         const { argsMap, args } = this.seedFunction
         const reverseArgsMap = reverseMap(argsMap)
+        const seedWith = new Set(this.seedSpec.seedWith || [])
 
         const requiredArgColPaths = []
         const colPathToFunctionInputArg = {}
@@ -645,7 +646,7 @@ class SeedTableService {
             const propertyKey = reverseArgsMap[inputKey] || inputKey
             const isRequiredInput = args[inputKey]
 
-            if (isRequiredInput) {
+            if (isRequiredInput || seedWith.has(propertyKey)) {
                 const colPath = this.seedSpec.linkProperties[propertyKey]
                 requiredArgColPaths.push(colPath)
                 colPathToFunctionInputArg[colPath] = inputKey
