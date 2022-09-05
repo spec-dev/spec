@@ -254,11 +254,12 @@ export async function getColTypes(
     )
     let bindings = [schema, table]
     if (colNames?.length) {
-        query += `AND column_name in (${colNames.map(c => '?').join(', ')})`
-        bindings = [...bindings, ...colNames]
+        query += ` AND column_name in (${colNames.map(c => '?').join(', ')})`
+        bindings.push(...colNames)
     }
 
     const { rows } = await db.raw(query, bindings)
+
     if (!groupNumericTypes) {
         return rows || []
     }
