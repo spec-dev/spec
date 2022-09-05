@@ -4,7 +4,7 @@ import { StringKeyMap } from './types'
 
 const constants: StringKeyMap = {
     // TODO
-    SPEC_CONFIG_DIR: path.resolve(ev('SPEC_CONFIG_DIR', '/app/.spec')),
+    SPEC_CONFIG_DIR: path.resolve(ev('SPEC_CONFIG_DIR', '.spec')),
 
     // TODO
     EVENTS_HOSTNAME: ev('EVENTS_HOSTNAME', 'events.spec.dev'),
