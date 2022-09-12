@@ -5,6 +5,8 @@ import { StringKeyMap } from './types'
 const constants: StringKeyMap = {
     // TODO
     SPEC_CONFIG_DIR: path.resolve(ev('SPEC_CONFIG_DIR', '.spec')),
+    CONNECTION_CONFIG_FILE_NAME: 'connect.toml',
+    PROJECT_CONFIG_FILE_NAME: 'project.toml',
 
     // TODO
     EVENTS_HOSTNAME: ev('EVENTS_HOSTNAME', 'events.spec.dev'),
@@ -37,6 +39,9 @@ const constants: StringKeyMap = {
     MAX_UPDATES_BEFORE_BULK_UPDATE_USED: 10,
 }
 
-constants.PROJECT_CONFIG_PATH = path.join(constants.SPEC_CONFIG_DIR, 'project.toml')
+constants.PROJECT_CONFIG_PATH = path.join(
+    constants.SPEC_CONFIG_DIR, 
+    constants.PROJECT_CONFIG_FILE_NAME,
+)
 
 export default constants

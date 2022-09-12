@@ -9,6 +9,7 @@ import { db } from '../db'
 import { QueryError } from '../errors'
 import constants from '../constants'
 import { tablesMeta, getRel } from '../db/tablesMeta'
+import chalk from 'chalk'
 
 const valueSep = '__:__'
 
@@ -25,6 +26,8 @@ class SeedTableService {
     requiredArgColPaths: string[] = []
 
     colPathToFunctionInputArg: { [key: string]: string } = {}
+
+    seedCount: number = 0
 
     seedStrategy: () => void | null
 
@@ -262,7 +265,7 @@ class SeedTableService {
     }
 
     async _seedWithForeignTable(foreignTablePath: string, inputColNames: string[], inputRecords?: StringKeyMap[]) {
-        logger.info(`Seeding ${this.seedTablePath} with foreign table ${foreignTablePath}...`)
+        logger.info(chalk.cyanBright(`Seeding ${this.seedTablePath} with foreign table ${foreignTablePath}...`))
 
         // Get seed table -> foreign table relationship.
         const rel = getRel(this.seedTablePath, foreignTablePath)
@@ -275,6 +278,7 @@ class SeedTableService {
 
         // Start seeding with batches of input records.
         let offset = 0
+        let t0 = null
         while (true) {
             // Get batch of input records from the foreign table.
             const batchInputRecords = inputRecords || (await this._getInputRecordsBatch(
@@ -311,6 +315,8 @@ class SeedTableService {
                 referenceKeyValues,
             )
 
+            t0 = t0 || performance.now()
+
             // Call spec function and handle response data.
             try {
                 await callSpecFunction(this.seedFunction, batchFunctionInputs, onFunctionRespData)
@@ -320,7 +326,14 @@ class SeedTableService {
                 break
             }
 
-            if (isLastBatch) break
+            if (isLastBatch) {
+                const tf = performance.now()
+                const seconds = Number(((tf - t0) / 1000).toFixed(2))
+                const rate = Math.round(this.seedCount / seconds)
+                logger.info(chalk.cyanBright('Done.'))
+                logger.info(chalk.cyanBright(`Upserted ${this.seedCount} records in ${seconds} seconds (${rate} records/sec)`))
+                break
+            }
         }
     }
 
@@ -366,7 +379,8 @@ class SeedTableService {
         foreignTablePath: string,
         referenceKeyValues: StringKeyMap,
     ) {
-        logger.info(`Upserting batch of length ${batch.length}...`)
+        this.seedCount += batch.length
+        logger.info(chalk.cyan(`  ${this.seedCount.toLocaleString('en-US')}`))
 
         const tableDataSources = this.tableDataSources
         const upsertRecords = []

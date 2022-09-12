@@ -62,7 +62,7 @@ export interface EdgeFunction {
 
 export interface LiveObjectLink {
     table: string
-    linkOn: StringMap
+    inputs: StringMap
     seedWith: string[]
     uniqueBy?: string[]
     seedIfEmpty?: boolean

@@ -295,7 +295,7 @@ class Spec {
             const seedColNames = uniqueLiveObjectTablePaths[uniqueKey]
             const [liveObjectId, tablePath] = uniqueKey.split(':')
             const link = config.getLink(liveObjectId, tablePath)
-            if (!link || !link.linkOn) {
+            if (!link || !link.inputs) {
                 logger.error(
                     `No link properties found for liveObjectId: ${liveObjectId}, 
                     tablePath: ${tablePath}...something's wrong.`
@@ -306,7 +306,7 @@ class Spec {
             seedSpecs.push({
                 liveObjectId,
                 tablePath,
-                linkProperties: link.linkOn,
+                linkProperties: link.inputs,
                 seedWith: link.seedWith,
                 uniqueBy: link.uniqueBy || null,
                 seedColNames,

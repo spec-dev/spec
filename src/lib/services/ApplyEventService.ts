@@ -4,6 +4,7 @@ import ApplyDiffsService from './ApplyDiffsService'
 import logger from '../logger'
 import { db } from '../db'
 import RunOpService from './RunOpService'
+import chalk from 'chalk'
 
 class ApplyEventService {
 
@@ -28,7 +29,7 @@ class ApplyEventService {
     }
 
     async perform() {
-        logger.info('Applying event...', this.event)
+        logger.info(chalk.green(`[${this.event.name}] Processing event...`))
         this._filterLiveObjectDiffs()
         await this.getOps()
         await this.runOps()
@@ -102,7 +103,7 @@ class ApplyEventService {
         for (const link of this.links) {
             let allLinkPropertiesIncludedInDiff = true
 
-            for (const property in link.linkOn) {
+            for (const property in link.inputs) {
                 for (const diff of this.liveObjectDiffs) {
                     if (!diff.hasOwnProperty(property)) {
                         allLinkPropertiesIncludedInDiff = false

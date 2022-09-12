@@ -98,7 +98,7 @@ class Config {
                 if (link.table === tablePath) {
                     return {
                         ...link,
-                        linkOn: toMap(link.linkOn),
+                        inputs: toMap(link.inputs),
                     }
                 }
             }
@@ -134,7 +134,7 @@ class Config {
 
                 let allSeedColsOnTable = true
                 for (const seedProperty of link.seedWith) {
-                    const seedColPath = link.linkOn[seedProperty]
+                    const seedColPath = link.inputs[seedProperty]
                     const [seedColSchema, seedColTable, _] = seedColPath.split('.')
                     const seedColTablePath = [seedColSchema, seedColTable].join('.')    
 
@@ -238,7 +238,7 @@ class Config {
             for (const link of obj.links) {
                 tablePaths.add(link.table)
 
-                for (const colPath of Object.values(link.linkOn)) {
+                for (const colPath of Object.values(link.inputs)) {
                     const [schemaName, tableName, colName] = colPath.split('.')
                     const colTablePath = [schemaName, tableName].join('.')
                     tablePaths.add(colTablePath)
@@ -271,7 +271,7 @@ class Config {
         const link = this.getLink(liveObjectId, tablePath)
         if (!link) return null
 
-        const uniqueBy = link.uniqueBy || Object.keys(link.linkOn) || []
+        const uniqueBy = link.uniqueBy || Object.keys(link.inputs) || []
         if (!uniqueBy.length) return null
 
         const { uniqueColGroups } = tablesMeta[tablePath]
@@ -280,7 +280,7 @@ class Config {
         // Resolve uniqueBy properties to their respective column names.
         const uniqueByColNames = []
         for (const property of uniqueBy) {
-            const colPath = link.linkOn[property]
+            const colPath = link.inputs[property]
             if (!colPath) return null
             const [colSchema, colTable, colName] = colPath.split('.')
             const colTablePath = [colSchema, colTable].join('.')
@@ -429,9 +429,9 @@ class Config {
 
     _logMissingUniqueConstraint(link: LiveObjectLink) {
         const uniqueByColNames = []
-        const uniqueByProperties = link.uniqueBy || Object.keys(toMap(link.linkOn))
+        const uniqueByProperties = link.uniqueBy || Object.keys(toMap(link.inputs))
         for (const property of uniqueByProperties) {
-            const colPath = link.linkOn[property]
+            const colPath = link.inputs[property]
             if (!colPath) return null
             const [colSchema, colTable, colName] = colPath.split('.')
             const colTablePath = [colSchema, colTable].join('.')

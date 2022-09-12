@@ -237,7 +237,7 @@ export class TableSubscriber {
         const events = [...tableSub.buffer]
         this.tableSubs[tablePath].buffer = []
 
-        logger.info(`Processing ${events.length} data-change event(s) on ${tablePath}...`)
+        // logger.info(`Processing ${events.length} data-change event(s) on ${tablePath}...`)
 
         // Mark new timestamp for table sub cursor.
         upsertTableSubCursor(tablePath)
@@ -343,7 +343,7 @@ export class TableSubscriber {
         const seedSpec = {
             liveObjectId,
             tablePath: link.table,
-            linkProperties: link.linkOn,
+            linkProperties: link.inputs,
             seedWith: link.seedWith,
             uniqueBy: link.uniqueBy || null,
             seedColNames: [], // not used with foreign seeds
@@ -367,7 +367,7 @@ export class TableSubscriber {
 
         const internalLinksToProcess = []
         for (const tableLink of tableLinks) {
-            const linkColPaths = Object.values(tableLink.link.linkOn)
+            const linkColPaths = Object.values(tableLink.link.inputs)
 
             const eventsAffectingLinkedCols = []
             for (const event of events) {
@@ -438,7 +438,7 @@ export class TableSubscriber {
                 )))
     
                 for (const seedWithProperty of depTableLink.link.seedWith) {
-                    const seedWithColPath = depTableLink.link.linkOn[seedWithProperty]
+                    const seedWithColPath = depTableLink.link.inputs[seedWithProperty]
                     if (!seedWithColPath) continue
                     if (colPathsWithValues.has(seedWithColPath)) {
                         insertsCausingDownstreamSeeds.push(event)
