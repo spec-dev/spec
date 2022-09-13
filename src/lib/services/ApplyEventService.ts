@@ -29,7 +29,7 @@ class ApplyEventService {
     }
 
     async perform() {
-        logger.info(chalk.green(`[${this.event.name}] Processing event...`))
+        logger.info(`[${this.event.name}] Processing event...`)
         this._filterLiveObjectDiffs()
         await this.getOps()
         await this.runOps()

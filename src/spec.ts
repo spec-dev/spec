@@ -363,7 +363,9 @@ class Spec {
 
         // Start listening to events from this live object now.
         this.liveObjectsToIgnoreEventsFrom.delete(liveObjectId)
-        this._subscribeToLiveObjectEvents()
+        ;(this._subscribeToLiveObjectEvents() || []).forEach(newEventName => {
+            this.eventSubs[newEventName].shouldBuffer = false
+        })
     }
 
     async _processAllBufferedEvents() {
