@@ -15,14 +15,16 @@ const connectionConfig = {
 export const db = knex({
     client: 'pg',
     connection: connectionConfig,
+    pool: { min: 0, max: constants.MAX_POOL_SIZE },
 })
 
 // Create connection pool.
-export const pool = new Pool(connectionConfig)
+export const pool = new Pool({
+    ...connectionConfig,
+    min: 0,
+    max: 10, // leave
+})
 pool.on('error', err => logger.error('pg client error', err))
-pool.on('drain', (...args) => logger.info('pg client drain', ...args))
-pool.on('notice', (...args) => logger.info('pg client notice', ...args))
-pool.on('notification', (...args) => logger.info('pg client notification', ...args))
 
 export const pgListener = createSubscriber(connectionConfig)
 

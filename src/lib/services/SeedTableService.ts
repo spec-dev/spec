@@ -331,7 +331,7 @@ class SeedTableService {
                 const seconds = Number(((tf - t0) / 1000).toFixed(2))
                 const rate = Math.round(this.seedCount / seconds)
                 logger.info(chalk.cyanBright('Done.'))
-                logger.info(chalk.cyanBright(`Upserted ${this.seedCount} records in ${seconds} seconds (${rate} records/sec)`))
+                logger.info(chalk.cyanBright(`Upserted ${this.seedCount.toLocaleString('en-US')} records in ${seconds} seconds (${rate.toLocaleString('en-US')} rows/s)`))
                 break
             }
         }
@@ -380,7 +380,7 @@ class SeedTableService {
         referenceKeyValues: StringKeyMap,
     ) {
         this.seedCount += batch.length
-        logger.info(chalk.cyan(`  ${this.seedCount.toLocaleString('en-US')}`))
+        logger.info(chalk.cyanBright(`  ${this.seedCount.toLocaleString('en-US')}`))
 
         const tableDataSources = this.tableDataSources
         const upsertRecords = []
@@ -405,6 +405,7 @@ class SeedTableService {
             upsertRecord[rel.foreignKey] = referenceKeyValue
             upsertRecords.push(upsertRecord)
         }
+        if (!upsertRecords.length) return
 
         const upsertBatchOp = {
             type: OpType.Insert,
@@ -481,6 +482,7 @@ class SeedTableService {
 
         try {
             if (useBulkUpdate) {
+                if (!updates.length) return
                 const op = {
                     type: OpType.Update,
                     schema: this.seedSchemaName,
@@ -490,6 +492,7 @@ class SeedTableService {
                 }
                 await new RunOpService(op).perform()
             } else {
+                if (!updateOps.length) return
                 await db.transaction(async tx => {
                     await Promise.all(updateOps.map(op => new RunOpService(op, tx).perform()))
                 })    

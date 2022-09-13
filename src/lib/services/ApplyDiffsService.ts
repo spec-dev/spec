@@ -188,6 +188,7 @@ class ApplyDiffsService {
 
             upsertRecords.push(upsertRecord)
         }
+        if (!upsertRecords.length) return
 
         // Perform all upserts in a single, bulk insert operation.
         this.ops = [{
@@ -404,6 +405,7 @@ class ApplyDiffsService {
             updates.push(recordUpdates)
             where.push(pkConditions)
         }
+        if (!updates.length) return
 
         this.ops.push({
             type: OpType.Update,

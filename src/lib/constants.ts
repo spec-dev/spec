@@ -22,6 +22,7 @@ const constants: StringKeyMap = {
     DB_USER: ev('DB_USER', 'spec'),
     DB_PASSWORD: ev('DB_PASSWORD'),
     DB_NAME: ev('DB_NAME'),
+    MAX_POOL_SIZE: ev('MAX_POOL_SIZE', 50),
 
     // TODO
     SEED_INPUT_BATCH_SIZE: Number(ev('SEED_INPUT_BATCH_SIZE', 1000)),

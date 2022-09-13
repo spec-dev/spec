@@ -51,11 +51,13 @@ class ApplyEventService {
         }
 
         this.ops = (await Promise.all(promises)).flat()
+
         return this.ops
     }
 
     async runOps() {
         if (!this.ops.length) return
+        logger.info(`Event generated ${this.ops.length} ops.`)
         await db.transaction(async tx => {
             await Promise.all(this.ops.map(op => new RunOpService(op, tx).perform()))
         })
