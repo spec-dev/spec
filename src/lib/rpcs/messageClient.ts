@@ -30,6 +30,7 @@ export class MessageClient {
         this.client = createEventClient({
             hostname: constants.EVENTS_HOSTNAME,
             port: constants.EVENTS_PORT,
+            signedAuthToken: constants.PROJECT_API_KEY,
             onConnect: this.onConnect,
         })
     }

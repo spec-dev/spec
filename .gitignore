@@ -19,3 +19,6 @@ pids
 
 # Local config
 .spec/
+
+bin/build
+bin/dlogin

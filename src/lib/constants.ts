@@ -5,8 +5,11 @@ import { StringKeyMap } from './types'
 const constants: StringKeyMap = {
     // TODO
     SPEC_CONFIG_DIR: path.resolve(ev('SPEC_CONFIG_DIR', '.spec')),
-    CONNECTION_CONFIG_FILE_NAME: 'connect.toml',
     PROJECT_CONFIG_FILE_NAME: 'project.toml',
+
+    // Project credentials.
+    PROJECT_API_KEY: ev('PROJECT_API_KEY'),
+    PROJECT_ADMIN_KEY: ev('PROJECT_ADMIN_KEY'),
 
     // TODO
     EVENTS_HOSTNAME: ev('EVENTS_HOSTNAME', 'events.spec.dev'),
