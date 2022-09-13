@@ -32,6 +32,8 @@ class Config {
 
     checkTablesTimer: any = null
 
+    fileContents: string = ''
+
     onUpdate: () => void
 
     get projectId(): string {
@@ -326,6 +328,10 @@ class Config {
     watch() {
         // Watch config file for any changes.
         fs.watch(constants.PROJECT_CONFIG_PATH, () => {
+            // Ensure the file contents actually changed.
+            const newContents = fs.readFileSync(constants.PROJECT_CONFIG_PATH, 'utf-8').toString()
+            if (newContents === this.fileContents) return
+            this.fileContents = newContents
             logger.info('New config file detected.')
             this.onUpdate()
         })
@@ -455,9 +461,9 @@ class Config {
 
     _readAndParseFile() {
         try {
-            this.config = toml.parse(
-                fs.readFileSync(constants.PROJECT_CONFIG_PATH, 'utf-8')
-            ) as unknown as ProjectConfig
+            const file = fs.readFileSync(constants.PROJECT_CONFIG_PATH, 'utf-8')
+            this.config = toml.parse(file) as unknown as ProjectConfig
+            this.fileContents = file.toString()
         } catch (err) {
             throw new ConfigError(err)
         }
