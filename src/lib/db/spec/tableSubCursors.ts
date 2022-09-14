@@ -22,13 +22,15 @@ export async function getTableSubCursorsForPaths(tablePaths: string[]): Promise<
 
 export async function upsertTableSubCursor(tablePath: string) {
     try {
-        await tableSubCursors()
-            .insert({
-                table_path: tablePath,
-                timestamp: db.raw(`CURRENT_TIMESTAMP at time zone 'UTC'`),
-            })
-            .onConflict('table_path')
-            .merge()
+        await db.transaction(async tx => {
+            await tableSubCursors(tx)
+                .insert({
+                    table_path: tablePath,
+                    timestamp: db.raw(`CURRENT_TIMESTAMP at time zone 'UTC'`),
+                })
+                .onConflict('table_path')
+                .merge()
+        })
     } catch (err) {
         logger.error(`Error upserting table_sub_cursors: ${err}`)
     }

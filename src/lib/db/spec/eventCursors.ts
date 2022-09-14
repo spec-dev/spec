@@ -1,4 +1,4 @@
-import { schema } from '..'
+import { schema, db } from '..'
 import { EventCursor } from '../../types'
 import { SPEC_SCHEMA_NAME, EVENT_CURSORS_TABLE_NAME } from './names'
 import logger from '../../logger'
@@ -24,12 +24,14 @@ export async function getEventCursorsForNames(names: string[]): Promise<EventCur
     })) as EventCursor[]
 }
 
-export async function saveEventCursors(records: EventCursor[]) {
+export async function saveEventCursors(records: EventCursor[]) {    
     try {
-        await eventCursors()
-            .insert(records)
-            .onConflict('name')
-            .merge()
+        await db.transaction(async tx => {
+            await eventCursors(tx)
+                .insert(records)
+                .onConflict('name')
+                .merge()
+        })
     } catch (err) {
         logger.error(`Error saving event cursors: ${err}`)
     }

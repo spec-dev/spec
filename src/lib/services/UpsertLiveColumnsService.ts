@@ -36,7 +36,7 @@ class UpsertLiveColumnsService {
 
         const columnPaths = this.querySpecs.map(qs => qs.columnPath)
 
-        // Get all existing live columns by given array of column paths.
+        // Get all existing live columns for the given array of column paths.
         try {
             this.prevLiveColumns = await getLiveColumnsForColPaths(columnPaths)
         } catch (err) {

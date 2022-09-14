@@ -85,7 +85,7 @@ class Spec {
             return
         }
         
-        // Upsert live columns listed in the config and start seeding the new ones.
+        // Upsert live columns listed in the config and start seeding with new ones.
         await this._upsertAndSeedLiveColumns()
 
         // Subscribe to all events powering the live objects.
@@ -121,12 +121,18 @@ class Spec {
             return
         }
 
+        // Ensure at least one live object will process this event.
+        const liveObjectIdsThatWillProcessEvent = (sub.liveObjectIds || []).filter(
+            liveObjectId => !this.liveObjectsToIgnoreEventsFrom.has(liveObjectId),
+        )
+        if (!liveObjectIdsThatWillProcessEvent.length) return
+
         // Prevent duplicates.
-        if (this._wasEventSeen(event.id)) {
+        if (this._wasEventSeenByAllDependentLiveObjects(event.id, liveObjectIdsThatWillProcessEvent)) {
             logger.warn(`Duplicate event seen - ${event.id} - skipping.`)
             return
         }
-        this._registerEventAsSeen(event)
+        this._registerEventAsSeen(event, liveObjectIdsThatWillProcessEvent)
         
         // Buffer new event if still resolving previous missed events.
         if (sub.shouldBuffer || options?.forceToBuffer) {
@@ -136,7 +142,6 @@ class Spec {
 
         this._processEvent(event)
 
-        // TODO: Consider not running this until _processEvent executes without failure.
         this._updateEventCursor(event)
     }
 
@@ -150,6 +155,8 @@ class Spec {
 
         // Apply the event to each live object that depends on it.
         for (const liveObjectId of sub.liveObjectIds || []) {
+            if (this.liveObjectsToIgnoreEventsFrom.has(liveObjectId)) continue
+
             const liveObject = this.liveObjects[liveObjectId]
             if (!liveObject) continue
 
@@ -191,24 +198,24 @@ class Spec {
 
         // Subscribe to new events.
         for (const newEventName in liveObjectsByEvent) {
-            if (!this.eventSubs.hasOwnProperty(newEventName)) {
-                // Register event callback.
-                messageClient.on(
-                    newEventName,
-                    (event: SpecEvent<StringKeyMap | StringKeyMap[]>) => this._onEvent(event),
-                )
+            if (this.eventSubs.hasOwnProperty(newEventName)) continue
+            
+            // Register event callback.
+            messageClient.on(
+                newEventName,
+                (event: SpecEvent<StringKeyMap | StringKeyMap[]>) => this._onEvent(event),
+            )
 
-                // Register sub.
-                this.eventSubs[newEventName] = {
-                    name: newEventName,
-                    liveObjectIds: liveObjectsByEvent[newEventName],
-                    cursor: null,
-                    cursorChanged: false,
-                    shouldBuffer: true,
-                    buffer: [],
-                }
-                newEventNames.push(newEventName)
+            // Register sub.
+            this.eventSubs[newEventName] = {
+                name: newEventName,
+                liveObjectIds: liveObjectsByEvent[newEventName],
+                cursor: null,
+                cursorChanged: false,
+                shouldBuffer: true,
+                buffer: [],
             }
+            newEventNames.push(newEventName)
         }
 
         // Unsubscribe from events that aren't needed anymore.
@@ -217,11 +224,18 @@ class Spec {
         return newEventNames
     }
 
-    async _loadEventCursors() {
+    async _loadEventCursors(eventNamesFilter?: string[]) {
+        eventNamesFilter = eventNamesFilter || []
+
         // Get event subs that haven't been registered yet in the eventCursors map.
-        const eventNamesWithNoCursor = Object.keys(this.eventSubs).filter(
+        let eventNamesWithNoCursor = Object.keys(this.eventSubs).filter(
             eventName => !this.eventSubs[eventName].cursor
         )
+        if (eventNamesFilter.length) {
+            eventNamesWithNoCursor = eventNamesWithNoCursor.filter(
+                eventName => eventNamesFilter.includes(eventName)
+            )
+        }
 
         // Get the missing event cursors from Postgres.
         const records = await getEventCursorsForNames(eventNamesWithNoCursor)
@@ -237,9 +251,9 @@ class Spec {
             const cursor = this.eventSubs[newEventName].cursor
             cursor && cursors.push(cursor)
         }
-        if (!cursors.length) return
-
+ 
         logger.info('Fetching any missed events...')
+
         // Fetch any events that came after the following cursors.
         try {
             await messageClient.fetchMissedEvents(cursors, (events: SpecEvent<StringKeyMap | StringKeyMap[]>[]) => {
@@ -358,19 +372,34 @@ class Spec {
             return
         }
 
-        // Mark seed as success.
+        // Register seed as successful.
         seedSucceeded(seedColNames.map(colName => [tablePath, colName].join('.')))
 
         // Start listening to events from this live object now.
         this.liveObjectsToIgnoreEventsFrom.delete(liveObjectId)
-        ;(this._subscribeToLiveObjectEvents() || []).forEach(newEventName => {
-            this.eventSubs[newEventName].shouldBuffer = false
-        })
+        const newEventNames = this._subscribeToLiveObjectEvents() || []
+        if (!newEventNames.length) return
+
+        // Load the event cursors for these new events.
+        await this._loadEventCursors(newEventNames)
+
+        // Fetch missed events for any new sub that already has an 
+        // existing event cursor (i.e. events that have been seen before).
+        await this._fetchMissedEvents(newEventNames)
+
+        // Process all missed events just added to the buffer above.
+        await this._processAllBufferedEvents(newEventNames)
+
+        // Start saving event cursors on an interval (+ save immediately).
+        this._saveEventCursors(newEventNames)
+        this._createSaveCursorsJob()
     }
 
-    async _processAllBufferedEvents() {
+    async _processAllBufferedEvents(eventNamesFilter?: string[]) {
+        eventNamesFilter = eventNamesFilter || []
         let promises = []
         for (let eventName in this.eventSubs) {
+            if (eventNamesFilter.length && !eventNamesFilter.includes(eventName)) continue
             promises.push(this._processEventBuffer(eventName))
         }
         await Promise.all(promises)
@@ -414,15 +443,20 @@ class Spec {
         })
     }
 
-    async _saveEventCursors() {
+    async _saveEventCursors(eventNamesFilter?: string[]) {
+        eventNamesFilter = eventNamesFilter || []
+
         // Get all event cursors that changed since the last save interval.
         const cursorsToSave = []
         for (let eventName in this.eventSubs) {
+            if (eventNamesFilter.length && !eventNamesFilter.includes(eventName)) continue
+
             if (this.eventSubs[eventName].cursorChanged) {
                 cursorsToSave.push(this.eventSubs[eventName].cursor)
                 this.eventSubs[eventName].cursorChanged = false
             }
         }
+
         cursorsToSave.length && await saveEventCursors(cursorsToSave)
     }
 
@@ -472,12 +506,19 @@ class Spec {
         return subs
     }
 
-    _registerEventAsSeen(event: SpecEvent<StringKeyMap | StringKeyMap[]>) {
-        this.seenEvents.set(event.id, true)
+    _registerEventAsSeen(event: SpecEvent<StringKeyMap | StringKeyMap[]>, liveObjectIds: string[]) {
+        liveObjectIds.forEach(liveObjectId => {
+            this.seenEvents.set(`${event.id}:${liveObjectId}`, true)
+        })
     }
 
-    _wasEventSeen(eventId: string): boolean {
-        return this.seenEvents.has(eventId)
+    _wasEventSeenByAllDependentLiveObjects(eventId: string, liveObjectIds: string[]): boolean {
+        for (let liveObjectId of liveObjectIds) {
+            if (!this.seenEvents.has(`${eventId}:${liveObjectId}`)) {
+                return false
+            }
+        }
+        return true
     }
 
     _updateEventCursor(event: SpecEvent<StringKeyMap | StringKeyMap[]>) {

@@ -4,7 +4,6 @@ import ApplyDiffsService from './ApplyDiffsService'
 import logger from '../logger'
 import { db } from '../db'
 import RunOpService from './RunOpService'
-import chalk from 'chalk'
 
 class ApplyEventService {
 

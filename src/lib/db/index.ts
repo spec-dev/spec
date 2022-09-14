@@ -15,7 +15,11 @@ const connectionConfig = {
 export const db = knex({
     client: 'pg',
     connection: connectionConfig,
-    pool: { min: 0, max: constants.MAX_POOL_SIZE },
+    pool: { 
+        min: 0,
+        max: constants.MAX_POOL_SIZE,
+        propagateCreateError: false,
+    },
 })
 
 // Create connection pool.

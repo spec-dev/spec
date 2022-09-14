@@ -1,4 +1,4 @@
-import { schema } from '..'
+import { schema, db } from '..'
 import { LiveColumn, LiveColumnSeedStatus } from '../../types'
 import { SPEC_SCHEMA_NAME, LIVE_COLUMNS_TABLE_NAME } from './names'
 import logger from '../../logger'
@@ -23,10 +23,12 @@ export async function getLiveColumnsForColPaths(columnPaths: string[]): Promise<
 
 export async function saveLiveColumns(records: LiveColumn[]) {
     try {
-        await liveColumns()
-            .insert(decamelizeKeys(records))
-            .onConflict('column_path')
-            .merge()
+        await db.transaction(async tx => {
+            await liveColumns(tx)
+                .insert(decamelizeKeys(records))
+                .onConflict('column_path')
+                .merge()
+        })
     } catch (err) {
         logger.error(`Error saving live columns: ${err}`)
         throw err

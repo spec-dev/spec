@@ -56,7 +56,7 @@ class Config {
         const ids = []
         const objects = this.liveObjects
         for (let configName in objects) {
-            ids.push(objects[configName].id)
+            objects[configName].id && ids.push(objects[configName].id)
         }
         return ids
     }
@@ -96,7 +96,7 @@ class Config {
             const obj = objects[configName]
             if (obj.id !== liveObjectId) continue
 
-            for (const link of obj.links) {
+            for (const link of (obj.links || [])) {
                 if (link.table === tablePath) {
                     return {
                         ...link,
@@ -113,7 +113,7 @@ class Config {
         const objects = this.liveObjects
         for (const configName in objects) {
             const obj = objects[configName]
-            for (const link of obj.links) {
+            for (const link of (obj.links || [])) {
                 if (link.table === tablePath) {
                     tableLinks.push({
                         liveObjectId: obj.id,
@@ -131,7 +131,7 @@ class Config {
         for (const configName in objects) {
             const obj = objects[configName]
 
-            for (const link of obj.links) {
+            for (const link of (obj.links || [])) {
                 if (link.table === tablePath) continue
 
                 let allSeedColsOnTable = true
@@ -237,11 +237,11 @@ class Config {
         for (const configName in objects) {
             const obj = objects[configName]
 
-            for (const link of obj.links) {
+            for (const link of (obj.links || [])) {
                 tablePaths.add(link.table)
 
                 for (const colPath of Object.values(link.inputs)) {
-                    const [schemaName, tableName, colName] = colPath.split('.')
+                    const [schemaName, tableName, _] = colPath.split('.')
                     const colTablePath = [schemaName, tableName].join('.')
                     tablePaths.add(colTablePath)
                 }
@@ -418,7 +418,7 @@ class Config {
         
         for (const configName in objects) {
             const obj = objects[configName]
-            for (const link of obj.links) {
+            for (const link of (obj.links || [])) {
                 const uniqueConstraint = this.getUniqueConstraintForLink(obj.id, link.table, false)
                 if (!uniqueConstraint) {
                     this._logMissingUniqueConstraint(link)
