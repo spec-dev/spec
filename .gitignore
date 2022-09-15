@@ -10,6 +10,8 @@ npm-debug.log*
 typings/
 *.tsbuildinfo
 .npm
+in/
+envs/
 
 # Runtime data
 pids
@@ -19,6 +21,3 @@ pids
 
 # Local config
 .spec/
-
-bin/build
-bin/dlogin

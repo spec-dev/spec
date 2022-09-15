@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spec-{{PROJECT_ID}}
+  labels:
+    app: spec-{{PROJECT_ID}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spec-{{PROJECT_ID}}
+  template:
+    metadata:
+      labels:
+        app: spec-{{PROJECT_ID}}
+    spec:
+      containers:
+      - name: spec-{{PROJECT_ID}}
+        image: {{IMAGE}}
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: ENV
+          value: {{ENV}}
+        - name: DB_HOST
+          value: {{DB_HOST}}
+        - name: DB_PORT
+          value: "{{DB_PORT}}"
+        - name: DB_NAME
+          value: {{DB_NAME}}
+        - name: DB_USER
+          value: {{DB_USER}}
+        - name: DB_PASSWORD
+          value: {{DB_PASSWORD}}
+        - name: PROJECT_API_KEY
+          value: {{PROJECT_API_KEY}}
+        - name: DEBUG
+          value: {{DEBUG}}
+        - name: FORCE_COLOR
+          value: "1"
