@@ -121,3 +121,9 @@ export async function updateCursor(id: string, cursor: number) {
         logger.error(`Error updating seed_cursor (id=${id}) to cursor ${cursor}: ${err}`)
     }
 }
+
+export async function failedSeedCursorsExist(): Promise<boolean> {
+    const result = await seedCursors().where('status', SeedCursorStatus.Failed).count()
+    const count = result ? Number((result[0] || {}).count || 0) : 0
+    return count > 0
+}

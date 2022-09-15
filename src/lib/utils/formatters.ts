@@ -29,3 +29,19 @@ export function toMap(obj): AnyMap {
 export function unique(arr: any[]): any[] {
     return Array.from(new Set(arr))
 }
+
+export const fromNamespacedVersion = (
+    namespacedVersion: string
+): { nsp: string; name: string; version: string } => {
+    const atSplit = (namespacedVersion || '').split('@')
+    if (atSplit.length !== 2) {
+        return { nsp: '', name: '', version: '' }
+    }
+    const [nspName, version] = atSplit
+    const dotSplit = (nspName || '').split('.')
+    if (dotSplit.length !== 2) {
+        return { nsp: '', name: '', version: '' }
+    }
+    const [nsp, name] = dotSplit
+    return { nsp, name, version }
+}

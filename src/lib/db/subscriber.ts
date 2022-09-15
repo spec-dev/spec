@@ -9,7 +9,7 @@ import ResolveRecordsService from '../services/ResolveRecordsService'
 import constants from '../constants'
 import { debounce } from 'lodash'
 import { getRecordsForPrimaryKeys } from './ops'
-import { getTableSubCursorsForPaths, upsertTableSubCursor } from './spec/tableSubCursors'
+import { getTableSubCursorsForPaths, upsertTableSubCursor, deleteTableSubCursor } from './spec/tableSubCursors'
 import { createSeedCursor, seedFailed, seedSucceeded } from './spec/seedCursors'
 import short from 'short-uuid'
 
@@ -71,9 +71,9 @@ export class TableSubscriber {
         await Promise.all(tableSubs.map(ts => this._upsertTableSub(ts, existingTriggersMap)))
     }
 
-    deleteTableSub(tablePath: string) {
+    async deleteTableSub(tablePath: string) {
         delete this.tableSubs[tablePath]
-        // TODO: Delete the spec.table_sub_cursor for this tablePath
+        await deleteTableSubCursor(tablePath)
     }
 
     async _subscribeToTables(subsThatNeedSubscribing: TableSub[]) {

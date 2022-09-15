@@ -36,6 +36,7 @@ const constants: StringKeyMap = {
     // TODO: 
     SAVE_EVENT_CURSORS_INTERVAL: 1000,
     ANALYZE_TABLES_INTERVAL: 30000,
+    RETRY_SEED_CURSORS_INTERVAL: 30000,
 
     TABLE_SUBS_CHANNEL: 'spec_data_change_notifications',
     TABLE_SUB_BUFFER_INTERVAL: 100,

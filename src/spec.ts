@@ -3,8 +3,8 @@ import config from './lib/config'
 import constants from './lib/constants'
 import { resolveLiveObjects } from './lib/rpcs/liveObjects'
 import messageClient from './lib/rpcs/messageClient'
-import { LiveObject, StringKeyMap, EventSub, SeedSpec, SeedCursor, SeedCursorStatus, SeedCursorJobType, ResolveRecordsSpec } from './lib/types'
-import { ensureSpecSchemaIsReady, getEventCursorsForNames, saveEventCursors, getSeedCursorsWithStatus, seedFailed, seedSucceeded, processSeedCursorBatch } from './lib/db/spec'
+import { LiveObject, StringKeyMap, EventSub, SeedSpec, SeedCursorStatus, SeedCursorJobType, ResolveRecordsSpec } from './lib/types'
+import { ensureSpecSchemaIsReady, getEventCursorsForNames, saveEventCursors, getSeedCursorsWithStatus, seedFailed, seedSucceeded, processSeedCursorBatch, failedSeedCursorsExist } from './lib/db/spec'
 import { SpecEvent } from '@spec.dev/event-client'
 import LRU from 'lru-cache'
 import ApplyEventService from './lib/services/ApplyEventService'
@@ -23,6 +23,8 @@ class Spec {
     eventSubs: { [key: string]: EventSub } = {}
 
     saveEventCursorsJob: any = null
+
+    retrySeedCursorsJob: any = null
 
     isProcessingNewConfig: boolean = false
 
@@ -113,7 +115,7 @@ class Spec {
 
         // Start saving event cursors on an interval (+ save immediately).
         this._saveEventCursors()
-        this._createSaveCursorsJob()
+        this._createSaveCursorsJobIfNotExists()
         this._doneProcessingNewConfig()
     }
 
@@ -261,6 +263,7 @@ class Spec {
         // Fetch any events that came after the following cursors.
         try {
             await messageClient.fetchMissedEvents(cursors, (events: SpecEvent<StringKeyMap | StringKeyMap[]>[]) => {
+                logger.info(`Fetched ${events.length} missed events.`)
                 events.forEach(event => this._onEvent(event, { forceToBuffer: true }))
             })
         } catch (error) {
@@ -508,6 +511,9 @@ class Spec {
         Object.values(seedJobs).forEach(jobs => {
             this._runSeedJobs(jobs).catch(err => logger.error(err))
         })
+
+        // Create a job that checks and retries failed seeds on an interval.
+        this._createRetrySeedCursorsJobIfNotExists()
     }
 
     async _runSeedJobs(jobs: StringKeyMap) {
@@ -597,7 +603,7 @@ class Spec {
 
         // Start saving event cursors on an interval (+ save immediately).
         this._saveEventCursors(newEventNames)
-        this._createSaveCursorsJob()
+        this._createSaveCursorsJobIfNotExists()
     }
 
     async _processAllBufferedEvents(eventNamesFilter?: string[]) {
@@ -674,13 +680,24 @@ class Spec {
         this.isProcessingNewConfig = false
     }
 
-    _createSaveCursorsJob() {
-        if (this.saveEventCursorsJob !== null) return
-        
-        this.saveEventCursorsJob = setInterval(
+    _createSaveCursorsJobIfNotExists() {
+        this.saveEventCursorsJob = this.saveEventCursorsJob || setInterval(
             () => this._saveEventCursors(),
             constants.SAVE_EVENT_CURSORS_INTERVAL,
         )
+    }
+
+    _createRetrySeedCursorsJobIfNotExists() {        
+        this.retrySeedCursorsJob = this.retrySeedCursorsJob || setInterval(
+            () => this._retrySeedCursors(),
+            constants.RETRY_SEED_CURSORS_INTERVAL,
+        )
+    }
+
+    async _retrySeedCursors() {
+        if (!(await failedSeedCursorsExist())) return
+        logger.info('Failed seed cursors exist....Will retry seed job(s).')
+        await this._upsertAndSeedLiveColumns()
     }
 
     _removeUselessSubs(liveObjectsByEvent: { [key: string]: string[] }) {

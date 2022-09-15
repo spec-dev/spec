@@ -2,7 +2,7 @@ import toml from '@ltd/j-toml'
 import fs from 'fs'
 import constants from './constants'
 import { ConfigError } from './errors'
-import { noop, toMap } from './utils/formatters'
+import { noop, toMap, fromNamespacedVersion } from './utils/formatters'
 import logger from './logger'
 import { tablesMeta, pullTableMeta, getRel } from './db/tablesMeta'
 import { cloneDeep } from 'lodash'
@@ -74,7 +74,7 @@ class Config {
             m[obj.id] = {
                 configName,
                 id: obj.id,
-                filterBy: obj.filterBy,
+                filterBy: toMap(obj.filterBy || {}),
                 links: obj.links,
             }
         }
@@ -100,7 +100,7 @@ class Config {
                 if (link.table === tablePath) {
                     return {
                         ...link,
-                        inputs: toMap(link.inputs),
+                        inputs: toMap(link.inputs || {}),
                     }
                 }
             }
@@ -136,7 +136,8 @@ class Config {
 
                 let allSeedColsOnTable = true
                 for (const seedProperty of link.seedWith) {
-                    const seedColPath = link.inputs[seedProperty]
+                    const inputs = toMap(link.inputs || {})
+                    const seedColPath = inputs[seedProperty]
                     const [seedColSchema, seedColTable, _] = seedColPath.split('.')
                     const seedColTablePath = [seedColSchema, seedColTable].join('.')    
 
@@ -165,21 +166,39 @@ class Config {
         return table ? toMap(table) : null
     }
 
-    getDataSourcesForTable(schemaName: string, tableName: string): TableDataSources | null {
+    getDataSourcesForTable(schemaName: string, tableName: string, returnNullIfError?: boolean): TableDataSources | null {
         const table = this.getTable(schemaName, tableName)
-        if (!table) return null
+        if (!table) {
+            logger.error(`No table exists in config for path "${schemaName}.${tableName}".`)
+            return null
+        }
 
         const dataSources = {}
         for (const columnName in table) {
             const dataSource = table[columnName]
             const { object, property } = this._parseDataSourceForColumn(dataSource)
+
             if (!object || !property) {
-                logger.error(`Invalid data source for ${tableName}.${columnName}:`, dataSource)
+                logger.error(
+                    `Invalid data source for ${tableName}.${columnName}:`, 
+                    dataSource,
+                )
+                if (returnNullIfError) {
+                    return null
+                }
                 continue
             }
             
             const liveObject = this.getLiveObject(object)
-            if (!liveObject) continue
+            if (!liveObject) {
+                logger.error(
+                    `${tableName}.${columnName} references a live object not found in the config "${object}".`
+                )
+                if (returnNullIfError) {
+                    return null
+                }
+                continue
+            }
 
             const dataSourceKey = `${liveObject.id}:${property}`
             if (!dataSources.hasOwnProperty(dataSourceKey)) {
@@ -239,8 +258,9 @@ class Config {
 
             for (const link of (obj.links || [])) {
                 tablePaths.add(link.table)
+                const inputs = toMap(link.inputs || {})
 
-                for (const colPath of Object.values(link.inputs)) {
+                for (const colPath of Object.values(inputs)) {
                     const [schemaName, tableName, _] = colPath.split('.')
                     const colTablePath = [schemaName, tableName].join('.')
                     tablePaths.add(colTablePath)
@@ -316,13 +336,24 @@ class Config {
     }
 
     async validate() {
-        // Validate table schema / meta / constraints.
-        if (!(await this._checkTableStructures())) {
-            this.isValid = false
-            return
+        let valid = true
+
+        try {
+            if (!this._validateObjectsSection()) {
+                valid = false
+            }
+            if (!this._validateTablesSection()) {
+                valid = false
+            }
+            if (valid && !(await this._checkTableStructures())) {
+                valid = false
+            }
+        } catch (err) {
+            logger.error(`Unexpected error occurred while validating config: ${err}`)
+            valid = false
         }
 
-        this.isValid = true
+        this.isValid = valid
     }
 
     watch() {
@@ -382,10 +413,112 @@ class Config {
         }
 
         // Ensure each link's uniqueBy array has a matching unique constraint.
-        if (!this._getUniqueConstraintsForAllLinks()) {
+        if (!this._checkUniqueConstraintsForAllLinks()) {
             return false
         }
 
+        return true
+    }
+
+    _validateObjectsSection(): boolean {
+        const objects = this.liveObjects
+        let isValid = true
+
+        for (let configName in objects) {
+            const obj = objects[configName]
+            // Ensure object has id.
+            if (!obj.id) {
+                logger.error(`Live object "${configName}" is missing id.`)
+                isValid = false
+                continue
+            }
+            // Ensure object has valid id version structure.
+            const { nsp, name, version } = fromNamespacedVersion(obj.id)
+            if (!nsp || !name || !version) {
+                logger.error(`Live object "${configName}" has malformed id: ${obj.id}.\nMake sure the id is in "<namespace>.<name>@<version>" format.`)
+                isValid = false
+            }
+
+            // Ensure object has links.
+            if (!obj.links || !obj.links.length) {
+                logger.error(`Live object "${configName}" has no links.`)
+                isValid = false
+                continue
+            }
+
+            // Validate each link.
+            for (const link of (obj.links || [])) {
+                const tablePath = link.table || ''
+                if (!tablePath) {
+                    logger.error(`Link for live object "${configName}" is missing the "table" attribute.`)
+                    isValid = false
+                    continue
+                }
+
+                const splitTablePath = tablePath.split('.')
+
+                // Ensure table is valid.
+                if (splitTablePath.length !== 2) {
+                    logger.error(`Link for live object "${configName}" has invalid "table" attribute: ${tablePath}. \nMust be in "<schema>.<table>" format.`)
+                    isValid = false
+                    continue
+                }
+                const [schema, table] = splitTablePath
+
+                // Ensure table is included in config.
+                if (!this.getTable(schema, table)) {
+                    logger.error(`Link for live object "${configName}" has invalid "table" attribute: ${tablePath}. \nValue references table not included in config file.`)
+                    isValid = false
+                }
+
+                // Ensure link has inputs.
+                const inputs = link.inputs ? toMap(link.inputs || {}) : {}
+                if (!Object.keys(inputs).length) {
+                    logger.error(`Link for live object "${configName}" has no inputs.`)
+                    isValid = false
+                }
+
+                // Ensure input column paths are of valid structure.
+                for (const key in inputs) {
+                    const colPath = inputs[key] || ''
+                    const splitColPath = colPath.split('.')
+
+                    if (splitColPath.length !== 3) {
+                        logger.error(`Link for live object "${configName}" has invalid input property for key "${key}": ${colPath}. \nMust be in "<schema>.<table>.<column>" format.`)
+                        isValid = false
+                        continue
+                    }
+                }
+
+                // Ensure seedWith properties exist.
+                if (!link.seedWith || !link.seedWith.length) {
+                    logger.error(`Link for live object "${configName}" has no "seedWith" attribute or it is empty.`)
+                    isValid = false
+                    continue
+                }
+
+                // Ensure each seedWith property is actually an input property.
+                for (const property of (link.seedWith || [])) {
+                    if (!inputs.hasOwnProperty(property)) {
+                        logger.error(`Link for live object "${configName}" has invalid "seedWith" entry: ${property}. \nYou can only seed with properties included in the "inputs" map.`)
+                        isValid = false    
+                    }
+                }
+            }
+        }
+        return isValid
+    }
+
+    _validateTablesSection(): boolean {
+        for (const schemaName in config.tables) {
+            for (const tableName in config.tables[schemaName]) {
+                const dataSources = config.getDataSourcesForTable(schemaName, tableName, true)
+                // Will be null if there's an error.
+                if (dataSources === null) {
+                    return false
+                }
+            }
+        }
         return true
     }
 
@@ -393,6 +526,7 @@ class Config {
         const priorTablePaths = Object.keys(tablesMeta)
         const allTablePathsReferencedInConfig = this.getAllReferencedTablePaths()
 
+        // Pull table metadata for all table paths referenced in the config file.
         try {
             await Promise.all(allTablePathsReferencedInConfig.map(tablePath => pullTableMeta(tablePath)))
         } catch (err) {
@@ -412,32 +546,36 @@ class Config {
         return true
     }
 
-    _getUniqueConstraintsForAllLinks(): boolean {
+    _checkUniqueConstraintsForAllLinks(): boolean {
         const linkUniqueConstraints = {}
         const objects = this.liveObjects
-        
+        let isValid = true
+
         for (const configName in objects) {
             const obj = objects[configName]
             for (const link of (obj.links || [])) {
                 const uniqueConstraint = this.getUniqueConstraintForLink(obj.id, link.table, false)
                 if (!uniqueConstraint) {
-                    this._logMissingUniqueConstraint(link)
-                    return false
+                    this._logMissingUniqueConstraint(link, obj.id)
+                    isValid = false
+                    continue
                 }
                 const key = [obj.id, link.table].join(':')
                 linkUniqueConstraints[key] = uniqueConstraint
             }
         }
+        if (!isValid) return false
 
         this.linkUniqueConstraints = linkUniqueConstraints
         return true
     }
 
-    _logMissingUniqueConstraint(link: LiveObjectLink) {
+    _logMissingUniqueConstraint(link: LiveObjectLink, liveObjectId: string) {
         const uniqueByColNames = []
-        const uniqueByProperties = link.uniqueBy || Object.keys(toMap(link.inputs))
+        const inputs = toMap(link.inputs || {})
+        const uniqueByProperties = link.uniqueBy || Object.keys(inputs)
         for (const property of uniqueByProperties) {
-            const colPath = link.inputs[property]
+            const colPath = inputs[property]
             if (!colPath) return null
             const [colSchema, colTable, colName] = colPath.split('.')
             const colTablePath = [colSchema, colTable].join('.')
@@ -450,7 +588,9 @@ class Config {
                 uniqueByColNames.push(foreignKeyConstraint.foreignKey)
             }
         }
-        logger.error(`No unique constraint exists on table "${link.table}" for column(s): ${uniqueByColNames}`)
+        logger.error(
+            `No unique constraint exists on "${link.table}" for column(s): ${uniqueByColNames}\nPlease add a unique contraint on this group of columns in order to make the link between ${link.table} and ${liveObjectId} work.`
+        )
     }
 
     _ensureFileExists() {

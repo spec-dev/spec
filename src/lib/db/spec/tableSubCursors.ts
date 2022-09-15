@@ -33,6 +33,16 @@ export async function upsertTableSubCursor(tablePath: string) {
                 .merge()
         })
     } catch (err) {
-        logger.error(`Error upserting table_sub_cursors: ${err}`)
+        logger.error(`Error upserting table_sub_cursor for ${tablePath}: ${err}`)
+    }
+}
+
+export async function deleteTableSubCursor(tablePath: string) {
+    try {
+        await db.transaction(async tx => {
+            await tableSubCursors(tx).where('table_path', tablePath).del()
+        })
+    } catch (err) {
+        logger.error(`Error deleting table_sub_cursor for ${tablePath}: ${err}`)
     }
 }
