@@ -15,6 +15,7 @@ const constants: StringKeyMap = {
     EVENTS_HOSTNAME: ev('EVENTS_HOSTNAME', 'events.spec.dev'),
     EVENTS_PORT: Number(ev('EVENTS_PORT', 443)),
     SEEN_EVENTS_CACHE_SIZE: Number(ev('SEEN_EVENTS_CACHE_SIZE', 1000)),
+    EVENTS_PING_INTERVAL: 30000,
 
     // TODO
     DB_HOST: ev('DB_HOST', 'localhost'),

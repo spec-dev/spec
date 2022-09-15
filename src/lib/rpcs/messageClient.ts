@@ -17,6 +17,8 @@ export class MessageClient {
 
     onConnect: () => void
 
+    pingJob: any = null
+
     /**
      * Create a new MessageClient instance.
      */
@@ -31,7 +33,10 @@ export class MessageClient {
             hostname: constants.EVENTS_HOSTNAME,
             port: constants.EVENTS_PORT,
             signedAuthToken: constants.PROJECT_API_KEY,
-            onConnect: this.onConnect,
+            onConnect: () => {
+                this._createPingJobIfNotExists()
+                this.onConnect()
+            },
         })
     }
 
@@ -85,6 +90,13 @@ export class MessageClient {
             return { data: null, error }
         }
         return { data, error: null }
+    }
+
+    _createPingJobIfNotExists() {
+        this.pingJob = this.pingJob || setInterval(
+            () => this.call(RPC.Ping, { ping: true }),
+            constants.EVENTS_PING_INTERVAL,
+        )
     }
 }
 
