@@ -8,6 +8,7 @@ import { camelizeKeys } from 'humps'
 const tableSubCursors = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(TABLE_SUB_CURSORS_TABLE_NAME)
 
 export async function getTableSubCursorsForPaths(tablePaths: string[]): Promise<TableSubCursor[]> {
+    if (!tablePaths.length) return []
     let records
     try {
         records = await tableSubCursors()

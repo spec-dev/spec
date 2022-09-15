@@ -9,7 +9,7 @@ export const seedCursors = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(SEED_CURSO
 
 export async function getSeedCursorsWithStatus(status: SeedCursorStatus | SeedCursorStatus[]): Promise<SeedCursor[]> {
     status = Array.isArray(status) ? status : [status]
-
+    if (!status.length) return []
     let records
     try {
         records = await seedCursors()
@@ -88,6 +88,7 @@ export async function seedFailed(ids: string | string[]) {
 // Just delete successful seed cursors.
 export async function seedSucceeded(ids: string | string[]) {
     ids = Array.isArray(ids) ? ids : [ids]
+    if (!ids.length) return
     try {
         await db.transaction(async tx => {
             await seedCursors(tx).whereIn('id', unique(ids as any[])).del()
@@ -99,6 +100,7 @@ export async function seedSucceeded(ids: string | string[]) {
 
 export async function updateStatus(ids: string | string[], seedStatus: SeedCursorStatus) {
     ids = Array.isArray(ids) ? ids : [ids]
+    if (!ids.length) return
     try {
         await db.transaction(async tx => {
             await seedCursors(tx)

@@ -8,6 +8,7 @@ import { camelizeKeys, decamelizeKeys } from 'humps'
 const liveColumns = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(LIVE_COLUMNS_TABLE_NAME)
 
 export async function getLiveColumnsForColPaths(columnPaths: string[]): Promise<LiveColumn[]> {
+    if (!columnPaths.length) return []
     let records
     try {
         records = await liveColumns()
@@ -22,6 +23,7 @@ export async function getLiveColumnsForColPaths(columnPaths: string[]): Promise<
 }
 
 export async function saveLiveColumns(records: LiveColumn[]) {
+    if (!records.length) return
     try {
         await db.transaction(async tx => {
             await liveColumns(tx)

@@ -7,6 +7,7 @@ import { unique } from '../../utils/formatters'
 export const eventCursors = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(EVENT_CURSORS_TABLE_NAME)
 
 export async function getEventCursorsForNames(names: string[]): Promise<EventCursor[]> {
+    if (!names.length) return []
     let records
     try {
         records = await eventCursors()
@@ -25,6 +26,7 @@ export async function getEventCursorsForNames(names: string[]): Promise<EventCur
 }
 
 export async function saveEventCursors(records: EventCursor[]) {    
+    if (!records.length) return
     try {
         await db.transaction(async tx => {
             await eventCursors(tx)
