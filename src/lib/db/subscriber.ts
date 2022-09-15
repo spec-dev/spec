@@ -1,16 +1,17 @@
 import { pgListener, db } from '.'
 import { getSpecTriggers, formatTriggerName, dropTrigger, createTrigger } from './triggers'
-import { TableSub, TableSubStatus, TableSubEvent, StringKeyMap, StringMap, Trigger, TriggerEvent, TableLinkDataChanges, LiveObject, TableSubCursor } from '../types'
+import { TableSub, TableSubStatus, TableSubEvent, StringKeyMap, StringMap, Trigger, TriggerEvent, TableLinkDataChanges, LiveObject, TableSubCursor, ResolveRecordsSpec, SeedCursorJobType, SeedCursorStatus } from '../types'
 import { tablesMeta, getRel } from './tablesMeta'
-import { unique } from '../utils/formatters'
 import config from '../config'
 import logger from '../logger'
 import SeedTableService from '../services/SeedTableService'
 import ResolveRecordsService from '../services/ResolveRecordsService'
 import constants from '../constants'
 import { debounce } from 'lodash'
-import { QueryError } from '../errors'
+import { getRecordsForPrimaryKeys } from './ops'
 import { getTableSubCursorsForPaths, upsertTableSubCursor } from './spec/tableSubCursors'
+import { createSeedCursor, seedFailed, seedSucceeded } from './spec/seedCursors'
+import short from 'short-uuid'
 
 export class TableSubscriber {
 
@@ -72,7 +73,6 @@ export class TableSubscriber {
 
     deleteTableSub(tablePath: string) {
         delete this.tableSubs[tablePath]
-
         // TODO: Delete the spec.table_sub_cursor for this tablePath
     }
 
@@ -237,7 +237,7 @@ export class TableSubscriber {
         const events = [...tableSub.buffer]
         this.tableSubs[tablePath].buffer = []
 
-        // logger.info(`Processing ${events.length} data-change event(s) on ${tablePath}...`)
+        logger.info(`Processing ${events.length} data-change event(s) on ${tablePath}...`)
 
         // Mark new timestamp for table sub cursor.
         upsertTableSubCursor(tablePath)
@@ -286,17 +286,42 @@ export class TableSubscriber {
             return
         }
 
-        // Auto fetch and populate in any live columns on these records.
-        try {
-            await new ResolveRecordsService(tablePath, liveObject, link, primaryKeyData).perform()
-        } catch (err) {
-            if (err.message && err.message.includes('associated resolve function')) {
-                logger.info(`No resolve function exists for live object ${liveObject.id}.`)
-                return
-            }
-            logger.error(`Failed to auto-resolve live columns on records in ${link.table}: ${err}`)
+        // Create resolve records spec.
+        const resolveRecordsSpec: ResolveRecordsSpec = {
+            liveObjectId,
+            tablePath,
+            primaryKeyData,
         }
+
+        // Create and save seed cursor.
+        const seedCursor = {
+            id: short.generate(),
+            jobType: SeedCursorJobType.ResolveRecords,
+            spec: resolveRecordsSpec,
+            status: SeedCursorStatus.InProgress,
+            cursor: 0,
+        }
+        await createSeedCursor(seedCursor)
+
+        // Auto-resolve and populate any live columns on these records.
+        try {
+            const resolveRecordsService = new ResolveRecordsService(
+                resolveRecordsSpec, 
+                liveObject, 
+                link,
+                seedCursor.id,
+                seedCursor.cursor,
+            )
+            await resolveRecordsService.perform()
+        } catch (err) {
+            logger.error(`Failed to auto-resolve live columns on records in ${link.table}: ${err}`)
+            await seedFailed(seedCursor.id)
+        }
+
+        // Register seed cursor as successful.
+        await seedSucceeded(seedCursor.id)
     }
+
 
     async _processExternalTableLinkDataChanges(tableSub: TableSub, tableLinkDataChanges: TableLinkDataChanges) {
         const { tableLink, events } = tableLinkDataChanges
@@ -325,7 +350,7 @@ export class TableSubscriber {
             records = missedEventRecords
         } else {
             try {
-                records = await this._getRecordsForPrimaryKeys(tablePath, primaryKeyData)
+                records = await getRecordsForPrimaryKeys(tablePath, primaryKeyData)
             } catch (err) {
                 logger.error(err)
                 return
@@ -349,11 +374,32 @@ export class TableSubscriber {
             seedColNames: [], // not used with foreign seeds
             seedIfEmpty: link.seedIfEmpty || false,
         }
+
+        // Create and save seed cursor.
+        const seedCursor = {
+            id: short.generate(),
+            jobType: SeedCursorJobType.SeedTable,
+            spec: seedSpec,
+            status: SeedCursorStatus.InProgress,
+            cursor: 0,
+            metadata: {
+                foreignTablePath: tablePath,
+                foreignPrimaryKeyData: primaryKeyData,
+            }
+        }
+        await createSeedCursor(seedCursor)
+
+        // Seed table using foreign records.
         try {
-            await new SeedTableService(seedSpec, liveObject).seedWithForeignRecords(tablePath, records)
+            const seedTableService = new SeedTableService(seedSpec, liveObject, seedCursor.id, seedCursor.cursor)
+            await seedTableService.seedWithForeignRecords(tablePath, records)
         } catch (err) {
             logger.error(`Failed to auto-seed ${link.table} using ${tablePath}: ${err}`)
+            await seedFailed(seedCursor.id)
         }
+
+        // Register seed cursor as successful.
+        await seedSucceeded(seedCursor.id)
     }
 
     _getInternalTableLinkDataChanges(tablePath: string, events: TableSubEvent[]): TableLinkDataChanges[] {
@@ -454,34 +500,6 @@ export class TableSubscriber {
         }
 
         return externalLinksToProcess
-    }
-
-    async _getRecordsForPrimaryKeys(tablePath: string, primaryKeyData: StringKeyMap[]): Promise<StringKeyMap[]> {
-        // Group primary keys into arrays of values for the same key.
-        const primaryKeys = {}
-        Object.keys(primaryKeyData[0]).forEach(key => {
-            primaryKeys[key] = []
-        })
-        for (const pkData of primaryKeyData) {
-            for (const key in pkData) {
-                const val = pkData[key]
-                primaryKeys[key].push(val)
-            }
-        }
-
-        // Build query for all records associated with the array of primary keys.
-        let query = db.from(tablePath).select('*')
-        for (const key in primaryKeys) {
-            query.whereIn(key, unique(primaryKeys[key]))
-        }
-        query.limit(primaryKeyData.length)
-
-        try {
-            return await query
-        } catch (err) {
-            const [schema, table] = tablePath.split('.')
-            throw new QueryError('select', schema, table, err)
-        }
     }
 
     _getColNamesAffectedByEvent(event: TableSubEvent): string[] {

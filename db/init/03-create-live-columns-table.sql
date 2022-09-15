@@ -1,10 +1,8 @@
 -- spec.live_columns definition
 
 create table if not exists spec.live_columns (
-    column_path character varying not null,
-    live_property character varying not null,
-    seed_status character varying not null,
-    constraint live_columns_pkey primary key (column_path)
+    column_path character varying not null primary key,
+    live_property character varying not null
 );
 comment on table spec.live_columns is 'Spec: Stores the current live columns.';
 

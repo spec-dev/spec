@@ -1,4 +1,4 @@
-import { OpType, LiveObject, LiveObjectLink, StringKeyMap, TableDataSources, EdgeFunction, StringMap, LiveObjectFunctionRole } from '../types'
+import { OpType, LiveObject, LiveObjectLink, StringKeyMap, TableDataSources, EdgeFunction, StringMap, LiveObjectFunctionRole, ResolveRecordsSpec } from '../types'
 import { reverseMap, toMap, unique } from '../utils/formatters'
 import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
@@ -8,6 +8,7 @@ import { QueryError } from '../errors'
 import constants from '../constants'
 import logger from '../logger'
 import { tablesMeta, getRel } from '../db/tablesMeta'
+import chalk from 'chalk'
 
 const valueSep = '__:__'
 
@@ -20,6 +21,12 @@ class ResolveRecordsService {
     link: LiveObjectLink
 
     primaryKeyData: StringKeyMap[]
+
+    seedCursorId: string
+
+    cursor: number
+
+    seedCount: number = 0
 
     resolveFunction: EdgeFunction | null
 
@@ -88,18 +95,29 @@ class ResolveRecordsService {
         return this.link.uniqueBy || Object.keys(this.linkProperties)
     }
 
-    constructor(tablePath: string, liveObject: LiveObject, link: LiveObjectLink, primaryKeyData: StringKeyMap[]) {
-        this.tablePath = tablePath
+    constructor(
+        resolveRecordsSpec: ResolveRecordsSpec,
+        liveObject: LiveObject, 
+        link: LiveObjectLink, 
+        seedCursorId: string, 
+        cursor: number,
+    ) {
+        this.tablePath = resolveRecordsSpec.tablePath
         this.liveObject = liveObject
         this.link = link
-        this.primaryKeyData = primaryKeyData
+        this.primaryKeyData = resolveRecordsSpec.primaryKeyData
+        this.seedCursorId = seedCursorId
+        this.cursor = cursor
         this.resolveFunction = null
     }
 
     async perform() {
         // Find resolve function to use.
         this._findResolveFunction()
-        if (!this.resolveFunction) throw 'Live object doesn\'t have an associated resolve function.'
+        if (!this.resolveFunction) {
+            logger.warn(`Live object ${this.liveObject.id} has no associated resolve function.`)
+            return
+        }
 
         // Find the input args for this function and their associated columns.
         this._findInputArgColumns()
@@ -112,16 +130,33 @@ class ResolveRecordsService {
         // Create batched function inputs and an index to map live object responses -> records.
         this._createAndMapFunctionInputs()
 
+        logger.info(chalk.cyanBright(
+            `Resolving live data for ${this.inputRecords.length} records in ${this.tablePath}... `
+        ))
+
         // Call spec function and handle response data.
-        await callSpecFunction(
-            this.resolveFunction, 
-            this.batchFunctionInputs, 
-            async data => await this._handleFunctionRespData(data as StringKeyMap[]),
-        )
+        const t0 = performance.now()
+        try {
+            await callSpecFunction(
+                this.resolveFunction, 
+                this.batchFunctionInputs, 
+                async data => await this._handleFunctionRespData(data as StringKeyMap[]),
+            )
+        } catch (err) {
+            logger.error(err)
+            throw err
+        }
+
+        const tf = performance.now()
+        const seconds = Number(((tf - t0) / 1000).toFixed(2))
+        const rate = Math.round(this.seedCount / seconds)
+        logger.info(chalk.cyanBright('Done.'))
+        logger.info(chalk.cyanBright(`Updated ${this.seedCount.toLocaleString('en-US')} records in ${seconds} seconds (${rate.toLocaleString('en-US')} rows/s)`))
     }
 
     async _handleFunctionRespData(batch: StringKeyMap[]) {
-        logger.info(`Updating batch of length ${batch.length}...`)
+        this.seedCount += batch.length
+        logger.info(chalk.cyanBright(`  ${this.seedCount.toLocaleString('en-US')}`))
 
         const tableDataSources = this.tableDataSources
         const updateableColNames = this.updateableColNames

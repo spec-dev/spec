@@ -4,6 +4,7 @@ import { SPEC_SCHEMA_NAME, specSchemaTableNames } from './names'
 export * from './eventCursors'
 export * from './liveColumns'
 export * from './tableSubCursors'
+export * from './seedCursors'
 export * from './names'
 
 const NOT_READY_DELAY = 30000 // ms

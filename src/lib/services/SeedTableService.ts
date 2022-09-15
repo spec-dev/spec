@@ -10,6 +10,7 @@ import { QueryError } from '../errors'
 import constants from '../constants'
 import { tablesMeta, getRel } from '../db/tablesMeta'
 import chalk from 'chalk'
+import { updateCursor } from '../db/spec'
 
 const valueSep = '__:__'
 
@@ -18,6 +19,10 @@ class SeedTableService {
     seedSpec: SeedSpec
 
     liveObject: LiveObject
+
+    seedCursorId: string
+
+    cursor: number
 
     seedFunction: EdgeFunction | null
 
@@ -71,9 +76,11 @@ class SeedTableService {
         return this.liveObject.filterBy || {}
     }
 
-    constructor(seedSpec: SeedSpec, liveObject: LiveObject) {
+    constructor(seedSpec: SeedSpec, liveObject: LiveObject, seedCursorId: string, cursor: number) {
         this.seedSpec = seedSpec
         this.liveObject = liveObject
+        this.seedCursorId = seedCursorId
+        this.cursor = cursor || 0
         this.seedFunction = null
         this.seedColNames = new Set<string>(this.seedSpec.seedColNames)
         this.seedStrategy = null
@@ -184,21 +191,27 @@ class SeedTableService {
     }
 
     async _seedFromScratch() {
-        logger.info(`Seeding ${this.seedTablePath} from scratch...`)
+        logger.info(chalk.cyanBright(`Seeding ${this.seedTablePath} from scratch...`))
 
+        const t0 = performance.now()
         try {
             await callSpecFunction(this.seedFunction, this.defaultFilters, async data => {
                 await this._handleDataOnSeedFromScratch(data as StringKeyMap[])
             })
         } catch (err) {
-            // TODO: Handle seed failure at this input batch.
             logger.error(err)
-            return
+            throw err
         }
+
+        const tf = performance.now()
+        const seconds = Number(((tf - t0) / 1000).toFixed(2))
+        const rate = Math.round(this.seedCount / seconds)
+        logger.info(chalk.cyanBright('Done.'))
+        logger.info(chalk.cyanBright(`Upserted ${this.seedCount.toLocaleString('en-US')} records in ${seconds} seconds (${rate.toLocaleString('en-US')} rows/s)`))
     }
 
     async _seedWithAdjacentCols() {
-        logger.info(`Seeding ${this.seedTablePath} from adjacent columns...`)
+        logger.info(chalk.cyanBright(`Seeding ${this.seedTablePath} from adjacent columns...`))
 
         const queryConditions = this._buildQueryForSeedWithAdjacentCols()
 
@@ -207,15 +220,15 @@ class SeedTableService {
         const inputPropertyKeys = this.requiredArgColPaths.map(colPath => reverseLinkProperties[colPath])
 
         // Start seeding with batches of input records.
-        let offset = 0
+        let t0 = null
         while (true) {
             // Get batch of input records from the seed table.
-            const batchInputRecords = await this._findInputRecordsFromAdjacentCols(queryConditions, offset)
+            const batchInputRecords = await this._findInputRecordsFromAdjacentCols(queryConditions, this.cursor)
             if (batchInputRecords === null) {
-                // TODO: Handle seed failure at this input batch.
-                break
+                throw `Foreign input records batch came up null for ${this.seedTablePath} at offset ${this.cursor}.`
             }
-            offset += batchInputRecords.length
+
+            this.cursor += batchInputRecords.length
             const isLastBatch = batchInputRecords.length < constants.SEED_INPUT_BATCH_SIZE
 
             const batchFunctionInputs = []
@@ -252,15 +265,24 @@ class SeedTableService {
             )
 
             // Call spec function and handle response data.
+            t0 = t0 || performance.now()
             try {
                 await callSpecFunction(this.seedFunction, batchFunctionInputs, onFunctionRespData)
             } catch (err) {
-                // TODO: Handle seed failure at this input batch.
                 logger.error(err)
-                break
+                throw err
             }
 
-            if (isLastBatch) break
+            await updateCursor(this.seedCursorId, this.cursor)
+
+            if (isLastBatch) {
+                const tf = performance.now()
+                const seconds = Number(((tf - t0) / 1000).toFixed(2))
+                const rate = Math.round(this.seedCount / seconds)
+                logger.info(chalk.cyanBright('Done.'))
+                logger.info(chalk.cyanBright(`Updated ${this.seedCount.toLocaleString('en-US')} records in ${seconds} seconds (${rate.toLocaleString('en-US')} rows/s)`))
+                break
+            }
         }
     }
 
@@ -277,22 +299,21 @@ class SeedTableService {
         const inputPropertyKeys = inputColNames.map(colName => reverseLinkProperties[`${foreignTablePath}.${colName}`])
 
         // Start seeding with batches of input records.
-        let offset = 0
         let t0 = null
         while (true) {
             // Get batch of input records from the foreign table.
-            const batchInputRecords = inputRecords || (await this._getInputRecordsBatch(
+            const batchInputRecords = inputRecords || (await this._getForeignInputRecordsBatch(
                 foreignTablePath,
                 foreignTablePrimaryKeys as string[],
                 inputColNames,
-                offset,
+                this.cursor,
             ))
             if (batchInputRecords === null) {
-                // TODO: Handle seed failure at this input batch.
-                break
+                throw `Foreign input records batch came up null for ${foreignTablePath} at offset ${this.cursor}.`
             }
-            offset += batchInputRecords.length
-            const isLastBatch = !!inputRecords || (batchInputRecords.length < constants.SEED_INPUT_BATCH_SIZE)
+
+            this.cursor += batchInputRecords.length
+            const isLastBatch = !!inputRecords || (batchInputRecords.length < constants.FOREIGN_SEED_INPUT_BATCH_SIZE)
 
             // Map the input records to their reference key value, so that records being added
             // to the seed table later can easily find/assign their foreign keys. 
@@ -315,16 +336,16 @@ class SeedTableService {
                 referenceKeyValues,
             )
 
-            t0 = t0 || performance.now()
-
             // Call spec function and handle response data.
+            t0 = t0 || performance.now()
             try {
                 await callSpecFunction(this.seedFunction, batchFunctionInputs, onFunctionRespData)
             } catch (err) {
-                // TODO: Handle seed failure at this input batch.
                 logger.error(err)
-                break
+                throw err
             }
+
+            await updateCursor(this.seedCursorId, this.cursor)
 
             if (isLastBatch) {
                 const tf = performance.now()
@@ -338,7 +359,8 @@ class SeedTableService {
     }
 
     async _handleDataOnSeedFromScratch(batch: StringKeyMap[]) {
-        logger.info(`Inserting batch of length ${batch.length}...`)
+        this.seedCount += batch.length
+        logger.info(chalk.cyanBright(`  ${this.seedCount.toLocaleString('en-US')}`))
 
         const tableDataSources = this.tableDataSources
         const insertRecords = []
@@ -429,7 +451,8 @@ class SeedTableService {
         inputPropertyKeys: string[],
         indexedPkConditions: StringKeyMap, 
     ) {
-        logger.info(`Updating batch of length ${batch.length}...`)
+        this.seedCount += batch.length
+        logger.info(chalk.cyanBright(`  ${this.seedCount.toLocaleString('en-US')}`))
 
         const tableDataSources = this.tableDataSources
         const linkProperties = this.linkProperties
@@ -529,7 +552,7 @@ class SeedTableService {
         }
 
         // Add SELECT conditions and order by primary keys.
-        query.select(queryConditions.select).orderBy(this.seedTablePrimaryKeys)
+        query.select(queryConditions.select).orderBy(this.seedTablePrimaryKeys.sort())
 
         // Add WHERE NOT NULL conditions.
         const whereNotNull = {}
@@ -580,7 +603,7 @@ class SeedTableService {
         return queryConditions
     }
 
-    async _getInputRecordsBatch(
+    async _getForeignInputRecordsBatch(
         tablePath: string, 
         primaryKeys: string[], 
         tableInputColNames: string[], 
@@ -596,10 +619,10 @@ class SeedTableService {
         try {
             return await db.from(tablePath)
                 .select('*')
-                .orderBy(primaryKeys)
+                .orderBy(primaryKeys.sort())
                 .whereNot(whereNotNull)
                 .offset(offset)
-                .limit(constants.SEED_INPUT_BATCH_SIZE)
+                .limit(constants.FOREIGN_SEED_INPUT_BATCH_SIZE)
         } catch (err) {
             const [schema, table] = tablePath.split('.')
             logger.error(new QueryError('select', schema, table, err).message)

@@ -33,12 +33,10 @@ class UpsertLiveColumnsService {
 
     async _getExistingLiveColumns() {
         this._getQuerySpecs()
-
-        const columnPaths = this.querySpecs.map(qs => qs.columnPath)
-
+        
         // Get all existing live columns for the given array of column paths.
         try {
-            this.prevLiveColumns = await getLiveColumnsForColPaths(columnPaths)
+            this.prevLiveColumns = await getLiveColumnsForColPaths(this.querySpecs.map(qs => qs.columnPath))
         } catch (err) {
             throw new QueryError('select', SPEC_SCHEMA_NAME, LIVE_COLUMNS_TABLE_NAME, err)
         }
@@ -49,24 +47,15 @@ class UpsertLiveColumnsService {
         // -----
         // (1) The live columns that don't exist yet.
         // (2) The live columns where the data source has changed.
-        // (3) The live columns that failed to seed.
         const querySpecsToUpsert = []
         const existingLiveColumns = mapBy<LiveColumn>(this.prevLiveColumns, 'columnPath')
         for (const querySpec of this.querySpecs) {
-            if (!existingLiveColumns.hasOwnProperty(querySpec.columnPath) ||
-                (
-                    existingLiveColumns[querySpec.columnPath].liveProperty !== querySpec.liveProperty && 
-                    existingLiveColumns[querySpec.columnPath].seedStatus === LiveColumnSeedStatus.Succeeded
-                ) ||
-                existingLiveColumns[querySpec.columnPath].seedStatus === LiveColumnSeedStatus.Failed
-            ) {
+            if (!existingLiveColumns.hasOwnProperty(querySpec.columnPath) || 
+                existingLiveColumns[querySpec.columnPath].liveProperty !== querySpec.liveProperty) {
                 querySpecsToUpsert.push(querySpec)
             }
         }
-        this.liveColumnsToUpsert = querySpecsToUpsert.map(qs => ({
-            ...qs,
-            seedStatus: LiveColumnSeedStatus.InProgress,
-        }))
+        this.liveColumnsToUpsert = querySpecsToUpsert
     }
 
     _getQuerySpecs() {

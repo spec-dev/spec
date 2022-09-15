@@ -154,16 +154,30 @@ export interface Op {
     conflictTargets?: string[]
 }
 
-export enum LiveColumnSeedStatus {
+export enum SeedCursorStatus {
     InProgress = 'in-progress',
     Succeeded = 'succeeded',
     Failed = 'failed',
 }
 
+export enum SeedCursorJobType {
+    SeedTable = 'seed-table',
+    ResolveRecords = 'resolve-records',
+}
+
+export interface SeedCursor {
+    id: string
+    jobType: string
+    spec: StringKeyMap
+    status: SeedCursorStatus
+    cursor: number
+    metadata?: StringKeyMap | null
+    createdAt: Date
+}
+
 export interface LiveColumn {
     columnPath: string
     liveProperty: string
-    seedStatus: LiveColumnSeedStatus
 }
 
 export interface LiveColumnQuerySpec {
@@ -179,6 +193,12 @@ export interface SeedSpec {
     uniqueBy: string[] | null
     seedColNames: string[]
     seedIfEmpty?: boolean
+}
+
+export interface ResolveRecordsSpec {
+    liveObjectId: string
+    tablePath: string
+    primaryKeyData: StringKeyMap[], 
 }
 
 export enum ConstraintType {

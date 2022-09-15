@@ -3,14 +3,18 @@ import config from './lib/config'
 import constants from './lib/constants'
 import { resolveLiveObjects } from './lib/rpcs/liveObjects'
 import messageClient from './lib/rpcs/messageClient'
-import { LiveObject, StringKeyMap, EventSub, SeedSpec } from './lib/types'
-import { ensureSpecSchemaIsReady, getEventCursorsForNames, saveEventCursors, seedFailed, seedSucceeded } from './lib/db/spec'
+import { LiveObject, StringKeyMap, EventSub, SeedSpec, SeedCursor, SeedCursorStatus, SeedCursorJobType, ResolveRecordsSpec } from './lib/types'
+import { ensureSpecSchemaIsReady, getEventCursorsForNames, saveEventCursors, getSeedCursorsWithStatus, seedFailed, seedSucceeded, processSeedCursorBatch } from './lib/db/spec'
 import { SpecEvent } from '@spec.dev/event-client'
 import LRU from 'lru-cache'
 import ApplyEventService from './lib/services/ApplyEventService'
 import UpsertLiveColumnsService from './lib/services/UpsertLiveColumnsService'
 import SeedTableService from './lib/services/SeedTableService'
 import { tableSubscriber } from './lib/db/subscriber'
+import short from 'short-uuid'
+import ResolveRecordsService from './lib/services/ResolveRecordsService'
+import { unique } from './lib/utils/formatters'
+import { getRecordsForPrimaryKeys } from './lib/db/ops'
 
 class Spec {
 
@@ -25,6 +29,8 @@ class Spec {
     hasPendingConfigUpdate: boolean = false
 
     liveObjectsToIgnoreEventsFrom: Set<string> = new Set()
+
+    hasCalledUpsertAndSeedLiveColumns: boolean = false 
     
     seenEvents: LRU<string, boolean> = new LRU({
         max: constants.SEEN_EVENTS_CACHE_SIZE,
@@ -268,19 +274,19 @@ class Spec {
     }
 
     async _upsertAndSeedLiveColumns() {
+        let liveColumnsToSeed = []
+
         // Upsert any new/changed live columns listed in the config.
         const upsertLiveColumnService = new UpsertLiveColumnsService()
         try {
             await upsertLiveColumnService.perform() 
+            liveColumnsToSeed = upsertLiveColumnService.liveColumnsToUpsert
         } catch (err) {
             logger.error(`Failed to upsert live columns: ${err}`)
-            return
+            liveColumnsToSeed = []
         }
 
         // Seed (or re-seed) all live columns that were upserted.
-        const liveColumnsToSeed = upsertLiveColumnService.liveColumnsToUpsert
-        if (!liveColumnsToSeed.length) return
-
         const tablePathsUsingLiveObjectId = upsertLiveColumnService.tablePathsUsingLiveObjectId
 
         // Get a map of unique live-object/table relations (grouping the column names).
@@ -291,10 +297,13 @@ class Spec {
             const [liveObjectId, _] = liveProperty.split(':')
             const tablePath = [schemaName, tableName].join('.')
             const uniqueKey = [liveObjectId, tablePath].join(':')
+
             if (!uniqueLiveObjectTablePaths.hasOwnProperty(uniqueKey)) {
                 uniqueLiveObjectTablePaths[uniqueKey] = []
             }
+
             uniqueLiveObjectTablePaths[uniqueKey].push(colName)
+
             if (!tablePathsUsingLiveObjectIdForSeed.hasOwnProperty(liveObjectId)) {
                 tablePathsUsingLiveObjectIdForSeed[liveObjectId] = new Set<string>()
             }
@@ -311,10 +320,9 @@ class Spec {
             const link = config.getLink(liveObjectId, tablePath)
             if (!link || !link.inputs) {
                 logger.error(
-                    `No link properties found for liveObjectId: ${liveObjectId}, 
-                    tablePath: ${tablePath}...something's wrong.`
+                    `Not seeding table -- no link or link inputs found for (liveObjectId: ${liveObjectId} + 
+                    tablePath: ${tablePath})...something's wrong.`
                 )
-                seedFailed(seedColNames.map(colName => [tablePath, colName].join('.')))
                 continue
             }
             seedSpecs.push({
@@ -328,7 +336,88 @@ class Spec {
             })
         }
 
-        seedSpecs.forEach(seedSpec => {
+        const seedSpecsMap = {}
+        for (const seedSpec of seedSpecs) {
+            seedSpecsMap[`${seedSpec.liveObjectId}:${seedSpec.tablePath}`] = seedSpec
+        }
+
+        // Get any seed jobs that failed (plus those that were stopped mid-seed (in-progress) 
+        // if this is our first pass through this function (i.e. on startup)).
+        const statusesToRetry = [
+            SeedCursorStatus.Failed,
+            this.hasCalledUpsertAndSeedLiveColumns ? null : SeedCursorStatus.InProgress,
+        ].filter(v => !!v)
+        const seedCursorsToRetry = await getSeedCursorsWithStatus(statusesToRetry) || []
+        
+        this.hasCalledUpsertAndSeedLiveColumns = true
+
+        const retryResolveRecordsJobs = []
+        const retrySeedTableJobs = []
+        const deleteSeedCursorIds = []
+
+        // Make sure there's not a conflict with seedSpecs above.
+        // Merge seeds if that's the case.
+        for (const seedCursor of seedCursorsToRetry) {
+            const { liveObjectId, tablePath } = seedCursor.spec
+
+            // Ensure this link still exists...
+            if (!config.getLink(liveObjectId, tablePath)) {
+                deleteSeedCursorIds.push(seedCursor.id)
+                continue
+            }
+
+            if (seedCursor.jobType === SeedCursorJobType.SeedTable) {
+                // Check to see if a seed spec for this liveObjectId+tablePath 
+                // is already scheduled to run (per above).
+                const uniqueSeedSpecKey = `${liveObjectId}:${tablePath}`
+                const plannedSeedSpec = seedSpecsMap[uniqueSeedSpecKey]
+
+                // If a matching seed spec exists, just merge seedColNames and continue.
+                if (plannedSeedSpec) {
+                    const [schemaName, tableName] = tablePath.split('.')
+                    const plannedSeedColNames = new Set(plannedSeedSpec.seedColNames || [])
+                    const cursorSeedColNames = seedCursor.spec.seedColNames || []
+                    const currentTableLiveColNames = new Set(Object.keys(config.getTable(schemaName, tableName)))
+                    for (const colName of cursorSeedColNames) {
+                        if (!plannedSeedColNames.has(colName) && currentTableLiveColNames.has(colName)) {
+                            seedSpecsMap[uniqueSeedSpecKey].seedColNames.push(colName)
+                        }
+                    }
+                    deleteSeedCursorIds.push(seedCursor.id)
+                } else {
+                    retrySeedTableJobs.push(seedCursor)
+                }
+            }
+            else if (seedCursor.jobType === SeedCursorJobType.ResolveRecords) {
+                retryResolveRecordsJobs.push(seedCursor)
+            }
+        }
+
+        const seedSpecsWithCursors = []
+
+        // Compile instructions for new seed cursors to create.
+        const createSeedCursors = []
+        for (const seedSpec of seedSpecs) {
+            const seedCursor = {
+                id: short.generate(),
+                jobType: SeedCursorJobType.SeedTable,
+                spec: seedSpec,
+                status: SeedCursorStatus.InProgress,
+                cursor: 0,
+            }
+            createSeedCursors.push(seedCursor)
+            seedSpecsWithCursors.push([seedSpec, seedCursor])
+        }
+
+        // Curate list of seed cursor ids to flip back to in-progress, and register 
+        // the seed cursors that need retrying with the master list of seed specs to run.
+        const updateSeedCursorIds = []
+        for (const seedCursor of retrySeedTableJobs) {
+            updateSeedCursorIds.push(seedCursor.id)
+            seedSpecsWithCursors.push([seedCursor.spec as SeedSpec, seedCursor])
+        }
+
+        seedSpecsWithCursors.forEach(([seedSpec, _]) => {
             const numTablesUsingLiveObject = tablePathsUsingLiveObjectId[seedSpec.liveObjectId].size
             const numTablesUsingLiveObjectForSeed = tablePathsUsingLiveObjectIdForSeed[seedSpec.liveObjectId].size
             // If this live object is only used in the table(s) about to be seeded, 
@@ -338,45 +427,155 @@ class Spec {
             }
         })
 
-        // Create seed table services and determine the seed strategies up-front for each.
-        const seedTableJobs = []
-        for (const seedSpec of seedSpecs) {
-            const { liveObjectId, seedColNames, tablePath } = seedSpec
+        // Create seed jobs and determine the seed strategies up-front for each.
+        const seedJobs = {}
+        for (const [seedSpec, seedCursor] of seedSpecsWithCursors) {
+            const { liveObjectId, tablePath } = seedSpec
+            const liveObject = this.liveObjects[liveObjectId]
+            if (!liveObject) continue
+
             try {
-                const liveObject = this.liveObjects[liveObjectId]
-                if (!liveObject) throw `No live object found for id ${liveObjectId}`
-                const seedTableService = new SeedTableService(seedSpec, liveObject)
-                await seedTableService.determineSeedStrategy()
-                seedTableJobs.push([seedTableService, seedSpec])
+                const seedTableService = new SeedTableService(
+                    seedSpec, 
+                    liveObject,
+                    seedCursor.id,
+                    seedCursor.cursor,
+                )
+                
+                // Determine seed strategy up-front unless already determined 
+                // (see '_processExternalTableLinkDataChanges()' within subscriber.ts)
+                if (!seedCursor.metadata?.foreignTablePath) {
+                    await seedTableService.determineSeedStrategy()
+                }
+                seedJobs[tablePath] = seedJobs[tablePath] || { seedTableJobs: [], resolveRecordsJobs: [] }
+                seedJobs[tablePath].seedTableJobs.push([seedTableService, seedSpec, seedCursor.metadata])
             } catch (err) {
                 logger.error(`Creating seed table service for ${tablePath} failed: ${err}`)
-                seedFailed(seedColNames.map(colName => [tablePath, colName].join('.')))
+                continue
             }
         }
 
-        // Seed tables in parallel.
-        seedTableJobs.forEach(seedTableJob => {
-            const [seedTableService, seedSpec] = seedTableJob
-            this._seedTable(seedTableService, seedSpec)
+        // Create resolve records jobs (if need be).
+        for (const seedCursor of retryResolveRecordsJobs) {
+            const resolveRecordsSpec = seedCursor.spec as ResolveRecordsSpec
+            const { liveObjectId, tablePath } = resolveRecordsSpec
+            const liveObject = this.liveObjects[liveObjectId]
+
+            if (!liveObject) {
+                deleteSeedCursorIds.push(seedCursor.id)
+                continue
+            }
+
+            const link = config.getLink(liveObjectId, tablePath)
+            if (!link) {
+                deleteSeedCursorIds.push(seedCursor.id)
+                continue
+            }
+
+            try {
+                const resolveRecordsService = new ResolveRecordsService(
+                    resolveRecordsSpec, 
+                    liveObject,
+                    link,
+                    seedCursor.id,
+                    seedCursor.cursor,
+                )
+                seedJobs[tablePath] = seedJobs[tablePath] || { seedTableJobs: [], resolveRecordsJobs: [] }
+                seedJobs[tablePath].resolveRecordsJobs.push([resolveRecordsService, resolveRecordsSpec])
+            } catch (err) {
+                logger.error(`Creating resolve records service for ${tablePath} failed: ${err}`)
+                continue
+            }
+
+            updateSeedCursorIds.push(seedCursor.id)
+        }
+
+        // Save seed cursor inserts/updates/deletes as a single batch transaction.
+        const saved = await processSeedCursorBatch(
+            createSeedCursors,
+            updateSeedCursorIds,
+            deleteSeedCursorIds,
+        )
+        if (!saved) return
+
+        // Run all seed jobs.
+        Object.values(seedJobs).forEach(jobs => {
+            this._runSeedJobs(jobs).catch(err => logger.error(err))
         })
     }
 
-    async _seedTable(seedTableService: SeedTableService, seedSpec: SeedSpec) {
-        const { liveObjectId, seedColNames, tablePath } = seedSpec
+    async _runSeedJobs(jobs: StringKeyMap) {
+        const seedTableJobs = jobs.seedTableJobs || []
+        const resolveRecordsJobs = jobs.resolveRecordsJobs || []
+        const seedLiveObjectIds = unique(seedTableJobs.map(j => j[1].liveObjectId))
+        const resolveLiveObjectIds = unique(resolveRecordsJobs.map(j => j[1].liveObjectId))
+        const liveObjectIdsOnlyInResolveJobs = resolveLiveObjectIds.filter(
+            liveObjectId => !seedLiveObjectIds.includes(liveObjectId)
+        )
 
+        // Run all resolve records jobs first.
+        await Promise.all(resolveRecordsJobs.map(([service, spec]) => (
+            this._resolveRecords(service, spec)
+        )))
+        
+        this._processEventsPostSeed(liveObjectIdsOnlyInResolveJobs)
+
+        // Run all seed jobs.
+        await Promise.all(seedTableJobs.map(([service, spec, metadata]) => (
+            this._seedTable(service, spec, metadata || {})
+        )))
+    }
+
+    async _resolveRecords(resolveRecordsService: ResolveRecordsService, resolveRecordsSpec: ResolveRecordsSpec) {
+        const { liveObjectId, tablePath } = resolveRecordsSpec
+        const seedCursorId = resolveRecordsService.seedCursorId
         try {
-            await seedTableService.executeSeedStrategy()
+            await resolveRecordsService.perform()
         } catch (err) {
-            logger.error(`Seed failed for table ${tablePath}: ${err}`)
-            seedFailed(seedColNames.map(colName => [tablePath, colName].join('.')))
-            return
+            logger.error(`Failed to resolve records for (liveObjectId=${liveObjectId}, tablePath=${tablePath}): ${err}`)
+            await seedFailed(seedCursorId)
         }
 
-        // Register seed as successful.
-        seedSucceeded(seedColNames.map(colName => [tablePath, colName].join('.')))
+        // Register seed cursor as successful.
+        await seedSucceeded(seedCursorId)
+    }
 
-        // Start listening to events from this live object now.
-        this.liveObjectsToIgnoreEventsFrom.delete(liveObjectId)
+    async _seedTable(seedTableService: SeedTableService, seedSpec: SeedSpec, metadata: StringKeyMap) {
+        const { liveObjectId, tablePath } = seedSpec
+        const foreignTablePath = metadata?.foreignTablePath
+
+        if (!!foreignTablePath) {
+            const foreignPrimaryKeyData = metadata.foreignPrimaryKeyData || []
+            try {
+                const foreignRecords = await getRecordsForPrimaryKeys(foreignTablePath, foreignPrimaryKeyData)
+                await seedTableService.seedWithForeignRecords(foreignTablePath, foreignRecords)
+            } catch (err) {
+                logger.error(`Seed failed for table ${tablePath}: ${err}`)
+                seedFailed(seedTableService.seedCursorId)             
+                return
+            }
+        } else {
+            try {
+                await seedTableService.executeSeedStrategy()
+            } catch (err) {
+                logger.error(`Seed failed for table ${tablePath}: ${err}`)
+                seedFailed(seedTableService.seedCursorId)
+                return
+            }
+        }
+
+        await Promise.all([
+            seedSucceeded(seedTableService.seedCursorId),
+            this._processEventsPostSeed([liveObjectId]),
+        ])
+    }
+
+    async _processEventsPostSeed(liveObjectIds: string[]) {
+        // Start listening to events from these live objects now.
+        liveObjectIds.forEach(liveObjectId => {
+            this.liveObjectsToIgnoreEventsFrom.delete(liveObjectId)
+        })
+
         const newEventNames = this._subscribeToLiveObjectEvents() || []
         if (!newEventNames.length) return
 

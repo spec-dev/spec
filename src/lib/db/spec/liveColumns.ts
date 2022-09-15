@@ -1,5 +1,5 @@
 import { schema, db } from '..'
-import { LiveColumn, LiveColumnSeedStatus } from '../../types'
+import { LiveColumn } from '../../types'
 import { SPEC_SCHEMA_NAME, LIVE_COLUMNS_TABLE_NAME } from './names'
 import logger from '../../logger'
 import { unique } from '../../utils/formatters'
@@ -32,26 +32,5 @@ export async function saveLiveColumns(records: LiveColumn[]) {
     } catch (err) {
         logger.error(`Error saving live columns: ${err}`)
         throw err
-    }
-}
-
-export async function seedFailed(columnPaths: string | string[]) {
-    updateSeedStatus(columnPaths, LiveColumnSeedStatus.Failed)
-}
-
-export async function seedSucceeded(columnPaths: string | string[]) {
-    updateSeedStatus(columnPaths, LiveColumnSeedStatus.Succeeded)
-}
-
-export async function updateSeedStatus(columnPaths: string | string[], seedStatus: LiveColumnSeedStatus) {
-    if (!Array.isArray(columnPaths)) {
-        columnPaths = [columnPaths]
-    }
-    try {
-        await liveColumns()
-            .update('seed_status', seedStatus)
-            .whereIn('column_path', unique(columnPaths))
-    } catch (err) {
-        logger.error(`Error updating live column seed status to ${seedStatus}: ${err}`)
     }
 }
