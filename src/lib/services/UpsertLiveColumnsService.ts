@@ -51,7 +51,9 @@ class UpsertLiveColumnsService {
         // (2) The live columns where the data source has changed.
         for (const querySpec of this.querySpecs) {
             const isNewColPath = !prevLiveColumnsMap.hasOwnProperty(querySpec.columnPath)
-            const colDataSourceChanged = prevLiveColumnsMap[querySpec.columnPath].liveProperty !== querySpec.liveProperty
+            const colDataSourceChanged = !isNewColPath && (
+                prevLiveColumnsMap[querySpec.columnPath].liveProperty !== querySpec.liveProperty
+            )
             
             if (isNewColPath || colDataSourceChanged) {
                 querySpecsToUpsert.push(querySpec)

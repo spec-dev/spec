@@ -301,6 +301,8 @@ class SeedTableService {
         // Start seeding with batches of input records.
         let t0 = null
         while (true) {
+            console.log('\nNEW BATCH\n')
+
             // Get batch of input records from the foreign table.
             const batchInputRecords = inputRecords || (await this._getForeignInputRecordsBatch(
                 foreignTablePath,
