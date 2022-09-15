@@ -42,18 +42,22 @@ class UpsertLiveColumnsService {
     }
 
     _findLiveColumnsToUpsert() {
+        const querySpecsToUpsert = []
+        const prevLiveColumnsMap = mapBy<LiveColumn>(this.prevLiveColumns, 'columnPath')
+        
         // Compare querySpecs and prevLiveColumns, to find:
         // -----
         // (1) The live columns that don't exist yet.
         // (2) The live columns where the data source has changed.
-        const querySpecsToUpsert = []
-        const existingLiveColumns = mapBy<LiveColumn>(this.prevLiveColumns, 'columnPath')
         for (const querySpec of this.querySpecs) {
-            if (!existingLiveColumns.hasOwnProperty(querySpec.columnPath) || 
-                existingLiveColumns[querySpec.columnPath].liveProperty !== querySpec.liveProperty) {
+            const isNewColPath = !prevLiveColumnsMap.hasOwnProperty(querySpec.columnPath)
+            const colDataSourceChanged = prevLiveColumnsMap[querySpec.columnPath].liveProperty !== querySpec.liveProperty
+            
+            if (isNewColPath || colDataSourceChanged) {
                 querySpecsToUpsert.push(querySpec)
             }
         }
+
         this.liveColumnsToUpsert = querySpecsToUpsert
     }
 

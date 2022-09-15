@@ -14,7 +14,7 @@
     },
     "dependencies": {
         "@ltd/j-toml": "1.30.0",
-        "@spec.dev/event-client": "^0.0.5",
+        "@spec.dev/event-client": "^0.0.7",
         "@streamparser/json": "^0.0.8",
         "chalk": "4.1.0",
         "humps": "^2.0.1",

@@ -25,6 +25,8 @@ import { tableSubscriber } from './db/subscriber'
 class Config {
 
     config: ProjectConfig
+
+    prevConfig: ProjectConfig
     
     isValid: boolean
 
@@ -345,7 +347,7 @@ class Config {
             if (!this._validateTablesSection()) {
                 valid = false
             }
-            if (valid && !(await this._checkTableStructures())) {
+            if (!(await this._checkTableStructures())) {
                 valid = false
             }
         } catch (err) {
@@ -601,6 +603,9 @@ class Config {
 
     _readAndParseFile() {
         try {
+            if (this.config) {
+                this.prevConfig = this.config
+            }
             const file = fs.readFileSync(constants.PROJECT_CONFIG_PATH, 'utf-8')
             this.config = toml.parse(file) as unknown as ProjectConfig
             this.fileContents = file.toString()

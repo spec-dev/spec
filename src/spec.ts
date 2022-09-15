@@ -15,6 +15,8 @@ import short from 'short-uuid'
 import ResolveRecordsService from './lib/services/ResolveRecordsService'
 import { unique } from './lib/utils/formatters'
 import { getRecordsForPrimaryKeys } from './lib/db/ops'
+import { Console } from 'console'
+import { sleep } from './lib/utils/time'
 
 class Spec {
 
@@ -257,21 +259,27 @@ class Spec {
             const cursor = this.eventSubs[newEventName].cursor
             cursor && cursors.push(cursor)
         }
- 
+        if (!cursors.length) return
+
         logger.info('Fetching any missed events...')
 
-        // Fetch any events that came after the following cursors.
-        try {
-            await messageClient.fetchMissedEvents(cursors, (events: SpecEvent<StringKeyMap | StringKeyMap[]>[]) => {
-                logger.info(`Fetched ${events.length} missed events.`)
-                events.forEach(event => this._onEvent(event, { forceToBuffer: true }))
-            })
-        } catch (error) {
-            logger.error(error)
-            // TODO: Retry a few times...
-        }
 
-        logger.info('Events in-sync.')
+        return new Promise(async (res, _) => {
+            // Fetch any events that came after the following cursors.
+            try {
+                await messageClient.fetchMissedEvents(cursors, (events: SpecEvent<StringKeyMap | StringKeyMap[]>[]) => {
+                    logger.info(`Fetched ${events.length} missed events.`)
+                    events.forEach(event => this._onEvent(event, { forceToBuffer: true }))
+                }, () => {
+                    logger.info('Events in-sync.')
+                    res(null)
+                })
+            } catch (error) {
+                logger.error(error)
+                res(null)
+                return
+            }
+        })
     }
 
     async _upsertAndSeedLiveColumns() {
@@ -673,10 +681,10 @@ class Spec {
 
     _doneProcessingNewConfig() {
         if (this.hasPendingConfigUpdate) {
+            this.hasPendingConfigUpdate = false
             this._onNewConfig()
             return
         }
-
         this.isProcessingNewConfig = false
     }
 

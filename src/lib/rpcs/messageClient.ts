@@ -1,5 +1,5 @@
 import { createEventClient, SpecEventClient, EventCallback } from '@spec.dev/event-client'
-import { EventCursor, MessageClientOptions, ResolvedLiveObject } from '../types'
+import { EventCursor, MessageClientOptions, ResolvedLiveObject, StringKeyMap } from '../types'
 import constants from '../constants'
 import { noop } from '../utils/formatters'
 import { RpcError } from '../errors'
@@ -33,6 +33,7 @@ export class MessageClient {
             hostname: constants.EVENTS_HOSTNAME,
             port: constants.EVENTS_PORT,
             signedAuthToken: constants.PROJECT_API_KEY,
+            ackTimeout: 30000,
             onConnect: () => {
                 this._createPingJobIfNotExists()
                 this.onConnect()
@@ -40,8 +41,8 @@ export class MessageClient {
         })
     }
 
-    on(eventName: string, cb: EventCallback) {
-        this.client.on(eventName, cb)
+    on(eventName: string, cb: EventCallback, opts?: StringKeyMap) {
+        this.client.on(eventName, cb, opts)
     }
 
     async off(eventName: string) {
@@ -61,10 +62,17 @@ export class MessageClient {
         }
     }
 
-    async fetchMissedEvents(cursors: EventCursor[], cb: EventCallback) {
+    async fetchMissedEvents(cursors: EventCursor[], cb: EventCallback, onDone?: any) {
         // Subscribe to a unique, temporary channel to use for missed-event transfer.
         const channel = short.generate()
-        this.on(channel, cb)
+        this.on(channel, async (data: any) => {
+            if (data && typeof data === 'object' && !Array.isArray(data) && data.done) {
+                await this.off(channel)
+                onDone && onDone()
+            } else {
+                cb(data)
+            }
+        }, { temp: true })
 
         // Tell the server to find and send over the missed events.
         const { error } = await this.call(RPC.GetEventsAfterCursors, {
@@ -75,9 +83,6 @@ export class MessageClient {
             logger.error(error)
             throw error
         }
-
-        // Trash temp channel.
-        await this.off(channel)
     }
 
     async call(functionName: RPC, payload?: any): Promise<{ data: any, error: RpcError }> {
@@ -86,7 +91,7 @@ export class MessageClient {
             data = await this.client.socket.invoke(functionName, payload)
         } catch (err) {
             const error = new RpcError(functionName, err)
-            logger.error(error)
+            logger.error(error.message)
             return { data: null, error }
         }
         return { data, error: null }
