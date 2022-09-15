@@ -237,8 +237,6 @@ export class TableSubscriber {
         const events = [...tableSub.buffer]
         this.tableSubs[tablePath].buffer = []
 
-        logger.info(`Processing ${events.length} data-change event(s) on ${tablePath}...`)
-
         // Mark new timestamp for table sub cursor.
         upsertTableSubCursor(tablePath)
 

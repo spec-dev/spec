@@ -86,7 +86,6 @@ class Spec {
         // Resolve all live objects for the versions listed in the config file.
         await this._getLiveObjectsInConfig()
         if (this.liveObjects === null) {
-            logger.info('No live objects listed in config.')
             this._doneProcessingNewConfig()
             return
         }
@@ -97,7 +96,6 @@ class Spec {
         // Subscribe to all events powering the live objects.
         const newEventNames = this._subscribeToLiveObjectEvents()
         if (!Object.keys(this.eventSubs).length) {
-            logger.info('No events to subscribe to.')
             this._doneProcessingNewConfig()
             return
         }
@@ -301,15 +299,12 @@ class Spec {
             if (!uniqueLiveObjectTablePaths.hasOwnProperty(uniqueKey)) {
                 uniqueLiveObjectTablePaths[uniqueKey] = []
             }
-
             uniqueLiveObjectTablePaths[uniqueKey].push(colName)
 
             if (!tablePathsUsingLiveObjectIdForSeed.hasOwnProperty(liveObjectId)) {
                 tablePathsUsingLiveObjectIdForSeed[liveObjectId] = new Set<string>()
             }
-            if (!tablePathsUsingLiveObjectIdForSeed[liveObjectId].has(tablePath)) {
-                tablePathsUsingLiveObjectIdForSeed[liveObjectId].add(tablePath)
-            }
+            tablePathsUsingLiveObjectIdForSeed[liveObjectId].add(tablePath)
         }
 
         // Create unique live-object/table seed specs to perform.
@@ -413,13 +408,24 @@ class Spec {
         // the seed cursors that need retrying with the master list of seed specs to run.
         const updateSeedCursorIds = []
         for (const seedCursor of retrySeedTableJobs) {
+            const spec = seedCursor.spec as SeedSpec
+            const { liveObjectId, tablePath } = spec
+            if (!tablePathsUsingLiveObjectIdForSeed.hasOwnProperty(liveObjectId)) {
+                tablePathsUsingLiveObjectIdForSeed[liveObjectId] = new Set<string>()
+            }
+            tablePathsUsingLiveObjectIdForSeed[liveObjectId].add(tablePath)
             updateSeedCursorIds.push(seedCursor.id)
-            seedSpecsWithCursors.push([seedCursor.spec as SeedSpec, seedCursor])
+            seedSpecsWithCursors.push([spec, seedCursor])
         }
 
         seedSpecsWithCursors.forEach(([seedSpec, _]) => {
+            if (!tablePathsUsingLiveObjectId.hasOwnProperty(seedSpec.liveObjectId) || 
+                !tablePathsUsingLiveObjectIdForSeed.hasOwnProperty(seedSpec.liveObjectId)
+            ) { return }
+
             const numTablesUsingLiveObject = tablePathsUsingLiveObjectId[seedSpec.liveObjectId].size
             const numTablesUsingLiveObjectForSeed = tablePathsUsingLiveObjectIdForSeed[seedSpec.liveObjectId].size
+
             // If this live object is only used in the table(s) about to be seeded, 
             // then add it to a list to indicates that events should be ignored.
             if (numTablesUsingLiveObject === numTablesUsingLiveObjectForSeed) {

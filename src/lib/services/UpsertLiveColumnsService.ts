@@ -1,8 +1,7 @@
-import { LiveColumnQuerySpec, LiveColumn, LiveColumnSeedStatus } from '../types'
+import { LiveColumnQuerySpec, LiveColumn } from '../types'
 import config from '../config'
 import { QueryError } from '../errors'
 import { mapBy } from '../utils/formatters'
-import { db } from '../db'
 import { SPEC_SCHEMA_NAME, LIVE_COLUMNS_TABLE_NAME, getLiveColumnsForColPaths, saveLiveColumns } from '../db/spec'
 
 class UpsertLiveColumnsService {
