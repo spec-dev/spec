@@ -1,9 +1,10 @@
-import { LiveObject, LiveObjectLink, StringKeyMap, Op } from '../types'
+import { LiveObject, LiveObjectLink, StringKeyMap, Op, OpType } from '../types'
 import { SpecEvent } from '@spec.dev/event-client'
 import ApplyDiffsService from './ApplyDiffsService'
 import logger from '../logger'
 import { db } from '../db'
 import RunOpService from './RunOpService'
+import chalk from 'chalk'
 
 class ApplyEventService {
     event: SpecEvent<StringKeyMap | StringKeyMap[]>
@@ -27,7 +28,7 @@ class ApplyEventService {
     }
 
     async perform() {
-        logger.info(`[${this.event.name}] Processing event...`)
+        this._logProcessingEvent()
         this._filterLiveObjectDiffs()
         await this.getOps()
         await this.runOps()
@@ -57,7 +58,14 @@ class ApplyEventService {
 
     async runOps() {
         if (!this.ops.length) return
-        logger.info(`Event generated ${this.ops.length} ops.`)
+
+        for (const op of this.ops) {
+            if (op.type === OpType.Insert) {
+                const numUpserts = op.data.length
+                logger.info(chalk.green(`Upserting ${numUpserts} records in ${op.schema}.${op.table}...`))
+            }
+        }
+
         await db.transaction(async (tx) => {
             await Promise.all(this.ops.map((op) => new RunOpService(op, tx).perform()))
         })
@@ -122,6 +130,13 @@ class ApplyEventService {
         }
 
         return linksToApplyDiffsTo
+    }
+
+    _logProcessingEvent() {
+        const origin = this.event.origin
+        const chainId = origin?.chainId
+        const blockNumber = origin?.blockNumber
+        logger.info(`[${chainId}:${blockNumber}] Processing ${this.event.name} (${this.event.nonce})...`)
     }
 }
 

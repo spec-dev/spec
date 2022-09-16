@@ -42,3 +42,5 @@ spec:
           value: /usr/app/.spec
         - name: LOGS_API_KEY
           value: {{LOGS_API_KEY}}
+        - name: FLIP
+          value: heads
