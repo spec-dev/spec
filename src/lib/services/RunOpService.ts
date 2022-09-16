@@ -7,7 +7,6 @@ import { tablesMeta } from '../db/tablesMeta'
 import { pool, db } from '../db'
 
 class RunOpService {
-
     op: Op
 
     tx: Knex.Transaction
@@ -42,7 +41,7 @@ class RunOpService {
         if (this.op.conflictTargets) {
             insertQuery.onConflict(this.op.conflictTargets).merge()
         }
-            
+
         // Perform the query, inserting the record(s).
         try {
             await insertQuery
@@ -79,12 +78,20 @@ class RunOpService {
         const tempTableName = `${this.op.table}_${short.generate()}`
         const colTypes = tablesMeta[this.tablePath].colTypes
         const primaryKeyCols = tablesMeta[this.tablePath].primaryKey
-        const primaryKeyColNames = primaryKeyCols.map(pk => pk.name)
-        const primaryKeyColDefs = primaryKeyColNames.map(colName => `${colName} ${colTypes[colName]} not null`)
+        const primaryKeyColNames = primaryKeyCols.map((pk) => pk.name)
+        const primaryKeyColDefs = primaryKeyColNames.map(
+            (colName) => `${colName} ${colTypes[colName]} not null`
+        )
         const updateColNames = Object.keys(this.op.data[0])
-        const updateColDefs = updateColNames.map(colName => `${colName} ${colTypes[colName]}`)
-        const primaryKeyConstraintDef = `constraint ${tempTableName}_pkey primary key (${primaryKeyColNames.join(', ')})`
-        const innerTableDef = [...primaryKeyColDefs, ...updateColDefs, primaryKeyConstraintDef].join(', ')
+        const updateColDefs = updateColNames.map((colName) => `${colName} ${colTypes[colName]}`)
+        const primaryKeyConstraintDef = `constraint ${tempTableName}_pkey primary key (${primaryKeyColNames.join(
+            ', '
+        )})`
+        const innerTableDef = [
+            ...primaryKeyColDefs,
+            ...updateColDefs,
+            primaryKeyConstraintDef,
+        ].join(', ')
 
         // Merge primary keys and updates into individual records.
         const tempRecords = []
@@ -94,18 +101,29 @@ class RunOpService {
 
         // Build the bulk insert query for a temp table.
         const valueColNames = Object.keys(tempRecords[0])
-        const valuePlaceholders = tempRecords.map(r => `(${valueColNames.map(_ => '?').join(', ')})`).join(', ')
-        const valueBindings = tempRecords.map(r => valueColNames.map(colName => r[colName])).flat()
-        const insertQuery = db.raw(
-            `INSERT INTO ${tempTableName} (${valueColNames.join(', ')}) VALUES ${valuePlaceholders}`,
-            valueBindings,
-        ).toSQL().toNative()
+        const valuePlaceholders = tempRecords
+            .map((r) => `(${valueColNames.map((_) => '?').join(', ')})`)
+            .join(', ')
+        const valueBindings = tempRecords
+            .map((r) => valueColNames.map((colName) => r[colName]))
+            .flat()
+        const insertQuery = db
+            .raw(
+                `INSERT INTO ${tempTableName} (${valueColNames.join(
+                    ', '
+                )}) VALUES ${valuePlaceholders}`,
+                valueBindings
+            )
+            .toSQL()
+            .toNative()
 
         // Which columns to merge over from the temp table and how the target table should join against it.
-        const updateSet = updateColNames.map(colName => `${colName} = ${tempTableName}.${colName}`).join(', ')
-        const updateWhere = primaryKeyColNames.map(
-            colName => `${this.tablePath}.${colName} = ${tempTableName}.${colName}`
-        ).join(' AND ')
+        const updateSet = updateColNames
+            .map((colName) => `${colName} = ${tempTableName}.${colName}`)
+            .join(', ')
+        const updateWhere = primaryKeyColNames
+            .map((colName) => `${this.tablePath}.${colName} = ${tempTableName}.${colName}`)
+            .join(' AND ')
 
         // Since knex.js is FUCKING trash and can't understand how to
         // work with temp tables, acquire a connection from 'pg' directly.
@@ -114,13 +132,17 @@ class RunOpService {
         try {
             // Create temp table and insert updates + primary key data.
             await client.query('BEGIN')
-            await client.query(`CREATE TEMP TABLE ${tempTableName} (${innerTableDef}) ON COMMIT DROP`)
-            
+            await client.query(
+                `CREATE TEMP TABLE ${tempTableName} (${innerTableDef}) ON COMMIT DROP`
+            )
+
             // Bulk insert the updated records to the temp table.
             await client.query(insertQuery.sql, insertQuery.bindings)
 
             // Merge the temp table updates into the target table ("bulk update").
-            await client.query(`UPDATE ${this.tablePath} SET ${updateSet} FROM ${tempTableName} WHERE ${updateWhere}`)
+            await client.query(
+                `UPDATE ${this.tablePath} SET ${updateSet} FROM ${tempTableName} WHERE ${updateWhere}`
+            )
             await client.query('COMMIT')
         } catch (e) {
             await client.query('ROLLBACK')
@@ -132,7 +154,7 @@ class RunOpService {
 
     _getWhereConditionsAsList(): string[][] {
         let conditions = []
-        for (let colName in (this.op.where || {})) {
+        for (let colName in this.op.where || {}) {
             conditions.push([colName, this.op.where[colName]])
         }
         return conditions

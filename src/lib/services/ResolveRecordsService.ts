@@ -1,4 +1,14 @@
-import { OpType, LiveObject, LiveObjectLink, StringKeyMap, TableDataSources, EdgeFunction, StringMap, LiveObjectFunctionRole, ResolveRecordsSpec } from '../types'
+import {
+    OpType,
+    LiveObject,
+    LiveObjectLink,
+    StringKeyMap,
+    TableDataSources,
+    EdgeFunction,
+    StringMap,
+    LiveObjectFunctionRole,
+    ResolveRecordsSpec,
+} from '../types'
 import { reverseMap, toMap, unique } from '../utils/formatters'
 import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
@@ -13,7 +23,6 @@ import chalk from 'chalk'
 const valueSep = '__:__'
 
 class ResolveRecordsService {
-
     tablePath: string
 
     liveObject: LiveObject
@@ -65,12 +74,16 @@ class ResolveRecordsService {
     get tablePrimaryKeys(): string[] {
         const meta = tablesMeta[this.tablePath]
         if (!meta) throw `No meta registered for table ${this.tablePath}`
-        return meta.primaryKey.map(pk => pk.name)
+        return meta.primaryKey.map((pk) => pk.name)
     }
 
     get tableUniqueConstraint(): string[] {
-        const uniqueConstaint = config.getUniqueConstraintForLink(this.liveObject.id, this.tablePath)
-        if (!uniqueConstaint) throw `No unique constraint for link ${this.liveObject.id} <-> ${this.tablePath}`
+        const uniqueConstaint = config.getUniqueConstraintForLink(
+            this.liveObject.id,
+            this.tablePath
+        )
+        if (!uniqueConstaint)
+            throw `No unique constraint for link ${this.liveObject.id} <-> ${this.tablePath}`
         return uniqueConstaint
     }
 
@@ -97,10 +110,10 @@ class ResolveRecordsService {
 
     constructor(
         resolveRecordsSpec: ResolveRecordsSpec,
-        liveObject: LiveObject, 
-        link: LiveObjectLink, 
-        seedCursorId: string, 
-        cursor: number,
+        liveObject: LiveObject,
+        link: LiveObjectLink,
+        seedCursorId: string,
+        cursor: number
     ) {
         this.tablePath = resolveRecordsSpec.tablePath
         this.liveObject = liveObject
@@ -130,17 +143,19 @@ class ResolveRecordsService {
         // Create batched function inputs and an index to map live object responses -> records.
         this._createAndMapFunctionInputs()
 
-        logger.info(chalk.cyanBright(
-            `Resolving live data for ${this.inputRecords.length} records in ${this.tablePath}... `
-        ))
+        logger.info(
+            chalk.cyanBright(
+                `Resolving live data for ${this.inputRecords.length} records in ${this.tablePath}... `
+            )
+        )
 
         // Call spec function and handle response data.
         const t0 = performance.now()
         try {
             await callSpecFunction(
-                this.resolveFunction, 
-                this.batchFunctionInputs, 
-                async data => await this._handleFunctionRespData(data as StringKeyMap[]),
+                this.resolveFunction,
+                this.batchFunctionInputs,
+                async (data) => await this._handleFunctionRespData(data as StringKeyMap[])
             )
         } catch (err) {
             logger.error(err)
@@ -151,7 +166,13 @@ class ResolveRecordsService {
         const seconds = Number(((tf - t0) / 1000).toFixed(2))
         const rate = Math.round(this.seedCount / seconds)
         logger.info(chalk.cyanBright('Done.'))
-        logger.info(chalk.cyanBright(`Updated ${this.seedCount.toLocaleString('en-US')} records in ${seconds} seconds (${rate.toLocaleString('en-US')} rows/s)`))
+        logger.info(
+            chalk.cyanBright(
+                `Updated ${this.seedCount.toLocaleString(
+                    'en-US'
+                )} records in ${seconds} seconds (${rate.toLocaleString('en-US')} rows/s)`
+            )
+        )
     }
 
     async _handleFunctionRespData(batch: StringKeyMap[]) {
@@ -177,10 +198,14 @@ class ResolveRecordsService {
             }
             if (!Object.keys(recordUpdates).length) continue
 
-            const liveObjectToPkConditionsKey = this.inputPropertyKeys.map(k => liveObjectData[k]).join(valueSep)
+            const liveObjectToPkConditionsKey = this.inputPropertyKeys
+                .map((k) => liveObjectData[k])
+                .join(valueSep)
             const primaryKeyConditions = this.indexedPkConditions[liveObjectToPkConditionsKey] || []
             if (!primaryKeyConditions?.length) {
-                logger.error(`Could not find primary keys on ${this.tablePath} for value ${liveObjectToPkConditionsKey}`)
+                logger.error(
+                    `Could not find primary keys on ${this.tablePath} for value ${liveObjectToPkConditionsKey}`
+                )
                 continue
             }
 
@@ -201,7 +226,7 @@ class ResolveRecordsService {
                         where: pkConditions,
                         data: recordUpdates,
                     })
-                }    
+                }
             }
         }
 
@@ -216,9 +241,9 @@ class ResolveRecordsService {
                 }
                 await new RunOpService(op).perform()
             } else {
-                await db.transaction(async tx => {
-                    await Promise.all(updateOps.map(op => new RunOpService(op, tx).perform()))
-                })    
+                await db.transaction(async (tx) => {
+                    await Promise.all(updateOps.map((op) => new RunOpService(op, tx).perform()))
+                })
             }
         } catch (err) {
             throw new QueryError('update', this.schemaName, this.tableName, err)
@@ -235,7 +260,7 @@ class ResolveRecordsService {
                 const [colSchemaName, colTableName, colName] = colPath.split('.')
                 const colTablePath = [colSchemaName, colTableName].join('.')
                 const inputArg = this.colPathToFunctionInputArg[colPath]
-                const recordColKey = (colTablePath === this.tablePath) ? colName : colPath
+                const recordColKey = colTablePath === this.tablePath ? colName : colPath
                 const value = record[recordColKey]
                 input[inputArg] = value
                 keyComps.push(value)
@@ -244,7 +269,7 @@ class ResolveRecordsService {
             const key = keyComps.join(valueSep)
             if (!indexedPkConditions.hasOwnProperty(key)) {
                 indexedPkConditions[key] = []
-            } 
+            }
             const recordPrimaryKeys = {}
             for (const pk of this.tablePrimaryKeys) {
                 recordPrimaryKeys[pk] = record[pk]
@@ -287,10 +312,10 @@ class ResolveRecordsService {
     }
 
     _buildQueryForInputRecords(): StringKeyMap {
-        const queryConditions = { 
+        const queryConditions = {
             join: [],
             select: [`${this.tablePath}.*`],
-            whereIn: []
+            whereIn: [],
         }
 
         // Select all cols on target table + linked foreign cols.
@@ -314,7 +339,7 @@ class ResolveRecordsService {
 
         // Group primary keys into arrays of values for the same key.
         const primaryKeys = {}
-        Object.keys(this.primaryKeyData[0]).forEach(key => {
+        Object.keys(this.primaryKeyData[0]).forEach((key) => {
             primaryKeys[key] = []
         })
         for (const pkData of this.primaryKeyData) {
@@ -330,7 +355,7 @@ class ResolveRecordsService {
             const colPath = [this.tablePath, colName].join('.')
             queryConditions.whereIn.push([colPath, unique(vals)])
         }
-        
+
         return queryConditions
     }
 
@@ -342,7 +367,7 @@ class ResolveRecordsService {
             }
 
             const { argsMap, args } = edgeFunction
- 
+
             const uniqueByProperties = this.linkUniqueByProperties
             let allUniqueByPropertiesAcceptedAsFunctionInput = true
             for (let propertyKey of uniqueByProperties) {
@@ -400,7 +425,9 @@ class ResolveRecordsService {
 
         // Get the live object property keys associated with each input column.
         const reverseLinkProperties = this.reverseLinkProperties
-        this.inputPropertyKeys = this.inputArgColPaths.map(colPath => reverseLinkProperties[colPath])
+        this.inputPropertyKeys = this.inputArgColPaths.map(
+            (colPath) => reverseLinkProperties[colPath]
+        )
     }
 }
 

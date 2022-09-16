@@ -21,7 +21,9 @@ function specSchemaAndTablesExist(): Promise<boolean> {
     return new Promise(async (res, _) => {
         // Ensure 'spec' schema exists.
         if (!(await doesSchemaExist(SPEC_SCHEMA_NAME))) {
-            logger.warn(`Schema "spec" does not yet exist. Checking again in ${NOT_READY_DELAY / 1000}s...`)
+            logger.warn(
+                `Schema "spec" does not yet exist. Checking again in ${NOT_READY_DELAY / 1000}s...`
+            )
             setTimeout(() => res(false), NOT_READY_DELAY)
             return
         }
@@ -41,11 +43,15 @@ function specSchemaAndTablesExist(): Promise<boolean> {
             }
         }
         if (tablesThatDontExist.length > 0) {
-            logger.warn(`Tables ${tablesThatDontExist.join(', ')} do not yet exist. Checking again in ${NOT_READY_DELAY / 1000}s...`)
+            logger.warn(
+                `Tables ${tablesThatDontExist.join(', ')} do not yet exist. Checking again in ${
+                    NOT_READY_DELAY / 1000
+                }s...`
+            )
             setTimeout(() => res(false), NOT_READY_DELAY)
             return
         }
-        
+
         res(true)
     })
 }

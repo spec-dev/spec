@@ -11,11 +11,11 @@ export async function getTableSubCursorsForPaths(tablePaths: string[]): Promise<
     if (!tablePaths.length) return []
     let records
     try {
-        records = await tableSubCursors()
-            .select('*')
-            .whereIn('table_path', unique(tablePaths))
+        records = await tableSubCursors().select('*').whereIn('table_path', unique(tablePaths))
     } catch (err) {
-        logger.error(`Error getting table_sub_cursors for table_paths: ${tablePaths.join(', ')}: ${err}`)
+        logger.error(
+            `Error getting table_sub_cursors for table_paths: ${tablePaths.join(', ')}: ${err}`
+        )
         return []
     }
     return camelizeKeys(records || [])
@@ -23,7 +23,7 @@ export async function getTableSubCursorsForPaths(tablePaths: string[]): Promise<
 
 export async function upsertTableSubCursor(tablePath: string) {
     try {
-        await db.transaction(async tx => {
+        await db.transaction(async (tx) => {
             await tableSubCursors(tx)
                 .insert({
                     table_path: tablePath,
@@ -39,7 +39,7 @@ export async function upsertTableSubCursor(tablePath: string) {
 
 export async function deleteTableSubCursor(tablePath: string) {
     try {
-        await db.transaction(async tx => {
+        await db.transaction(async (tx) => {
             await tableSubCursors(tx).where('table_path', tablePath).del()
         })
     } catch (err) {

@@ -124,7 +124,7 @@ export interface TableSub {
 }
 
 export interface TableSubEvent {
-    timestamp: string,
+    timestamp: string
     operation: TriggerEvent
     schema: string
     table: string
@@ -198,7 +198,7 @@ export interface SeedSpec {
 export interface ResolveRecordsSpec {
     liveObjectId: string
     tablePath: string
-    primaryKeyData: StringKeyMap[], 
+    primaryKeyData: StringKeyMap[]
 }
 
 export enum ConstraintType {
@@ -226,7 +226,7 @@ export interface ForeignKeyConstraint {
 export enum TriggerEvent {
     INSERT = 'INSERT',
     UPDATE = 'UPDATE',
-    MISSED = 'MISSED'
+    MISSED = 'MISSED',
 }
 
 export interface Trigger {
@@ -248,7 +248,7 @@ export interface TablesMeta {
     primaryKey: DBColumn[]
     uniqueColGroups: string[][]
     foreignKeys: ForeignKeyConstraint[]
-    colTypes: StringMap,
+    colTypes: StringMap
 }
 
 export interface TableLink {

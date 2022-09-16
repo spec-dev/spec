@@ -29,11 +29,11 @@ const constants: StringKeyMap = {
     SEED_INPUT_BATCH_SIZE: Number(ev('SEED_INPUT_BATCH_SIZE', 1000)),
     FOREIGN_SEED_INPUT_BATCH_SIZE: Number(ev('SEED_INPUT_BATCH_SIZE', 100)),
     STREAMING_SEED_UPSERT_BATCH_SIZE: Number(ev('STREAMING_SEED_UPSERT_BATCH_SIZE', 1000)),
-    
+
     // TODO
     DEBUG: ['true', true].includes(ev('DEBUG')),
 
-    // TODO: 
+    // TODO:
     SAVE_EVENT_CURSORS_INTERVAL: Number(ev('SAVE_EVENT_CURSORS_INTERVAL', 1000)),
     ANALYZE_TABLES_INTERVAL: Number(ev('ANALYZE_TABLES_INTERVAL', 30000)),
     RETRY_SEED_CURSORS_INTERVAL: Number(ev('RETRY_SEED_CURSORS_INTERVAL', 30000)),
@@ -44,11 +44,14 @@ const constants: StringKeyMap = {
     TABLE_SUB_UPDATED_AT_COL_NAME: ev('TABLE_SUB_UPDATED_AT_COL_NAME', 'updated_at'),
 
     MAX_UPDATES_BEFORE_BULK_UPDATE_USED: Number(ev('MAX_UPDATES_BEFORE_BULK_UPDATE_USED', 10)),
+
+    LOGS_HOST: ev('LOGS_HOST'),
+    LOGS_PORT: Number(ev('LOGS_PORT')),
 }
 
 constants.PROJECT_CONFIG_PATH = path.join(
-    constants.SPEC_CONFIG_DIR, 
-    constants.PROJECT_CONFIG_FILE_NAME,
+    constants.SPEC_CONFIG_DIR,
+    constants.PROJECT_CONFIG_FILE_NAME
 )
 
 export default constants

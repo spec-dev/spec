@@ -1,6 +1,20 @@
 import { pgListener, db } from '.'
 import { getSpecTriggers, formatTriggerName, dropTrigger, createTrigger } from './triggers'
-import { TableSub, TableSubStatus, TableSubEvent, StringKeyMap, StringMap, Trigger, TriggerEvent, TableLinkDataChanges, LiveObject, TableSubCursor, ResolveRecordsSpec, SeedCursorJobType, SeedCursorStatus } from '../types'
+import {
+    TableSub,
+    TableSubStatus,
+    TableSubEvent,
+    StringKeyMap,
+    StringMap,
+    Trigger,
+    TriggerEvent,
+    TableLinkDataChanges,
+    LiveObject,
+    TableSubCursor,
+    ResolveRecordsSpec,
+    SeedCursorJobType,
+    SeedCursorStatus,
+} from '../types'
 import { tablesMeta, getRel } from './tablesMeta'
 import config from '../config'
 import logger from '../logger'
@@ -9,12 +23,15 @@ import ResolveRecordsService from '../services/ResolveRecordsService'
 import constants from '../constants'
 import { debounce } from 'lodash'
 import { getRecordsForPrimaryKeys } from './ops'
-import { getTableSubCursorsForPaths, upsertTableSubCursor, deleteTableSubCursor } from './spec/tableSubCursors'
+import {
+    getTableSubCursorsForPaths,
+    upsertTableSubCursor,
+    deleteTableSubCursor,
+} from './spec/tableSubCursors'
 import { createSeedCursor, seedFailed, seedSucceeded } from './spec/seedCursors'
 import short from 'short-uuid'
 
 export class TableSubscriber {
-
     tableSubs: { [key: string]: TableSub } = {}
 
     // Set dynamically from the Spec class.
@@ -25,18 +42,18 @@ export class TableSubscriber {
         this._populateTableSubsFromConfig()
 
         // Find which table subs are pending (which ones we need to check on to make sure they exist).
-        const pendingSubs = Object.values(this.tableSubs).filter(ts => (
-            ts.status === TableSubStatus.Pending
-        ))
+        const pendingSubs = Object.values(this.tableSubs).filter(
+            (ts) => ts.status === TableSubStatus.Pending
+        )
         if (!pendingSubs.length) return
 
         // Upsert all pending subs (with their Postgres triggers and functions).
         await this.upsertTableSubsWithTriggers(pendingSubs)
 
         // All subs that were successfully upserted in the previous step should now be in the subscribing state.
-        const subsThatNeedSubscribing = Object.values(this.tableSubs).filter(ts => (
-            ts.status === TableSubStatus.Subscribing
-        ))
+        const subsThatNeedSubscribing = Object.values(this.tableSubs).filter(
+            (ts) => ts.status === TableSubStatus.Subscribing
+        )
         if (!subsThatNeedSubscribing.length) {
             logger.warn('Not all pending table subs moved to the subscribing status...')
             return
@@ -66,9 +83,9 @@ export class TableSubscriber {
             const key = [schema, table, event].join(':')
             existingTriggersMap[key] = trigger
         }
-        
+
         // Upsert table subs with their Postgres triggers and functions.
-        await Promise.all(tableSubs.map(ts => this._upsertTableSub(ts, existingTriggersMap)))
+        await Promise.all(tableSubs.map((ts) => this._upsertTableSub(ts, existingTriggersMap)))
     }
 
     async deleteTableSub(tablePath: string) {
@@ -89,9 +106,8 @@ export class TableSubscriber {
         if (subscribedChannels.includes(constants.TABLE_SUBS_CHANNEL)) return
 
         // Register event handler.
-        pgListener.notifications.on(
-            constants.TABLE_SUBS_CHANNEL,
-            event => this._onTableDataChange(event),
+        pgListener.notifications.on(constants.TABLE_SUBS_CHANNEL, (event) =>
+            this._onTableDataChange(event)
         )
 
         // Actually start listening to table data changes.
@@ -124,7 +140,7 @@ export class TableSubscriber {
         if (tableSub.blacklist.has(this._primaryKeysToBlacklistKey(event.primaryKeys))) {
             return
         }
-        
+
         // Immediately process events if buffer hits max capacity.
         this.tableSubs[tablePath].buffer.push(event)
         if (this.tableSubs[tablePath].buffer.length >= constants.TABLE_SUB_BUFFER_MAX_SIZE) {
@@ -144,7 +160,10 @@ export class TableSubscriber {
         }
 
         const eventPrimaryKeysId = Object.keys(eventPrimaryKeys).sort().join(',')
-        const primaryKeyId = tableMeta.primaryKey.map(pk => pk.name).sort().join(',')
+        const primaryKeyId = tableMeta.primaryKey
+            .map((pk) => pk.name)
+            .sort()
+            .join(',')
 
         if (eventPrimaryKeysId !== primaryKeyId) {
             logger.error(
@@ -159,12 +178,15 @@ export class TableSubscriber {
     }
 
     _primaryKeysToBlacklistKey(primaryKeys: StringKeyMap) {
-        return Object.keys(primaryKeys).sort().map(k => primaryKeys[k]).join(':')
+        return Object.keys(primaryKeys)
+            .sort()
+            .map((k) => primaryKeys[k])
+            .join(':')
     }
 
     _blacklistRecords(tablePath: string, events: TableSubEvent[]): string[] {
         const keysAdded = []
-        events.forEach(event => {
+        events.forEach((event) => {
             const key = this._primaryKeysToBlacklistKey(event.primaryKeys)
             this.tableSubs[tablePath].blacklist.add(key)
             keysAdded.push(key)
@@ -173,7 +195,7 @@ export class TableSubscriber {
     }
 
     _unblacklistRecords(tablePath: string, keys: string[]) {
-        keys.forEach(key => {
+        keys.forEach((key) => {
             this.tableSubs[tablePath].blacklist.delete(key)
         })
     }
@@ -188,30 +210,37 @@ export class TableSubscriber {
         if (!tableSubCursors.length) return
 
         // Process any missed events for these tables in parallel.
-        tableSubCursors.forEach(t => this._processMissedEventsForTableSubCursor(t))
+        tableSubCursors.forEach((t) => this._processMissedEventsForTableSubCursor(t))
     }
-    
+
     async _processMissedEventsForTableSubCursor(tableSubCursor: TableSubCursor) {
         const { tablePath, timestamp } = tableSubCursor
         const [schema, table] = tablePath.split('.')
         const meta = tablesMeta[tablePath]
         if (!meta) return
-        const primaryKeyColNames = meta.primaryKey.map(pk => pk.name)
+        const primaryKeyColNames = meta.primaryKey.map((pk) => pk.name)
 
         // Find records that were updated after the last registered cursor for this table.
         let recordsUpdatedAfterLastCursor = []
         try {
-            recordsUpdatedAfterLastCursor = await db.from(tablePath)
+            recordsUpdatedAfterLastCursor = await db
+                .from(tablePath)
                 .select('*')
-                .where(db.raw(`timezone('UTC', ${constants.TABLE_SUB_UPDATED_AT_COL_NAME}) > ?`, [timestamp.toISOString()]))
+                .where(
+                    db.raw(`timezone('UTC', ${constants.TABLE_SUB_UPDATED_AT_COL_NAME}) > ?`, [
+                        timestamp.toISOString(),
+                    ])
+                )
         } catch (err) {
-            logger.error(`Error finding missed events for table sub cursor for ${tablePath}: ${err}`)
+            logger.error(
+                `Error finding missed events for table sub cursor for ${tablePath}: ${err}`
+            )
             return
         }
-        if (!recordsUpdatedAfterLastCursor?.length) return  
+        if (!recordsUpdatedAfterLastCursor?.length) return
 
         // Register missed table data-change events for each of these records.
-        recordsUpdatedAfterLastCursor.forEach(record => {
+        recordsUpdatedAfterLastCursor.forEach((record) => {
             const primaryKeys = {}
             for (const key of primaryKeyColNames) {
                 primaryKeys[key] = record[key]
@@ -232,7 +261,7 @@ export class TableSubscriber {
         // Get table sub for path.
         const tableSub = this.tableSubs[tablePath]
         if (!tableSub) return
-        
+
         // Extract events from buffer / reset buffer.
         const events = [...tableSub.buffer]
         this.tableSubs[tablePath].buffer = []
@@ -264,19 +293,26 @@ export class TableSubscriber {
     }
 
     async _resolveExternalRecords(tableSub: TableSub, tablePath: string, events: TableSubEvent[]) {
-        await Promise.all(this._getExternalTableLinkDataChanges(tablePath, events).map(changes => 
-            this._processExternalTableLinkDataChanges(tableSub, changes)
-        ))
+        await Promise.all(
+            this._getExternalTableLinkDataChanges(tablePath, events).map((changes) =>
+                this._processExternalTableLinkDataChanges(tableSub, changes)
+            )
+        )
     }
 
-    async _processInternalTableLinkDataChanges(tableSub: TableSub, tableLinkDataChanges: TableLinkDataChanges) {
+    async _processInternalTableLinkDataChanges(
+        tableSub: TableSub,
+        tableLinkDataChanges: TableLinkDataChanges
+    ) {
         const { tableLink, events } = tableLinkDataChanges
         const { liveObjectId, link } = tableLink
         const tablePath = [tableSub.schema, tableSub.table].join('.')
-        
+
         // Parse/update primary keys in case of numerics.
-        const primaryKeyData = events.map(e => this._parsePrimaryKeys(e.primaryKeys, tableSub.primaryKeyTypes))
-        
+        const primaryKeyData = events.map((e) =>
+            this._parsePrimaryKeys(e.primaryKeys, tableSub.primaryKeyTypes)
+        )
+
         // Get full live object associated with table link.
         const liveObject = this.getLiveObject(liveObjectId)
         if (!liveObject) {
@@ -304,11 +340,11 @@ export class TableSubscriber {
         // Auto-resolve and populate any live columns on these records.
         try {
             const resolveRecordsService = new ResolveRecordsService(
-                resolveRecordsSpec, 
-                liveObject, 
+                resolveRecordsSpec,
+                liveObject,
                 link,
                 seedCursor.id,
-                seedCursor.cursor,
+                seedCursor.cursor
             )
             await resolveRecordsService.perform()
         } catch (err) {
@@ -320,15 +356,19 @@ export class TableSubscriber {
         await seedSucceeded(seedCursor.id)
     }
 
-
-    async _processExternalTableLinkDataChanges(tableSub: TableSub, tableLinkDataChanges: TableLinkDataChanges) {
+    async _processExternalTableLinkDataChanges(
+        tableSub: TableSub,
+        tableLinkDataChanges: TableLinkDataChanges
+    ) {
         const { tableLink, events } = tableLinkDataChanges
         const { liveObjectId, link } = tableLink
         const tablePath = [tableSub.schema, tableSub.table].join('.')
 
         // Parse/update primary keys in case of numerics.
-        const primaryKeyData = events.map(e => this._parsePrimaryKeys(e.primaryKeys, tableSub.primaryKeyTypes))
-        
+        const primaryKeyData = events.map((e) =>
+            this._parsePrimaryKeys(e.primaryKeys, tableSub.primaryKeyTypes)
+        )
+
         // Get all records for primary keys.
         let records: StringKeyMap[]
 
@@ -383,13 +423,18 @@ export class TableSubscriber {
             metadata: {
                 foreignTablePath: tablePath,
                 foreignPrimaryKeyData: primaryKeyData,
-            }
+            },
         }
         await createSeedCursor(seedCursor)
 
         // Seed table using foreign records.
         try {
-            const seedTableService = new SeedTableService(seedSpec, liveObject, seedCursor.id, seedCursor.cursor)
+            const seedTableService = new SeedTableService(
+                seedSpec,
+                liveObject,
+                seedCursor.id,
+                seedCursor.cursor
+            )
             await seedTableService.seedWithForeignRecords(tablePath, records)
         } catch (err) {
             logger.error(`Failed to auto-seed ${link.table} using ${tablePath}: ${err}`)
@@ -400,7 +445,10 @@ export class TableSubscriber {
         await seedSucceeded(seedCursor.id)
     }
 
-    _getInternalTableLinkDataChanges(tablePath: string, events: TableSubEvent[]): TableLinkDataChanges[] {
+    _getInternalTableLinkDataChanges(
+        tablePath: string,
+        events: TableSubEvent[]
+    ): TableLinkDataChanges[] {
         // Get all links where this table is the target.
         const tableLinks = config.getLinksForTable(tablePath)
         if (!tableLinks.length) return []
@@ -427,7 +475,10 @@ export class TableSubscriber {
                         break
                     }
                 }
-                if (allLiveColsWereAffectedSimultaneously && event.operation !== TriggerEvent.MISSED) {
+                if (
+                    allLiveColsWereAffectedSimultaneously &&
+                    event.operation !== TriggerEvent.MISSED
+                ) {
                     continue
                 }
 
@@ -443,7 +494,7 @@ export class TableSubscriber {
                         resolvedColName = foreignKeyConstraint.foreignKey
                     }
 
-                    resolvedLinkColNames.push(resolvedColName)        
+                    resolvedLinkColNames.push(resolvedColName)
                 }
 
                 // Process the event if any linked columns were affected.
@@ -465,22 +516,25 @@ export class TableSubscriber {
         return internalLinksToProcess
     }
 
-    _getExternalTableLinkDataChanges(tablePath: string, events: TableSubEvent[]): TableLinkDataChanges[] {
+    _getExternalTableLinkDataChanges(
+        tablePath: string,
+        events: TableSubEvent[]
+    ): TableLinkDataChanges[] {
         // Get all links where this table is NOT the target BUT IS USED to seed another table.
         const depTableLinks = config.getExternalTableLinksDependentOnTableForSeed(tablePath)
 
         const externalLinksToProcess = []
-        for (const depTableLink of depTableLinks) {            
+        for (const depTableLink of depTableLinks) {
             const insertsCausingDownstreamSeeds = []
             for (const event of events) {
                 // We only care about inserts and missed events for dependent table reactions.
                 if (![TriggerEvent.INSERT, TriggerEvent.MISSED].includes(event.operation)) continue
 
                 const colNamesWithValues = this._getColNamesAffectedByEvent(event)
-                const colPathsWithValues = new Set<string>((colNamesWithValues).map(colName => (
-                    [tablePath, colName].join('.')
-                )))
-    
+                const colPathsWithValues = new Set<string>(
+                    colNamesWithValues.map((colName) => [tablePath, colName].join('.'))
+                )
+
                 for (const seedWithProperty of depTableLink.link.seedWith) {
                     const seedWithColPath = depTableLink.link.inputs[seedWithProperty]
                     if (!seedWithColPath) continue
@@ -546,16 +600,21 @@ export class TableSubscriber {
         // Should create new triggers if they don't exist.
         let createUpdateTrigger = !updateTrigger
         let createInsertTrigger = !insertTrigger
-        
+
         const currentPrimaryKeyCols = tablesMeta[tablePath].primaryKey
-        const currentPrimaryKeys = currentPrimaryKeyCols.map(pk => pk.name)
+        const currentPrimaryKeys = currentPrimaryKeyCols.map((pk) => pk.name)
 
         // If the insert trigger already exists, ensure the primary keys for the table haven't changed.
         if (insertTrigger) {
             // If the trigger name is different, it means the table's primary keys must have changed,
             // so drop the existing triggers and we'll recreate them (+ the functions).
-            const expectedTriggerName = formatTriggerName(schema, table, insertTrigger.event, currentPrimaryKeys)
-            if (expectedTriggerName && (insertTrigger.name !== expectedTriggerName)) {
+            const expectedTriggerName = formatTriggerName(
+                schema,
+                table,
+                insertTrigger.event,
+                currentPrimaryKeys
+            )
+            if (expectedTriggerName && insertTrigger.name !== expectedTriggerName) {
                 try {
                     await dropTrigger(insertTrigger)
                     createInsertTrigger = true
@@ -569,8 +628,13 @@ export class TableSubscriber {
         if (updateTrigger) {
             // If the trigger name is different, it means the table's primary keys must have changed,
             // so drop the existing trigger and we'll recreate it (+ upsert the function).
-            const expectedTriggerName = formatTriggerName(schema, table, updateTrigger.event, currentPrimaryKeys)
-            if (expectedTriggerName && (updateTrigger.name !== expectedTriggerName)) {
+            const expectedTriggerName = formatTriggerName(
+                schema,
+                table,
+                updateTrigger.event,
+                currentPrimaryKeys
+            )
+            if (expectedTriggerName && updateTrigger.name !== expectedTriggerName) {
                 try {
                     await dropTrigger(updateTrigger)
                     createUpdateTrigger = true
@@ -582,14 +646,13 @@ export class TableSubscriber {
 
         // Jump to subscribing status if already created.
         if (!createInsertTrigger && !createUpdateTrigger) {
-
             // TODO: Consolidate with end of function.
             const primaryKeyTypes = {}
             for (const { name, type } of currentPrimaryKeyCols) {
                 primaryKeyTypes[name] = type
             }
-    
-            this.tableSubs[tablePath].primaryKeyTypes = primaryKeyTypes    
+
+            this.tableSubs[tablePath].primaryKeyTypes = primaryKeyTypes
             this.tableSubs[tablePath].status = TableSubStatus.Subscribing
             return
         }
@@ -598,12 +661,18 @@ export class TableSubscriber {
 
         // Create the needed triggers.
         const promises = []
-        createInsertTrigger && promises.push(createTrigger(schema, table, TriggerEvent.INSERT, { 
-            primaryKeys: currentPrimaryKeys,
-        }))
-        createUpdateTrigger && promises.push(createTrigger(schema, table, TriggerEvent.UPDATE, {
-            primaryKeys: currentPrimaryKeys,
-        }))
+        createInsertTrigger &&
+            promises.push(
+                createTrigger(schema, table, TriggerEvent.INSERT, {
+                    primaryKeys: currentPrimaryKeys,
+                })
+            )
+        createUpdateTrigger &&
+            promises.push(
+                createTrigger(schema, table, TriggerEvent.UPDATE, {
+                    primaryKeys: currentPrimaryKeys,
+                })
+            )
 
         try {
             await Promise.all(promises)
@@ -622,7 +691,7 @@ export class TableSubscriber {
     }
 
     _populateTableSubsFromConfig() {
-        config.getAllReferencedTablePaths().forEach(tablePath => {
+        config.getAllReferencedTablePaths().forEach((tablePath) => {
             if (this.tableSubs.hasOwnProperty(tablePath)) return
             const [schema, table] = tablePath.split('.')
 
@@ -633,7 +702,7 @@ export class TableSubscriber {
                 buffer: [],
                 processEvents: debounce(
                     () => this._processTableSubEvents(tablePath),
-                    constants.TABLE_SUB_BUFFER_INTERVAL,
+                    constants.TABLE_SUB_BUFFER_INTERVAL
                 ),
                 blacklist: new Set<string>(),
             }

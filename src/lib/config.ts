@@ -8,8 +8,8 @@ import { tablesMeta, pullTableMeta, getRel } from './db/tablesMeta'
 import { cloneDeep } from 'lodash'
 import { isTimestampColType } from './utils/colTypes'
 import {
-    ProjectConfig, 
-    LiveObjectsConfig, 
+    ProjectConfig,
+    LiveObjectsConfig,
     LiveObjectConfig,
     TablesConfig,
     TableConfig,
@@ -23,11 +23,10 @@ import {
 import { tableSubscriber } from './db/subscriber'
 
 class Config {
-
     config: ProjectConfig
 
     prevConfig: ProjectConfig
-    
+
     isValid: boolean
 
     linkUniqueConstraints: { [key: string]: string[] } = {}
@@ -63,12 +62,14 @@ class Config {
         return ids
     }
 
-    get liveObjectsMap(): { [key: string]: {
-        id: string
-        configName: string
-        filterBy: StringKeyMap,
-        links: StringMap[],
-    }} {
+    get liveObjectsMap(): {
+        [key: string]: {
+            id: string
+            configName: string
+            filterBy: StringKeyMap
+            links: StringMap[]
+        }
+    } {
         const m = {}
         const objects = this.liveObjects
         for (let configName in objects) {
@@ -98,7 +99,7 @@ class Config {
             const obj = objects[configName]
             if (obj.id !== liveObjectId) continue
 
-            for (const link of (obj.links || [])) {
+            for (const link of obj.links || []) {
                 if (link.table === tablePath) {
                     return {
                         ...link,
@@ -115,7 +116,7 @@ class Config {
         const objects = this.liveObjects
         for (const configName in objects) {
             const obj = objects[configName]
-            for (const link of (obj.links || [])) {
+            for (const link of obj.links || []) {
                 if (link.table === tablePath) {
                     tableLinks.push({
                         liveObjectId: obj.id,
@@ -133,7 +134,7 @@ class Config {
         for (const configName in objects) {
             const obj = objects[configName]
 
-            for (const link of (obj.links || [])) {
+            for (const link of obj.links || []) {
                 if (link.table === tablePath) continue
 
                 let allSeedColsOnTable = true
@@ -141,7 +142,7 @@ class Config {
                     const inputs = toMap(link.inputs || {})
                     const seedColPath = inputs[seedProperty]
                     const [seedColSchema, seedColTable, _] = seedColPath.split('.')
-                    const seedColTablePath = [seedColSchema, seedColTable].join('.')    
+                    const seedColTablePath = [seedColSchema, seedColTable].join('.')
 
                     if (seedColTablePath !== tablePath) {
                         allSeedColsOnTable = false
@@ -168,7 +169,11 @@ class Config {
         return table ? toMap(table) : null
     }
 
-    getDataSourcesForTable(schemaName: string, tableName: string, returnNullIfError?: boolean): TableDataSources | null {
+    getDataSourcesForTable(
+        schemaName: string,
+        tableName: string,
+        returnNullIfError?: boolean
+    ): TableDataSources | null {
         const table = this.getTable(schemaName, tableName)
         if (!table) {
             logger.error(`No table exists in config for path "${schemaName}.${tableName}".`)
@@ -181,16 +186,13 @@ class Config {
             const { object, property } = this._parseDataSourceForColumn(dataSource)
 
             if (!object || !property) {
-                logger.error(
-                    `Invalid data source for ${tableName}.${columnName}:`, 
-                    dataSource,
-                )
+                logger.error(`Invalid data source for ${tableName}.${columnName}:`, dataSource)
                 if (returnNullIfError) {
                     return null
                 }
                 continue
             }
-            
+
             const liveObject = this.getLiveObject(object)
             if (!liveObject) {
                 logger.error(
@@ -220,7 +222,7 @@ class Config {
                 ? { object: propertyPath[0], property: propertyPath[1] }
                 : {}
         }
-    
+
         if (typeof colDataSource === 'object') {
             const source = colDataSource.source
             if (typeof source === 'string') {
@@ -239,8 +241,8 @@ class Config {
         const [schema, table] = tablePath.split('.')
         const dataSourcesInTable = config.getDataSourcesForTable(schema, table) || {}
 
-        // Basically just recreate the map, but filtering out the data sources that 
-        // aren't associated with our live object. Additionally, use just the live 
+        // Basically just recreate the map, but filtering out the data sources that
+        // aren't associated with our live object. Additionally, use just the live
         // object property as the new key (removing the live object id).
         const tableDataSourcesForThisLiveObject = {}
         for (let key in dataSourcesInTable) {
@@ -258,7 +260,7 @@ class Config {
         for (const configName in objects) {
             const obj = objects[configName]
 
-            for (const link of (obj.links || [])) {
+            for (const link of obj.links || []) {
                 tablePaths.add(link.table)
                 const inputs = toMap(link.inputs || {})
 
@@ -274,7 +276,7 @@ class Config {
     }
 
     getAllReferencedTablePathsTrackingRecordUpdates(): string[] {
-        return this.getAllReferencedTablePaths().filter(tablePath => {
+        return this.getAllReferencedTablePaths().filter((tablePath) => {
             const meta = tablesMeta[tablePath]
             if (!meta) return false
 
@@ -285,7 +287,11 @@ class Config {
         })
     }
 
-    getUniqueConstraintForLink(liveObjectId: string, tablePath: string, useCache: boolean = true): string[] | null {
+    getUniqueConstraintForLink(
+        liveObjectId: string,
+        tablePath: string,
+        useCache: boolean = true
+    ): string[] | null {
         const cacheKey = [liveObjectId, tablePath].join(':')
         if (useCache) {
             const result = this.linkUniqueConstraints[cacheKey]
@@ -317,12 +323,16 @@ class Config {
                 uniqueByColNames.push(foreignKeyConstraint.foreignKey)
             }
         }
-        
+
         // Sort and convert to string to match against.
         const uniqueByColNamesId = uniqueByColNames.sort().join(':')
 
         // Find the matching unique col group (if any).
-        return uniqueColGroups.find(colGroup => [...colGroup].sort().join(':') === uniqueByColNamesId) || null
+        return (
+            uniqueColGroups.find(
+                (colGroup) => [...colGroup].sort().join(':') === uniqueByColNamesId
+            ) || null
+        )
     }
 
     load(): boolean {
@@ -369,7 +379,7 @@ class Config {
             this.onUpdate()
         })
 
-        // Refresh table metadata on an interval to catch 
+        // Refresh table metadata on an interval to catch
         // any table schema changes as best as possible.
         this._checkTablesOnInterval()
     }
@@ -391,8 +401,14 @@ class Config {
                 const prevTableMeta = prevTablesMeta[tablePath]
                 if (!prevTableMeta) continue
 
-                const prevPkColNames = prevTableMeta.primaryKey.map(pk => pk.name).sort().join(',')
-                const currentPkColNames = currentTableMeta.primaryKey.map(pk => pk.name).sort().join(',')
+                const prevPkColNames = prevTableMeta.primaryKey
+                    .map((pk) => pk.name)
+                    .sort()
+                    .join(',')
+                const currentPkColNames = currentTableMeta.primaryKey
+                    .map((pk) => pk.name)
+                    .sort()
+                    .join(',')
 
                 if (currentPkColNames !== prevPkColNames) {
                     tablePathsWherePrimaryKeysChanged.push(tablePath)
@@ -400,11 +416,9 @@ class Config {
             }
             if (!tablePathsWherePrimaryKeysChanged.length) return
 
-            // For tables where primary keys have changed, 
+            // For tables where primary keys have changed,
             // update their table sub triggers.
-            tableSubscriber.upsertTableSubsWithTriggers(
-                tablePathsWherePrimaryKeysChanged
-            )
+            tableSubscriber.upsertTableSubsWithTriggers(tablePathsWherePrimaryKeysChanged)
         }, constants.ANALYZE_TABLES_INTERVAL)
     }
 
@@ -437,7 +451,9 @@ class Config {
             // Ensure object has valid id version structure.
             const { nsp, name, version } = fromNamespacedVersion(obj.id)
             if (!nsp || !name || !version) {
-                logger.error(`Live object "${configName}" has malformed id: ${obj.id}.\nMake sure the id is in "<namespace>.<name>@<version>" format.`)
+                logger.error(
+                    `Live object "${configName}" has malformed id: ${obj.id}.\nMake sure the id is in "<namespace>.<name>@<version>" format.`
+                )
                 isValid = false
             }
 
@@ -449,10 +465,12 @@ class Config {
             }
 
             // Validate each link.
-            for (const link of (obj.links || [])) {
+            for (const link of obj.links || []) {
                 const tablePath = link.table || ''
                 if (!tablePath) {
-                    logger.error(`Link for live object "${configName}" is missing the "table" attribute.`)
+                    logger.error(
+                        `Link for live object "${configName}" is missing the "table" attribute.`
+                    )
                     isValid = false
                     continue
                 }
@@ -461,7 +479,9 @@ class Config {
 
                 // Ensure table is valid.
                 if (splitTablePath.length !== 2) {
-                    logger.error(`Link for live object "${configName}" has invalid "table" attribute: ${tablePath}. \nMust be in "<schema>.<table>" format.`)
+                    logger.error(
+                        `Link for live object "${configName}" has invalid "table" attribute: ${tablePath}. \nMust be in "<schema>.<table>" format.`
+                    )
                     isValid = false
                     continue
                 }
@@ -469,7 +489,9 @@ class Config {
 
                 // Ensure table is included in config.
                 if (!this.getTable(schema, table)) {
-                    logger.error(`Link for live object "${configName}" has invalid "table" attribute: ${tablePath}. \nValue references table not included in config file.`)
+                    logger.error(
+                        `Link for live object "${configName}" has invalid "table" attribute: ${tablePath}. \nValue references table not included in config file.`
+                    )
                     isValid = false
                 }
 
@@ -486,7 +508,9 @@ class Config {
                     const splitColPath = colPath.split('.')
 
                     if (splitColPath.length !== 3) {
-                        logger.error(`Link for live object "${configName}" has invalid input property for key "${key}": ${colPath}. \nMust be in "<schema>.<table>.<column>" format.`)
+                        logger.error(
+                            `Link for live object "${configName}" has invalid input property for key "${key}": ${colPath}. \nMust be in "<schema>.<table>.<column>" format.`
+                        )
                         isValid = false
                         continue
                     }
@@ -494,16 +518,20 @@ class Config {
 
                 // Ensure seedWith properties exist.
                 if (!link.seedWith || !link.seedWith.length) {
-                    logger.error(`Link for live object "${configName}" has no "seedWith" attribute or it is empty.`)
+                    logger.error(
+                        `Link for live object "${configName}" has no "seedWith" attribute or it is empty.`
+                    )
                     isValid = false
                     continue
                 }
 
                 // Ensure each seedWith property is actually an input property.
-                for (const property of (link.seedWith || [])) {
+                for (const property of link.seedWith || []) {
                     if (!inputs.hasOwnProperty(property)) {
-                        logger.error(`Link for live object "${configName}" has invalid "seedWith" entry: ${property}. \nYou can only seed with properties included in the "inputs" map.`)
-                        isValid = false    
+                        logger.error(
+                            `Link for live object "${configName}" has invalid "seedWith" entry: ${property}. \nYou can only seed with properties included in the "inputs" map.`
+                        )
+                        isValid = false
                     }
                 }
             }
@@ -530,7 +558,9 @@ class Config {
 
         // Pull table metadata for all table paths referenced in the config file.
         try {
-            await Promise.all(allTablePathsReferencedInConfig.map(tablePath => pullTableMeta(tablePath)))
+            await Promise.all(
+                allTablePathsReferencedInConfig.map((tablePath) => pullTableMeta(tablePath))
+            )
         } catch (err) {
             logger.error(`Error pulling metadata for tables in config: ${err}`)
             return false
@@ -555,7 +585,7 @@ class Config {
 
         for (const configName in objects) {
             const obj = objects[configName]
-            for (const link of (obj.links || [])) {
+            for (const link of obj.links || []) {
                 const uniqueConstraint = this.getUniqueConstraintForLink(obj.id, link.table, false)
                 if (!uniqueConstraint) {
                     this._logMissingUniqueConstraint(link, obj.id)

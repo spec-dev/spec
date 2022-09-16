@@ -1,4 +1,13 @@
-import { LiveObjectLink, LiveObject, StringKeyMap, StringMap, Op, OpType, TableDataSources, ForeignKeyConstraint } from '../types'
+import {
+    LiveObjectLink,
+    LiveObject,
+    StringKeyMap,
+    StringMap,
+    Op,
+    OpType,
+    TableDataSources,
+    ForeignKeyConstraint,
+} from '../types'
 import config from '../config'
 import { db } from '../db'
 import { toMap, unique } from '../utils/formatters'
@@ -11,7 +20,6 @@ import constants from '../constants'
 const valueSep = '__:__'
 
 class ApplyDiffsService {
-
     liveObjectDiffs: StringKeyMap[]
 
     link: LiveObjectLink
@@ -48,12 +56,16 @@ class ApplyDiffsService {
     get tablePrimaryKeys(): string[] {
         const meta = tablesMeta[this.linkTablePath]
         if (!meta) throw `No meta registered for table ${this.linkTablePath}`
-        return meta.primaryKey.map(pk => pk.name)
+        return meta.primaryKey.map((pk) => pk.name)
     }
 
     get linkTableUniqueConstraint(): string[] {
-        const uniqueConstaint = config.getUniqueConstraintForLink(this.liveObject.id, this.linkTablePath)
-        if (!uniqueConstaint) throw `No unique constraint for link ${this.liveObject.id} <-> ${this.linkTablePath}`
+        const uniqueConstaint = config.getUniqueConstraintForLink(
+            this.liveObject.id,
+            this.linkTablePath
+        )
+        if (!uniqueConstaint)
+            throw `No unique constraint for link ${this.liveObject.id} <-> ${this.linkTablePath}`
         return uniqueConstaint
     }
 
@@ -64,7 +76,7 @@ class ApplyDiffsService {
     get linkUniqueByProperties(): string[] {
         return this.link.uniqueBy || Object.keys(this.linkProperties)
     }
-    
+
     constructor(diffs: StringKeyMap[], link: LiveObjectLink, liveObject: LiveObject) {
         this.liveObjectDiffs = diffs
         this.link = link
@@ -79,20 +91,22 @@ class ApplyDiffsService {
     async getOps(): Promise<Op[]> {
         // Ensure table is reliant on this live object.
         if (!Object.keys(this.tableDataSources).length) {
-            logger.error(`Table ${this.linkTablePath} isn't reliant on Live Object ${this.liveObject.id}.`)
+            logger.error(
+                `Table ${this.linkTablePath} isn't reliant on Live Object ${this.liveObject.id}.`
+            )
             return this.ops
         }
 
         // Upsert or Update records using diffs.
         await (this.canInsertRecords ? this._createUpsertOps() : this._createUpdateOps())
-        
+
         return this.ops
     }
 
     async runOps() {
         if (!this.ops.length) return
-        await db.transaction(async tx => {
-            await Promise.all(this.ops.map(op => new RunOpService(op, tx).perform()))
+        await db.transaction(async (tx) => {
+            await Promise.all(this.ops.map((op) => new RunOpService(op, tx).perform()))
         })
     }
 
@@ -126,7 +140,7 @@ class ApplyDiffsService {
             foreignTableQueryConditions[colTablePath].colNames.push(colName)
             foreignTableQueryConditions[colTablePath].whereIn.push([
                 colName,
-                unique(this.liveObjectDiffs.map(diff => diff[property])),
+                unique(this.liveObjectDiffs.map((diff) => diff[property])),
             ])
         }
 
@@ -155,7 +169,9 @@ class ApplyDiffsService {
 
             referenceKeyValues[foreignTablePath] = {}
             for (const record of records) {
-                const key = queryConditions.colNames.map(colName => record[colName]).join(valueSep)
+                const key = queryConditions.colNames
+                    .map((colName) => record[colName])
+                    .join(valueSep)
                 if (referenceKeyValues[foreignTablePath].hasOwnProperty(key)) continue
                 referenceKeyValues[foreignTablePath][key] = record[queryConditions.rel.referenceKey]
             }
@@ -176,7 +192,9 @@ class ApplyDiffsService {
             let ignoreDiff = false
             for (const foreignTablePath in foreignTableQueryConditions) {
                 const queryConditions = foreignTableQueryConditions[foreignTablePath]
-                const uniqueForeignRefKey = queryConditions.properties.map(property => diff[property]).join(valueSep)
+                const uniqueForeignRefKey = queryConditions.properties
+                    .map((property) => diff[property])
+                    .join(valueSep)
                 if (!referenceKeyValues[foreignTablePath].hasOwnProperty(uniqueForeignRefKey)) {
                     ignoreDiff = true
                     break
@@ -191,18 +209,20 @@ class ApplyDiffsService {
         if (!upsertRecords.length) return
 
         // Perform all upserts in a single, bulk insert operation.
-        this.ops = [{
-            type: OpType.Insert,
-            schema: this.linkSchemaName,
-            table: this.linkTableName,
-            data: upsertRecords,
-            conflictTargets: this.linkTableUniqueConstraint,
-        }]
+        this.ops = [
+            {
+                type: OpType.Insert,
+                schema: this.linkSchemaName,
+                table: this.linkTableName,
+                data: upsertRecords,
+                conflictTargets: this.linkTableUniqueConstraint,
+            },
+        ]
     }
 
     async _createUpdateOps() {
         await (this.liveObjectDiffs > constants.MAX_UPDATES_BEFORE_BULK_UPDATE_USED
-            ? this._createBulkUpdateOp() 
+            ? this._createBulkUpdateOp()
             : this._createIndividualUpdateOps())
     }
 
@@ -236,7 +256,7 @@ class ApplyDiffsService {
             foreignTableQueryConditions[colTablePath].colNames.push(colName)
             foreignTableQueryConditions[colTablePath].whereIn.push([
                 colName,
-                unique(this.liveObjectDiffs.map(diff => diff[property])),
+                unique(this.liveObjectDiffs.map((diff) => diff[property])),
             ])
         }
 
@@ -265,7 +285,9 @@ class ApplyDiffsService {
 
             referenceKeyValues[foreignTablePath] = {}
             for (const record of records) {
-                const key = queryConditions.colNames.map(colName => record[colName]).join(valueSep)
+                const key = queryConditions.colNames
+                    .map((colName) => record[colName])
+                    .join(valueSep)
                 if (referenceKeyValues[foreignTablePath].hasOwnProperty(key)) continue
                 referenceKeyValues[foreignTablePath][key] = record[queryConditions.rel.referenceKey]
             }
@@ -297,7 +319,9 @@ class ApplyDiffsService {
             let ignoreDiff = false
             for (const foreignTablePath in foreignTableQueryConditions) {
                 const queryConditions = foreignTableQueryConditions[foreignTablePath]
-                const uniqueForeignRefKey = queryConditions.properties.map(property => diff[property]).join(valueSep)
+                const uniqueForeignRefKey = queryConditions.properties
+                    .map((property) => diff[property])
+                    .join(valueSep)
                 if (!referenceKeyValues[foreignTablePath].hasOwnProperty(uniqueForeignRefKey)) {
                     ignoreDiff = true
                     break
@@ -306,7 +330,7 @@ class ApplyDiffsService {
                 where[queryConditions.rel.foreignKey] = referenceKeyValue
             }
             if (ignoreDiff) continue
-            
+
             this.ops.push({
                 type: OpType.Update,
                 schema: this.linkSchemaName,
@@ -319,7 +343,7 @@ class ApplyDiffsService {
 
     async _createBulkUpdateOp() {
         const queryConditions = this._getExistingRecordQueryConditions()
-        
+
         // Start a new query on the linked table.
         let query = db.from(this.linkTablePath)
 
@@ -375,7 +399,7 @@ class ApplyDiffsService {
                     break
                 }
                 const [colSchemaName, colTableName, colName] = colPath.split('.')
-                const colTablePath = `${colSchemaName}.${colTableName}`    
+                const colTablePath = `${colSchemaName}.${colTableName}`
                 const value = record[colTablePath === this.linkTablePath ? colName : colPath] || ''
                 uniqueKeyComps.push(value)
             }
@@ -387,8 +411,9 @@ class ApplyDiffsService {
             // Build a record updates map using the diff, ignoring any linked properties.
             const recordUpdates = {}
             for (const property in tableDataSources) {
-                if (linkProperties.hasOwnProperty(property) || !diff.hasOwnProperty(property)) continue
-                const colNames = tableDataSources[property].map(ds => ds.columnName)
+                if (linkProperties.hasOwnProperty(property) || !diff.hasOwnProperty(property))
+                    continue
+                const colNames = tableDataSources[property].map((ds) => ds.columnName)
                 for (const colName of colNames) {
                     recordUpdates[colName] = diff[property]
                 }
@@ -417,7 +442,7 @@ class ApplyDiffsService {
     }
 
     _getExistingRecordQueryConditions(): StringKeyMap {
-        const queryConditions = { 
+        const queryConditions = {
             join: [],
             select: [`${this.linkTablePath}.*`],
             whereIn: [],
@@ -433,7 +458,7 @@ class ApplyDiffsService {
             if (colTablePath === tablePath) {
                 queryConditions.whereIn.push([
                     colName,
-                    unique(this.liveObjectDiffs.map(diff => diff[property])),
+                    unique(this.liveObjectDiffs.map((diff) => diff[property])),
                 ])
             } else {
                 const rel = getRel(tablePath, colTablePath)
@@ -444,11 +469,11 @@ class ApplyDiffsService {
                     `${colTablePath}.${rel.referenceKey}`,
                     `${tablePath}.${rel.foreignKey}`,
                 ])
-                
+
                 queryConditions.select.push(`${colPath} as ${colPath}`)
                 queryConditions.whereIn.push([
                     colPath,
-                    unique(this.liveObjectDiffs.map(diff => diff[property])),
+                    unique(this.liveObjectDiffs.map((diff) => diff[property])),
                 ])
             }
         }

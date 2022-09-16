@@ -10,29 +10,24 @@ export async function getEventCursorsForNames(names: string[]): Promise<EventCur
     if (!names.length) return []
     let records
     try {
-        records = await eventCursors()
-            .select('*')
-            .whereIn('name', unique(names))
+        records = await eventCursors().select('*').whereIn('name', unique(names))
     } catch (err) {
         logger.error(`Error getting event_cursors for names: ${names.join(', ')}: ${err}`)
         return []
     }
 
-    return (records || []).map(record => ({
+    return (records || []).map((record) => ({
         ...record,
         nonce: Number(record.nonce),
         timestamp: (record.timestamp as Date).toISOString(),
     })) as EventCursor[]
 }
 
-export async function saveEventCursors(records: EventCursor[]) {    
+export async function saveEventCursors(records: EventCursor[]) {
     if (!records.length) return
     try {
-        await db.transaction(async tx => {
-            await eventCursors(tx)
-                .insert(records)
-                .onConflict('name')
-                .merge()
+        await db.transaction(async (tx) => {
+            await eventCursors(tx).insert(records).onConflict('name').merge()
         })
     } catch (err) {
         logger.error(`Error saving event cursors: ${err}`)

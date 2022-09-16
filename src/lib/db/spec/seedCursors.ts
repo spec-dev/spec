@@ -7,14 +7,14 @@ import { camelizeKeys, decamelizeKeys } from 'humps'
 
 export const seedCursors = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(SEED_CURSORS_TABLE_NAME)
 
-export async function getSeedCursorsWithStatus(status: SeedCursorStatus | SeedCursorStatus[]): Promise<SeedCursor[]> {
+export async function getSeedCursorsWithStatus(
+    status: SeedCursorStatus | SeedCursorStatus[]
+): Promise<SeedCursor[]> {
     status = Array.isArray(status) ? status : [status]
     if (!status.length) return []
     let records
     try {
-        records = await seedCursors()
-            .select('*')
-            .whereIn('status', unique(status))
+        records = await seedCursors().select('*').whereIn('status', unique(status))
     } catch (err) {
         logger.error(`Error getting seed_cursors for status: ${status.join(', ')}: ${err}`)
         return []
@@ -25,39 +25,41 @@ export async function getSeedCursorsWithStatus(status: SeedCursorStatus | SeedCu
 
 export async function createSeedCursor(seedCursor: StringKeyMap) {
     try {
-        await db.transaction(async tx => {
-            await seedCursors(tx)
-                .insert({
-                    ...decamelizeKeys(seedCursor),
-                    created_at: db.raw(`CURRENT_TIMESTAMP at time zone 'UTC'`),
-                })
+        await db.transaction(async (tx) => {
+            await seedCursors(tx).insert({
+                ...decamelizeKeys(seedCursor),
+                created_at: db.raw(`CURRENT_TIMESTAMP at time zone 'UTC'`),
+            })
         })
     } catch (err) {
         const { liveObjectId, tablePath } = seedCursor.spec
-        logger.error(`Error creating seed_cursor $(liveObjectId=${liveObjectId}, tablePath=${tablePath}): ${err}`)
+        logger.error(
+            `Error creating seed_cursor $(liveObjectId=${liveObjectId}, tablePath=${tablePath}): ${err}`
+        )
     }
 }
 
 export async function processSeedCursorBatch(
-    inserts: StringKeyMap[], 
+    inserts: StringKeyMap[],
     updateToInProgressIds: string[] = [],
-    deleteIds: string[] = [],
+    deleteIds: string[] = []
 ): Promise<boolean> {
     if (!inserts.length && !updateToInProgressIds.length && !deleteIds.length) {
         return true
     }
 
     try {
-        await db.transaction(async tx => {
+        await db.transaction(async (tx) => {
             let promises = []
             // Inserts.
             if (inserts.length) {
                 promises.push(
-                    seedCursors(tx)
-                        .insert(inserts.map(seedCursor => ({
+                    seedCursors(tx).insert(
+                        inserts.map((seedCursor) => ({
                             ...decamelizeKeys(seedCursor),
-                            created_at: db.raw(`CURRENT_TIMESTAMP at time zone 'UTC'`),    
-                        })))
+                            created_at: db.raw(`CURRENT_TIMESTAMP at time zone 'UTC'`),
+                        }))
+                    )
                 )
             }
             // Updates.
@@ -70,7 +72,9 @@ export async function processSeedCursorBatch(
             }
             // Deletes.
             if (deleteIds.length) {
-                seedCursors(tx).whereIn('id', unique(deleteIds as any[])).del()
+                seedCursors(tx)
+                    .whereIn('id', unique(deleteIds as any[]))
+                    .del()
             }
             await Promise.all(promises)
         })
@@ -90,8 +94,10 @@ export async function seedSucceeded(ids: string | string[]) {
     ids = Array.isArray(ids) ? ids : [ids]
     if (!ids.length) return
     try {
-        await db.transaction(async tx => {
-            await seedCursors(tx).whereIn('id', unique(ids as any[])).del()
+        await db.transaction(async (tx) => {
+            await seedCursors(tx)
+                .whereIn('id', unique(ids as any[]))
+                .del()
         })
     } catch (err) {
         logger.error(`Error deleting seed_cursors upon success (ids=${ids.join(',')}): ${err}`)
@@ -102,19 +108,21 @@ export async function updateStatus(ids: string | string[], seedStatus: SeedCurso
     ids = Array.isArray(ids) ? ids : [ids]
     if (!ids.length) return
     try {
-        await db.transaction(async tx => {
+        await db.transaction(async (tx) => {
             await seedCursors(tx)
                 .update('status', seedStatus)
                 .whereIn('id', unique(ids as any[]))
         })
     } catch (err) {
-        logger.error(`Error updating seed_cursors (ids=${ids.join(',')}) to status ${seedStatus}: ${err}`)
+        logger.error(
+            `Error updating seed_cursors (ids=${ids.join(',')}) to status ${seedStatus}: ${err}`
+        )
     }
 }
 
 export async function updateCursor(id: string, cursor: number) {
     try {
-        await db.transaction(async tx => {
+        await db.transaction(async (tx) => {
             await seedCursors(tx).update('cursor', cursor).where('id', id)
         })
     } catch (err) {

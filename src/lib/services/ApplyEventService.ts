@@ -6,7 +6,6 @@ import { db } from '../db'
 import RunOpService from './RunOpService'
 
 class ApplyEventService {
-
     event: SpecEvent<StringKeyMap | StringKeyMap[]>
 
     liveObject: LiveObject
@@ -35,18 +34,20 @@ class ApplyEventService {
     }
 
     async getOps(): Promise<Op[]> {
-        // Get all links these diffs apply to (i.e. the links who have 
+        // Get all links these diffs apply to (i.e. the links who have
         // all of their property keys included in the diff structure).
         this.linksToApplyDiffsTo = this._getLinksToApplyDiffTo()
         if (!this.linksToApplyDiffsTo.length) {
-            logger.info('Live object diff didn\'t satisfy any configured links')
+            logger.info("Live object diff didn't satisfy any configured links")
             return this.ops
         }
 
         // Get ops to apply the diffs for each link.
         let promises = []
         for (let link of this.linksToApplyDiffsTo) {
-            promises.push(new ApplyDiffsService(this.liveObjectDiffs, link, this.liveObject).getOps())
+            promises.push(
+                new ApplyDiffsService(this.liveObjectDiffs, link, this.liveObject).getOps()
+            )
         }
 
         this.ops = (await Promise.all(promises)).flat()
@@ -57,8 +58,8 @@ class ApplyEventService {
     async runOps() {
         if (!this.ops.length) return
         logger.info(`Event generated ${this.ops.length} ops.`)
-        await db.transaction(async tx => {
-            await Promise.all(this.ops.map(op => new RunOpService(op, tx).perform()))
+        await db.transaction(async (tx) => {
+            await Promise.all(this.ops.map((op) => new RunOpService(op, tx).perform()))
         })
     }
 
@@ -86,15 +87,17 @@ class ApplyEventService {
                 const acceptedValueIsArray = Array.isArray(acceptedValue)
                 const givenValue = diff[property]
 
-                if ((acceptedValueIsArray && !acceptedValue.includes(givenValue)) || 
-                    (!acceptedValueIsArray && givenValue !== acceptedValue)) {
+                if (
+                    (acceptedValueIsArray && !acceptedValue.includes(givenValue)) ||
+                    (!acceptedValueIsArray && givenValue !== acceptedValue)
+                ) {
                     processDiff = false
                     break
                 }
             }
             processDiff && diffsToProcess.push(diff)
         }
-        
+
         this.liveObjectDiffs = diffsToProcess
     }
 
@@ -119,7 +122,7 @@ class ApplyEventService {
         }
 
         return linksToApplyDiffsTo
-    }    
+    }
 }
 
 export default ApplyEventService

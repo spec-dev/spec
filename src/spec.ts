@@ -3,8 +3,25 @@ import config from './lib/config'
 import constants from './lib/constants'
 import { resolveLiveObjects } from './lib/rpcs/liveObjects'
 import messageClient from './lib/rpcs/messageClient'
-import { LiveObject, StringKeyMap, EventSub, SeedSpec, SeedCursorStatus, SeedCursorJobType, ResolveRecordsSpec } from './lib/types'
-import { ensureSpecSchemaIsReady, getEventCursorsForNames, saveEventCursors, getSeedCursorsWithStatus, seedFailed, seedSucceeded, processSeedCursorBatch, failedSeedCursorsExist } from './lib/db/spec'
+import {
+    LiveObject,
+    StringKeyMap,
+    EventSub,
+    SeedSpec,
+    SeedCursorStatus,
+    SeedCursorJobType,
+    ResolveRecordsSpec,
+} from './lib/types'
+import {
+    ensureSpecSchemaIsReady,
+    getEventCursorsForNames,
+    saveEventCursors,
+    getSeedCursorsWithStatus,
+    seedFailed,
+    seedSucceeded,
+    processSeedCursorBatch,
+    failedSeedCursorsExist,
+} from './lib/db/spec'
 import { SpecEvent } from '@spec.dev/event-client'
 import LRU from 'lru-cache'
 import ApplyEventService from './lib/services/ApplyEventService'
@@ -15,11 +32,8 @@ import short from 'short-uuid'
 import ResolveRecordsService from './lib/services/ResolveRecordsService'
 import { unique } from './lib/utils/formatters'
 import { getRecordsForPrimaryKeys } from './lib/db/ops'
-import { Console } from 'console'
-import { sleep } from './lib/utils/time'
 
 class Spec {
-
     liveObjects: { [key: string]: LiveObject } = {}
 
     eventSubs: { [key: string]: EventSub } = {}
@@ -34,12 +48,12 @@ class Spec {
 
     liveObjectsToIgnoreEventsFrom: Set<string> = new Set()
 
-    hasCalledUpsertAndSeedLiveColumns: boolean = false 
-    
+    hasCalledUpsertAndSeedLiveColumns: boolean = false
+
     seenEvents: LRU<string, boolean> = new LRU({
         max: constants.SEEN_EVENTS_CACHE_SIZE,
     })
-    
+
     async start() {
         logger.info('Starting Spec...')
 
@@ -48,6 +62,8 @@ class Spec {
 
         // Ensure the 'spec' schema and associated tables within it exist.
         await ensureSpecSchemaIsReady()
+
+        logger.info('Schema is ready...')
 
         // Subscribe & react to config file changes.
         config.onUpdate = () => {
@@ -66,10 +82,15 @@ class Spec {
     async _onNewConfig() {
         this.isProcessingNewConfig = true
 
+        logger.info('Loading config...')
+
         // Load and validate project config file.
         if (config.load()) {
             await config.validate()
         }
+
+        logger.info('Passed config validation..', config.config, config.isValid)
+        return
 
         // If the config is invalid, just wait until the next save to try again.
         if (!config.isValid) {
@@ -78,10 +99,10 @@ class Spec {
         }
 
         // Upsert table subscriptions (listen to data changes).
-        tableSubscriber.getLiveObject = id => this.liveObjects[id]
+        tableSubscriber.getLiveObject = (id) => this.liveObjects[id]
         tableSubscriber.upsertTableSubs()
 
-        // Connect to event/rpc message client. 
+        // Connect to event/rpc message client.
         // Force run the onConnect handler if already connected.
         messageClient.client ? messageClient.onConnect() : messageClient.connect()
     }
@@ -93,7 +114,7 @@ class Spec {
             this._doneProcessingNewConfig()
             return
         }
-        
+
         // Upsert live columns listed in the config and start seeding with new ones.
         await this._upsertAndSeedLiveColumns()
 
@@ -107,11 +128,11 @@ class Spec {
         // Load the latest events received by each sub.
         await this._loadEventCursors()
 
-        // Fetch missed events for any new sub that already has an 
+        // Fetch missed events for any new sub that already has an
         // existing event cursor (i.e. events that have been seen before).
         await this._fetchMissedEvents(newEventNames)
 
-        // Process all buffered events. Missed events will be processed here 
+        // Process all buffered events. Missed events will be processed here
         // too, since the ones fetched above will be added to the buffer.
         await this._processAllBufferedEvents()
 
@@ -131,17 +152,19 @@ class Spec {
 
         // Ensure at least one live object will process this event.
         const liveObjectIdsThatWillProcessEvent = (sub.liveObjectIds || []).filter(
-            liveObjectId => !this.liveObjectsToIgnoreEventsFrom.has(liveObjectId),
+            (liveObjectId) => !this.liveObjectsToIgnoreEventsFrom.has(liveObjectId)
         )
         if (!liveObjectIdsThatWillProcessEvent.length) return
 
         // Prevent duplicates.
-        if (this._wasEventSeenByAllDependentLiveObjects(event.id, liveObjectIdsThatWillProcessEvent)) {
+        if (
+            this._wasEventSeenByAllDependentLiveObjects(event.id, liveObjectIdsThatWillProcessEvent)
+        ) {
             logger.warn(`Duplicate event seen - ${event.id} - skipping.`)
             return
         }
         this._registerEventAsSeen(event, liveObjectIdsThatWillProcessEvent)
-        
+
         // Buffer new event if still resolving previous missed events.
         if (sub.shouldBuffer || options?.forceToBuffer) {
             this.eventSubs[event.name].buffer.push(event)
@@ -157,7 +180,9 @@ class Spec {
         // Get sub for event.
         const sub = this.eventSubs[event.name]
         if (!sub) {
-            logger.error(`Processing event for ${event.name} without subscription...something's wrong.`)
+            logger.error(
+                `Processing event for ${event.name} without subscription...something's wrong.`
+            )
             return
         }
 
@@ -168,10 +193,11 @@ class Spec {
             const liveObject = this.liveObjects[liveObjectId]
             if (!liveObject) continue
 
-            const onError = (err: any) => logger.error(
-                `Failed to apply event to live object - 
+            const onError = (err: any) =>
+                logger.error(
+                    `Failed to apply event to live object - 
                 (event=${event.name}; liveObject=${liveObjectId}): ${err}`
-            )
+                )
             try {
                 new ApplyEventService(event, liveObject).perform().catch(onError)
             } catch (err) {
@@ -183,14 +209,16 @@ class Spec {
     async _getLiveObjectsInConfig() {
         // Get the list of live object version ids that haven't already been fetched.
         const newlyDetectedLiveObjectVersionIds = config.liveObjectIds.filter(
-            id => !this.liveObjects.hasOwnProperty(id)
+            (id) => !this.liveObjects.hasOwnProperty(id)
         )
         if (!newlyDetectedLiveObjectVersionIds.length) return
-        
+
         // Fetch the newly detected live objects via rpc.
         const newLiveObjects = await resolveLiveObjects(newlyDetectedLiveObjectVersionIds)
         if (newLiveObjects === null) {
-            logger.error(`Failed to fetch new live objects: ${newlyDetectedLiveObjectVersionIds.join(', ')}.`)
+            logger.error(
+                `Failed to fetch new live objects: ${newlyDetectedLiveObjectVersionIds.join(', ')}.`
+            )
             return
         }
 
@@ -207,11 +235,10 @@ class Spec {
         // Subscribe to new events.
         for (const newEventName in liveObjectsByEvent) {
             if (this.eventSubs.hasOwnProperty(newEventName)) continue
-            
+
             // Register event callback.
-            messageClient.on(
-                newEventName,
-                (event: SpecEvent<StringKeyMap | StringKeyMap[]>) => this._onEvent(event),
+            messageClient.on(newEventName, (event: SpecEvent<StringKeyMap | StringKeyMap[]>) =>
+                this._onEvent(event)
             )
 
             // Register sub.
@@ -237,11 +264,11 @@ class Spec {
 
         // Get event subs that haven't been registered yet in the eventCursors map.
         let eventNamesWithNoCursor = Object.keys(this.eventSubs).filter(
-            eventName => !this.eventSubs[eventName].cursor
+            (eventName) => !this.eventSubs[eventName].cursor
         )
         if (eventNamesFilter.length) {
-            eventNamesWithNoCursor = eventNamesWithNoCursor.filter(
-                eventName => eventNamesFilter.includes(eventName)
+            eventNamesWithNoCursor = eventNamesWithNoCursor.filter((eventName) =>
+                eventNamesFilter.includes(eventName)
             )
         }
 
@@ -253,7 +280,7 @@ class Spec {
     }
 
     async _fetchMissedEvents(newEventNames: string[]) {
-        // Get the previous cursors for the new events. 
+        // Get the previous cursors for the new events.
         const cursors = []
         for (let newEventName of newEventNames) {
             const cursor = this.eventSubs[newEventName].cursor
@@ -263,17 +290,20 @@ class Spec {
 
         logger.info('Fetching any missed events...')
 
-
         return new Promise(async (res, _) => {
             // Fetch any events that came after the following cursors.
             try {
-                await messageClient.fetchMissedEvents(cursors, (events: SpecEvent<StringKeyMap | StringKeyMap[]>[]) => {
-                    logger.info(`Fetched ${events.length} missed events.`)
-                    events.forEach(event => this._onEvent(event, { forceToBuffer: true }))
-                }, () => {
-                    logger.info('Events in-sync.')
-                    res(null)
-                })
+                await messageClient.fetchMissedEvents(
+                    cursors,
+                    (events: SpecEvent<StringKeyMap | StringKeyMap[]>[]) => {
+                        logger.info(`Fetched ${events.length} missed events.`)
+                        events.forEach((event) => this._onEvent(event, { forceToBuffer: true }))
+                    },
+                    () => {
+                        logger.info('Events in-sync.')
+                        res(null)
+                    }
+                )
             } catch (error) {
                 logger.error(error)
                 res(null)
@@ -288,7 +318,7 @@ class Spec {
         // Upsert any new/changed live columns listed in the config.
         const upsertLiveColumnService = new UpsertLiveColumnsService()
         try {
-            await upsertLiveColumnService.perform() 
+            await upsertLiveColumnService.perform()
             liveColumnsToSeed = upsertLiveColumnService.liveColumnsToUpsert
         } catch (err) {
             logger.error(`Failed to upsert live columns: ${err}`)
@@ -347,14 +377,14 @@ class Spec {
             seedSpecsMap[`${seedSpec.liveObjectId}:${seedSpec.tablePath}`] = seedSpec
         }
 
-        // Get any seed jobs that failed (plus those that were stopped mid-seed (in-progress) 
+        // Get any seed jobs that failed (plus those that were stopped mid-seed (in-progress)
         // if this is our first pass through this function (i.e. on startup)).
         const statusesToRetry = [
             SeedCursorStatus.Failed,
             this.hasCalledUpsertAndSeedLiveColumns ? null : SeedCursorStatus.InProgress,
-        ].filter(v => !!v)
-        const seedCursorsToRetry = await getSeedCursorsWithStatus(statusesToRetry) || []
-        
+        ].filter((v) => !!v)
+        const seedCursorsToRetry = (await getSeedCursorsWithStatus(statusesToRetry)) || []
+
         this.hasCalledUpsertAndSeedLiveColumns = true
 
         const retryResolveRecordsJobs = []
@@ -373,7 +403,7 @@ class Spec {
             }
 
             if (seedCursor.jobType === SeedCursorJobType.SeedTable) {
-                // Check to see if a seed spec for this liveObjectId+tablePath 
+                // Check to see if a seed spec for this liveObjectId+tablePath
                 // is already scheduled to run (per above).
                 const uniqueSeedSpecKey = `${liveObjectId}:${tablePath}`
                 const plannedSeedSpec = seedSpecsMap[uniqueSeedSpecKey]
@@ -383,9 +413,14 @@ class Spec {
                     const [schemaName, tableName] = tablePath.split('.')
                     const plannedSeedColNames = new Set(plannedSeedSpec.seedColNames || [])
                     const cursorSeedColNames = seedCursor.spec.seedColNames || []
-                    const currentTableLiveColNames = new Set(Object.keys(config.getTable(schemaName, tableName)))
+                    const currentTableLiveColNames = new Set(
+                        Object.keys(config.getTable(schemaName, tableName))
+                    )
                     for (const colName of cursorSeedColNames) {
-                        if (!plannedSeedColNames.has(colName) && currentTableLiveColNames.has(colName)) {
+                        if (
+                            !plannedSeedColNames.has(colName) &&
+                            currentTableLiveColNames.has(colName)
+                        ) {
                             seedSpecsMap[uniqueSeedSpecKey].seedColNames.push(colName)
                         }
                     }
@@ -393,8 +428,7 @@ class Spec {
                 } else {
                     retrySeedTableJobs.push(seedCursor)
                 }
-            }
-            else if (seedCursor.jobType === SeedCursorJobType.ResolveRecords) {
+            } else if (seedCursor.jobType === SeedCursorJobType.ResolveRecords) {
                 retryResolveRecordsJobs.push(seedCursor)
             }
         }
@@ -415,7 +449,7 @@ class Spec {
             seedSpecsWithCursors.push([seedSpec, seedCursor])
         }
 
-        // Curate list of seed cursor ids to flip back to in-progress, and register 
+        // Curate list of seed cursor ids to flip back to in-progress, and register
         // the seed cursors that need retrying with the master list of seed specs to run.
         const updateSeedCursorIds = []
         for (const seedCursor of retrySeedTableJobs) {
@@ -430,14 +464,18 @@ class Spec {
         }
 
         seedSpecsWithCursors.forEach(([seedSpec, _]) => {
-            if (!tablePathsUsingLiveObjectId.hasOwnProperty(seedSpec.liveObjectId) || 
+            if (
+                !tablePathsUsingLiveObjectId.hasOwnProperty(seedSpec.liveObjectId) ||
                 !tablePathsUsingLiveObjectIdForSeed.hasOwnProperty(seedSpec.liveObjectId)
-            ) { return }
+            ) {
+                return
+            }
 
             const numTablesUsingLiveObject = tablePathsUsingLiveObjectId[seedSpec.liveObjectId].size
-            const numTablesUsingLiveObjectForSeed = tablePathsUsingLiveObjectIdForSeed[seedSpec.liveObjectId].size
+            const numTablesUsingLiveObjectForSeed =
+                tablePathsUsingLiveObjectIdForSeed[seedSpec.liveObjectId].size
 
-            // If this live object is only used in the table(s) about to be seeded, 
+            // If this live object is only used in the table(s) about to be seeded,
             // then add it to a list to indicates that events should be ignored.
             if (numTablesUsingLiveObject === numTablesUsingLiveObjectForSeed) {
                 this.liveObjectsToIgnoreEventsFrom.add(seedSpec.liveObjectId)
@@ -453,19 +491,26 @@ class Spec {
 
             try {
                 const seedTableService = new SeedTableService(
-                    seedSpec, 
+                    seedSpec,
                     liveObject,
                     seedCursor.id,
-                    seedCursor.cursor,
+                    seedCursor.cursor
                 )
-                
-                // Determine seed strategy up-front unless already determined 
+
+                // Determine seed strategy up-front unless already determined
                 // (see '_processExternalTableLinkDataChanges()' within subscriber.ts)
                 if (!seedCursor.metadata?.foreignTablePath) {
                     await seedTableService.determineSeedStrategy()
                 }
-                seedJobs[tablePath] = seedJobs[tablePath] || { seedTableJobs: [], resolveRecordsJobs: [] }
-                seedJobs[tablePath].seedTableJobs.push([seedTableService, seedSpec, seedCursor.metadata])
+                seedJobs[tablePath] = seedJobs[tablePath] || {
+                    seedTableJobs: [],
+                    resolveRecordsJobs: [],
+                }
+                seedJobs[tablePath].seedTableJobs.push([
+                    seedTableService,
+                    seedSpec,
+                    seedCursor.metadata,
+                ])
             } catch (err) {
                 logger.error(`Creating seed table service for ${tablePath} failed: ${err}`)
                 continue
@@ -491,14 +536,20 @@ class Spec {
 
             try {
                 const resolveRecordsService = new ResolveRecordsService(
-                    resolveRecordsSpec, 
+                    resolveRecordsSpec,
                     liveObject,
                     link,
                     seedCursor.id,
-                    seedCursor.cursor,
+                    seedCursor.cursor
                 )
-                seedJobs[tablePath] = seedJobs[tablePath] || { seedTableJobs: [], resolveRecordsJobs: [] }
-                seedJobs[tablePath].resolveRecordsJobs.push([resolveRecordsService, resolveRecordsSpec])
+                seedJobs[tablePath] = seedJobs[tablePath] || {
+                    seedTableJobs: [],
+                    resolveRecordsJobs: [],
+                }
+                seedJobs[tablePath].resolveRecordsJobs.push([
+                    resolveRecordsService,
+                    resolveRecordsSpec,
+                ])
             } catch (err) {
                 logger.error(`Creating resolve records service for ${tablePath} failed: ${err}`)
                 continue
@@ -511,13 +562,13 @@ class Spec {
         const saved = await processSeedCursorBatch(
             createSeedCursors,
             updateSeedCursorIds,
-            deleteSeedCursorIds,
+            deleteSeedCursorIds
         )
         if (!saved) return
 
         // Run all seed jobs.
-        Object.values(seedJobs).forEach(jobs => {
-            this._runSeedJobs(jobs).catch(err => logger.error(err))
+        Object.values(seedJobs).forEach((jobs) => {
+            this._runSeedJobs(jobs).catch((err) => logger.error(err))
         })
 
         // Create a job that checks and retries failed seeds on an interval.
@@ -527,32 +578,39 @@ class Spec {
     async _runSeedJobs(jobs: StringKeyMap) {
         const seedTableJobs = jobs.seedTableJobs || []
         const resolveRecordsJobs = jobs.resolveRecordsJobs || []
-        const seedLiveObjectIds = unique(seedTableJobs.map(j => j[1].liveObjectId))
-        const resolveLiveObjectIds = unique(resolveRecordsJobs.map(j => j[1].liveObjectId))
+        const seedLiveObjectIds = unique(seedTableJobs.map((j) => j[1].liveObjectId))
+        const resolveLiveObjectIds = unique(resolveRecordsJobs.map((j) => j[1].liveObjectId))
         const liveObjectIdsOnlyInResolveJobs = resolveLiveObjectIds.filter(
-            liveObjectId => !seedLiveObjectIds.includes(liveObjectId)
+            (liveObjectId) => !seedLiveObjectIds.includes(liveObjectId)
         )
 
         // Run all resolve records jobs first.
-        await Promise.all(resolveRecordsJobs.map(([service, spec]) => (
-            this._resolveRecords(service, spec)
-        )))
-        
+        await Promise.all(
+            resolveRecordsJobs.map(([service, spec]) => this._resolveRecords(service, spec))
+        )
+
         this._processEventsPostSeed(liveObjectIdsOnlyInResolveJobs)
 
         // Run all seed jobs.
-        await Promise.all(seedTableJobs.map(([service, spec, metadata]) => (
-            this._seedTable(service, spec, metadata || {})
-        )))
+        await Promise.all(
+            seedTableJobs.map(([service, spec, metadata]) =>
+                this._seedTable(service, spec, metadata || {})
+            )
+        )
     }
 
-    async _resolveRecords(resolveRecordsService: ResolveRecordsService, resolveRecordsSpec: ResolveRecordsSpec) {
+    async _resolveRecords(
+        resolveRecordsService: ResolveRecordsService,
+        resolveRecordsSpec: ResolveRecordsSpec
+    ) {
         const { liveObjectId, tablePath } = resolveRecordsSpec
         const seedCursorId = resolveRecordsService.seedCursorId
         try {
             await resolveRecordsService.perform()
         } catch (err) {
-            logger.error(`Failed to resolve records for (liveObjectId=${liveObjectId}, tablePath=${tablePath}): ${err}`)
+            logger.error(
+                `Failed to resolve records for (liveObjectId=${liveObjectId}, tablePath=${tablePath}): ${err}`
+            )
             await seedFailed(seedCursorId)
         }
 
@@ -560,18 +618,25 @@ class Spec {
         await seedSucceeded(seedCursorId)
     }
 
-    async _seedTable(seedTableService: SeedTableService, seedSpec: SeedSpec, metadata: StringKeyMap) {
+    async _seedTable(
+        seedTableService: SeedTableService,
+        seedSpec: SeedSpec,
+        metadata: StringKeyMap
+    ) {
         const { liveObjectId, tablePath } = seedSpec
         const foreignTablePath = metadata?.foreignTablePath
 
         if (!!foreignTablePath) {
             const foreignPrimaryKeyData = metadata.foreignPrimaryKeyData || []
             try {
-                const foreignRecords = await getRecordsForPrimaryKeys(foreignTablePath, foreignPrimaryKeyData)
+                const foreignRecords = await getRecordsForPrimaryKeys(
+                    foreignTablePath,
+                    foreignPrimaryKeyData
+                )
                 await seedTableService.seedWithForeignRecords(foreignTablePath, foreignRecords)
             } catch (err) {
                 logger.error(`Seed failed for table ${tablePath}: ${err}`)
-                seedFailed(seedTableService.seedCursorId)             
+                seedFailed(seedTableService.seedCursorId)
                 return
             }
         } else {
@@ -592,7 +657,7 @@ class Spec {
 
     async _processEventsPostSeed(liveObjectIds: string[]) {
         // Start listening to events from these live objects now.
-        liveObjectIds.forEach(liveObjectId => {
+        liveObjectIds.forEach((liveObjectId) => {
             this.liveObjectsToIgnoreEventsFrom.delete(liveObjectId)
         })
 
@@ -602,7 +667,7 @@ class Spec {
         // Load the event cursors for these new events.
         await this._loadEventCursors(newEventNames)
 
-        // Fetch missed events for any new sub that already has an 
+        // Fetch missed events for any new sub that already has an
         // existing event cursor (i.e. events that have been seen before).
         await this._fetchMissedEvents(newEventNames)
 
@@ -645,16 +710,16 @@ class Spec {
             while (true) {
                 const buffer = this.eventSubs[eventName].buffer
                 if (!buffer.length) break
-    
+
                 // Sort buffer by nonce (smallest none first).
                 const sortedBuffer = [...buffer].sort((a, b) => a.nonce - b.nonce)
-                
+
                 // If some new event was buffered (race condition) during ^this sort,
                 // try again.
                 if (sortedBuffer.length !== this.eventSubs[eventName].buffer.length) {
                     continue
                 }
-    
+
                 this.eventSubs[eventName].buffer = sortedBuffer
                 break
             }
@@ -676,7 +741,7 @@ class Spec {
             }
         }
 
-        cursorsToSave.length && await saveEventCursors(cursorsToSave)
+        cursorsToSave.length && (await saveEventCursors(cursorsToSave))
     }
 
     _doneProcessingNewConfig() {
@@ -689,17 +754,15 @@ class Spec {
     }
 
     _createSaveCursorsJobIfNotExists() {
-        this.saveEventCursorsJob = this.saveEventCursorsJob || setInterval(
-            () => this._saveEventCursors(),
-            constants.SAVE_EVENT_CURSORS_INTERVAL,
-        )
+        this.saveEventCursorsJob =
+            this.saveEventCursorsJob ||
+            setInterval(() => this._saveEventCursors(), constants.SAVE_EVENT_CURSORS_INTERVAL)
     }
 
-    _createRetrySeedCursorsJobIfNotExists() {        
-        this.retrySeedCursorsJob = this.retrySeedCursorsJob || setInterval(
-            () => this._retrySeedCursors(),
-            constants.RETRY_SEED_CURSORS_INTERVAL,
-        )
+    _createRetrySeedCursorsJobIfNotExists() {
+        this.retrySeedCursorsJob =
+            this.retrySeedCursorsJob ||
+            setInterval(() => this._retrySeedCursors(), constants.RETRY_SEED_CURSORS_INTERVAL)
     }
 
     async _retrySeedCursors() {
@@ -725,7 +788,7 @@ class Spec {
             // Ignore events from live objects actively/exclusively being used to seed.
             if (this.liveObjectsToIgnoreEventsFrom.has(liveObjectId)) continue
 
-            const eventNames = this.liveObjects[liveObjectId].events.map(e => e.name)
+            const eventNames = this.liveObjects[liveObjectId].events.map((e) => e.name)
             for (const eventName of eventNames) {
                 if (!subs.hasOwnProperty(eventName)) {
                     subs[eventName] = []
@@ -737,7 +800,7 @@ class Spec {
     }
 
     _registerEventAsSeen(event: SpecEvent<StringKeyMap | StringKeyMap[]>, liveObjectIds: string[]) {
-        liveObjectIds.forEach(liveObjectId => {
+        liveObjectIds.forEach((liveObjectId) => {
             this.seenEvents.set(`${event.id}:${liveObjectId}`, true)
         })
     }

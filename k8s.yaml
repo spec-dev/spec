@@ -38,3 +38,5 @@ spec:
           value: {{DEBUG}}
         - name: FORCE_COLOR
           value: "1"
+        - name: SPEC_CONFIG_DIR
+          value: /usr/app/.spec

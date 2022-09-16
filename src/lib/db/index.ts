@@ -5,17 +5,17 @@ import logger from '../logger'
 import { Pool } from 'pg'
 
 const connectionConfig = {
-    host : constants.DB_HOST,
-    port : constants.DB_PORT,
-    user : constants.DB_USER,
-    password : constants.DB_PASSWORD,
-    database : constants.DB_NAME,
+    host: constants.DB_HOST,
+    port: constants.DB_PORT,
+    user: constants.DB_USER,
+    password: constants.DB_PASSWORD,
+    database: constants.DB_NAME,
 }
 
 export const db = knex({
     client: 'pg',
     connection: connectionConfig,
-    pool: { 
+    pool: {
         min: 0,
         max: constants.MAX_POOL_SIZE,
         propagateCreateError: false,
@@ -28,11 +28,11 @@ export const pool = new Pool({
     min: 0,
     max: 10, // leave
 })
-pool.on('error', err => logger.error('pg client error', err))
+pool.on('error', (err) => logger.error('pg client error', err))
 
 export const pgListener = createSubscriber(connectionConfig)
 
-pgListener.events.on('error', async err => {
+pgListener.events.on('error', async (err) => {
     logger.error(`Table Subscriber Error: ${err}`)
     // TODO: Attempt reconnection with debouncing and exponential backoff.
 })

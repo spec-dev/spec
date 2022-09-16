@@ -2,7 +2,7 @@ import constants from './constants'
 
 class Logger {
     info(...args: any[]) {
-        constants.DEBUG && console.log(...args)
+        console.log(...args)
     }
     warn(...args: any[]) {
         console.warn(...args)

@@ -12,7 +12,6 @@ const DEFAULT_OPTIONS = {
 }
 
 export class MessageClient {
-
     client: SpecEventClient
 
     onConnect: () => void
@@ -49,15 +48,15 @@ export class MessageClient {
         await this.client.off(eventName)
     }
 
-    async resolveLiveObjects(liveObjectIds: string[]): Promise<{ 
-        data: ResolvedLiveObject[] | null, 
-        error: RpcError | null,
+    async resolveLiveObjects(liveObjectIds: string[]): Promise<{
+        data: ResolvedLiveObject[] | null
+        error: RpcError | null
     }> {
-        const { data, error } = await this.call(RPC.ResolveLiveObjects, { 
+        const { data, error } = await this.call(RPC.ResolveLiveObjects, {
             ids: liveObjectIds,
         })
         return {
-            data: data ? data as ResolvedLiveObject[] : null,
+            data: data ? (data as ResolvedLiveObject[]) : null,
             error,
         }
     }
@@ -65,14 +64,18 @@ export class MessageClient {
     async fetchMissedEvents(cursors: EventCursor[], cb: EventCallback, onDone?: any) {
         // Subscribe to a unique, temporary channel to use for missed-event transfer.
         const channel = short.generate()
-        this.on(channel, async (data: any) => {
-            if (data && typeof data === 'object' && !Array.isArray(data) && data.done) {
-                await this.off(channel)
-                onDone && onDone()
-            } else {
-                cb(data)
-            }
-        }, { temp: true })
+        this.on(
+            channel,
+            async (data: any) => {
+                if (data && typeof data === 'object' && !Array.isArray(data) && data.done) {
+                    await this.off(channel)
+                    onDone && onDone()
+                } else {
+                    cb(data)
+                }
+            },
+            { temp: true }
+        )
 
         // Tell the server to find and send over the missed events.
         const { error } = await this.call(RPC.GetEventsAfterCursors, {
@@ -85,7 +88,7 @@ export class MessageClient {
         }
     }
 
-    async call(functionName: RPC, payload?: any): Promise<{ data: any, error: RpcError }> {
+    async call(functionName: RPC, payload?: any): Promise<{ data: any; error: RpcError }> {
         let data = null
         try {
             data = await this.client.socket.invoke(functionName, payload)
@@ -98,10 +101,9 @@ export class MessageClient {
     }
 
     _createPingJobIfNotExists() {
-        this.pingJob = this.pingJob || setInterval(
-            () => this.call(RPC.Ping, { ping: true }),
-            constants.EVENTS_PING_INTERVAL,
-        )
+        this.pingJob =
+            this.pingJob ||
+            setInterval(() => this.call(RPC.Ping, { ping: true }), constants.EVENTS_PING_INTERVAL)
     }
 }
 

@@ -4,13 +4,19 @@ import { unique } from '../utils/formatters'
 import { QueryError } from '../errors'
 
 export async function doesSchemaExist(schema: string): Promise<boolean> {
-    const result = await db.from('information_schema.schemata').where({ schema_name: schema }).count()
+    const result = await db
+        .from('information_schema.schemata')
+        .where({ schema_name: schema })
+        .count()
     const count = result ? Number((result[0] || {}).count || 0) : 0
     return count > 0
 }
 
 export async function doesTableExist(table: string, schema: string): Promise<boolean> {
-    const result = await db.from('pg_tables').where({ schemaname: schema, tablename: table }).count()
+    const result = await db
+        .from('pg_tables')
+        .where({ schemaname: schema, tablename: table })
+        .count()
     const count = result ? Number((result[0] || {}).count || 0) : 0
     return count > 0
 }
@@ -34,10 +40,13 @@ export async function tableCount(tablePath: string): Promise<number> {
     return result ? Number((result[0] || {}).count || 0) : 0
 }
 
-export async function getRecordsForPrimaryKeys(tablePath: string, primaryKeyData: StringKeyMap[]): Promise<StringKeyMap[]> {
+export async function getRecordsForPrimaryKeys(
+    tablePath: string,
+    primaryKeyData: StringKeyMap[]
+): Promise<StringKeyMap[]> {
     // Group primary keys into arrays of values for the same key.
     const primaryKeys = {}
-    Object.keys(primaryKeyData[0]).forEach(key => {
+    Object.keys(primaryKeyData[0]).forEach((key) => {
         primaryKeys[key] = []
     })
     for (const pkData of primaryKeyData) {

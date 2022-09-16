@@ -2,10 +2,14 @@ import { LiveColumnQuerySpec, LiveColumn } from '../types'
 import config from '../config'
 import { QueryError } from '../errors'
 import { mapBy } from '../utils/formatters'
-import { SPEC_SCHEMA_NAME, LIVE_COLUMNS_TABLE_NAME, getLiveColumnsForColPaths, saveLiveColumns } from '../db/spec'
+import {
+    SPEC_SCHEMA_NAME,
+    LIVE_COLUMNS_TABLE_NAME,
+    getLiveColumnsForColPaths,
+    saveLiveColumns,
+} from '../db/spec'
 
 class UpsertLiveColumnsService {
-
     querySpecs: LiveColumnQuerySpec[] = []
 
     prevLiveColumns: LiveColumn[] = []
@@ -32,10 +36,12 @@ class UpsertLiveColumnsService {
 
     async _getExistingLiveColumns() {
         this._getQuerySpecs()
-        
+
         // Get all existing live columns for the given array of column paths.
         try {
-            this.prevLiveColumns = await getLiveColumnsForColPaths(this.querySpecs.map(qs => qs.columnPath))
+            this.prevLiveColumns = await getLiveColumnsForColPaths(
+                this.querySpecs.map((qs) => qs.columnPath)
+            )
         } catch (err) {
             throw new QueryError('select', SPEC_SCHEMA_NAME, LIVE_COLUMNS_TABLE_NAME, err)
         }
@@ -44,17 +50,17 @@ class UpsertLiveColumnsService {
     _findLiveColumnsToUpsert() {
         const querySpecsToUpsert = []
         const prevLiveColumnsMap = mapBy<LiveColumn>(this.prevLiveColumns, 'columnPath')
-        
+
         // Compare querySpecs and prevLiveColumns, to find:
         // -----
         // (1) The live columns that don't exist yet.
         // (2) The live columns where the data source has changed.
         for (const querySpec of this.querySpecs) {
             const isNewColPath = !prevLiveColumnsMap.hasOwnProperty(querySpec.columnPath)
-            const colDataSourceChanged = !isNewColPath && (
+            const colDataSourceChanged =
+                !isNewColPath &&
                 prevLiveColumnsMap[querySpec.columnPath].liveProperty !== querySpec.liveProperty
-            )
-            
+
             if (isNewColPath || colDataSourceChanged) {
                 querySpecsToUpsert.push(querySpec)
             }

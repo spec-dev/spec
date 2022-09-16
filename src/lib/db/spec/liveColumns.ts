@@ -11,11 +11,11 @@ export async function getLiveColumnsForColPaths(columnPaths: string[]): Promise<
     if (!columnPaths.length) return []
     let records
     try {
-        records = await liveColumns()
-            .select('*')
-            .whereIn('column_path', unique(columnPaths))
+        records = await liveColumns().select('*').whereIn('column_path', unique(columnPaths))
     } catch (err) {
-        logger.error(`Error getting live_columns for column_paths: ${columnPaths.join(', ')}: ${err}`)
+        logger.error(
+            `Error getting live_columns for column_paths: ${columnPaths.join(', ')}: ${err}`
+        )
         throw err
     }
 
@@ -25,11 +25,8 @@ export async function getLiveColumnsForColPaths(columnPaths: string[]): Promise<
 export async function saveLiveColumns(records: LiveColumn[]) {
     if (!records.length) return
     try {
-        await db.transaction(async tx => {
-            await liveColumns(tx)
-                .insert(decamelizeKeys(records))
-                .onConflict('column_path')
-                .merge()
+        await db.transaction(async (tx) => {
+            await liveColumns(tx).insert(decamelizeKeys(records)).onConflict('column_path').merge()
         })
     } catch (err) {
         logger.error(`Error saving live columns: ${err}`)

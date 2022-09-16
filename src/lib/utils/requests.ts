@@ -1,4 +1,3 @@
-
 import { StringKeyMap, EdgeFunction } from '../types'
 import fetch, { Response } from 'node-fetch'
 import { JSONParser } from '@streamparser/json'
@@ -7,13 +6,14 @@ import logger from '../logger'
 
 type onDataCallbackType = (data: StringKeyMap | StringKeyMap[]) => Promise<void>
 
-const isStreamingResp = (resp: Response): boolean => resp.headers?.get('Transfer-Encoding') === 'chunked'
+const isStreamingResp = (resp: Response): boolean =>
+    resp.headers?.get('Transfer-Encoding') === 'chunked'
 
 export async function callSpecFunction(
     edgeFunction: EdgeFunction,
     payload: StringKeyMap | StringKeyMap[],
     onData: onDataCallbackType,
-    hasRetried?: boolean,
+    hasRetried?: boolean
 ) {
     const abortController = new AbortController()
     const initialRequestTimer = setTimeout(() => abortController.abort(), 30000)
@@ -38,17 +38,27 @@ export async function callSpecFunction(
     }
 }
 
-async function handleJSONResp(resp: Response, edgeFunction: EdgeFunction, onData: onDataCallbackType) {
+async function handleJSONResp(
+    resp: Response,
+    edgeFunction: EdgeFunction,
+    onData: onDataCallbackType
+) {
     let data
     try {
         data = await resp.json()
     } catch (err) {
-        throw `Failed to parse JSON response data from edge function ${edgeFunction.name}: ${err?.message || err}`
+        throw `Failed to parse JSON response data from edge function ${edgeFunction.name}: ${
+            err?.message || err
+        }`
     }
     await onData(data)
 }
 
-async function handleStreamingResp(resp: Response, abortController: AbortController, onData: onDataCallbackType) {
+async function handleStreamingResp(
+    resp: Response,
+    abortController: AbortController,
+    onData: onDataCallbackType
+) {
     // Create JSON parser for streamed response.
     const jsonParser = new JSONParser({
         stringBufferSize: undefined,
@@ -66,7 +76,7 @@ async function handleStreamingResp(resp: Response, abortController: AbortControl
     // Parse each JSON object and add it to a batch.
     let batch = []
     let promises = []
-    jsonParser.onValue = obj => {
+    jsonParser.onValue = (obj) => {
         if (!obj) return
         obj = obj as StringKeyMap
         if (obj.error) throw obj.error // Throw any errors explicitly passed back
@@ -88,17 +98,17 @@ async function handleStreamingResp(resp: Response, abortController: AbortControl
         throw `Error iterating response stream: ${err?.message || err}`
     }
     chunkTimer && clearTimeout(chunkTimer)
-    
+
     // Trailing results in partial batch (or no results).
     promises.push(onData(batch))
-    
+
     await Promise.all(promises)
 }
 
 async function makeRequest(
-    edgeFunction: EdgeFunction, 
+    edgeFunction: EdgeFunction,
     payload: StringKeyMap | StringKeyMap[],
-    abortController: AbortController,
+    abortController: AbortController
 ): Response {
     let resp: Response
     try {

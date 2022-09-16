@@ -11,10 +11,11 @@ export const triggerName: StringKeyMap = {
     PK_SEP: '__pk__',
 }
 
-triggerName.prefixForEvent = (triggerEvent: TriggerEvent): string | null => ({
-    [TriggerEvent.INSERT]: triggerName.INSERT_PREFIX,
-    [TriggerEvent.UPDATE]: triggerName.UPDATE_PREFIX,
-}[triggerEvent] || null)
+triggerName.prefixForEvent = (triggerEvent: TriggerEvent): string | null =>
+    ({
+        [TriggerEvent.INSERT]: triggerName.INSERT_PREFIX,
+        [TriggerEvent.UPDATE]: triggerName.UPDATE_PREFIX,
+    }[triggerEvent] || null)
 
 // Function name components.
 export const functionName: StringKeyMap = {
@@ -22,12 +23,18 @@ export const functionName: StringKeyMap = {
     UPDATE_PREFIX: 'spec_update_notify',
 }
 
-functionName.prefixForEvent = (triggerEvent: TriggerEvent): string | null => ({
-    [TriggerEvent.INSERT]: functionName.INSERT_PREFIX,
-    [TriggerEvent.UPDATE]: functionName.UPDATE_PREFIX,
-}[triggerEvent] || null)
+functionName.prefixForEvent = (triggerEvent: TriggerEvent): string | null =>
+    ({
+        [TriggerEvent.INSERT]: functionName.INSERT_PREFIX,
+        [TriggerEvent.UPDATE]: functionName.UPDATE_PREFIX,
+    }[triggerEvent] || null)
 
-export function formatTriggerName(schema: string, table: string, event: TriggerEvent, primaryKeys?: string[]): string {
+export function formatTriggerName(
+    schema: string,
+    table: string,
+    event: TriggerEvent,
+    primaryKeys?: string[]
+): string {
     const suffix = (primaryKeys || []).sort().join('_')
     const prefix = triggerName.prefixForEvent(event)
     return prefix ? `${prefix}_${schema}_${table}${triggerName.PK_SEP}${suffix}` : ''
@@ -40,9 +47,9 @@ export function formatFunctionName(schema: string, table: string, event: Trigger
 
 export function formatRecordAsTrigger(record: StringKeyMap): Trigger | null {
     const { schema, table, event, trigger_name } = record
-    const trigger = { 
-        schema, 
-        table, 
+    const trigger = {
+        schema,
+        table,
         event: event as TriggerEvent,
         name: trigger_name,
     } as Trigger
@@ -69,15 +76,15 @@ export async function getSpecTriggers(): Promise<Trigger[]> {
         FROM information_schema.triggers
         WHERE 
             trigger_name LIKE '${triggerName.INSERT_PREFIX}%' OR 
-            trigger_name LIKE '${triggerName.UPDATE_PREFIX}%'`,
+            trigger_name LIKE '${triggerName.UPDATE_PREFIX}%'`
     )
-    return (rows || []).map(formatRecordAsTrigger).filter(t => !!t)
+    return (rows || []).map(formatRecordAsTrigger).filter((t) => !!t)
 }
 
 export async function createTrigger(
-    schema: string, 
-    table: string, 
-    event: TriggerEvent, 
+    schema: string,
+    table: string,
+    event: TriggerEvent,
     options: StringKeyMap = {}
 ) {
     const tablePath = [schema, table].join('.')
@@ -85,11 +92,11 @@ export async function createTrigger(
     const withFunction = options.hasOwnProperty('withFunction') ? options.withFunction : true
 
     // Need primary keys of the table to serve as the suffix of the trigger name.
-    const primaryKeys = tablesMeta[tablePath].primaryKey.map(pk => pk.name)
+    const primaryKeys = tablesMeta[tablePath].primaryKey.map((pk) => pk.name)
     if (!primaryKeys.length) {
         throw `Can't create trigger -- no primary keys found for table ${tablePath}`
     }
-    const primaryKeysAsArgs = primaryKeys.map(pk => `'${pk}'`).join(', ')
+    const primaryKeysAsArgs = primaryKeys.map((pk) => `'${pk}'`).join(', ')
 
     const triggerName = formatTriggerName(schema, table, event, primaryKeys)
     if (!triggerName) throw 'Failed to create trigger - formatted name came back empty'
@@ -114,7 +121,7 @@ export async function createTrigger(
             await db.raw(
                 `CREATE TRIGGER ${triggerName} AFTER UPDATE ON ?? 
                 FOR EACH ROW EXECUTE PROCEDURE ${schema}.${functionName}(${primaryKeysAsArgs})`,
-                [tablePath],
+                [tablePath]
             )
             break
 
@@ -172,13 +179,13 @@ export async function createInsertFunction(name: string, schema: string) {
 
             RETURN rec;
         END;
-        $$ LANGUAGE plpgsql;`,
+        $$ LANGUAGE plpgsql;`
     )
 }
 
 export async function createUpdateFunction(name: string, schema: string) {
     logger.info(`Creating database function ${name}...`)
-    
+
     await db.raw(
         `CREATE OR REPLACE FUNCTION ${schema}.${name}() RETURNS trigger AS $$
         DECLARE
@@ -220,6 +227,6 @@ export async function createUpdateFunction(name: string, schema: string) {
 
             RETURN rec;
         END;
-        $$ LANGUAGE plpgsql;`,
+        $$ LANGUAGE plpgsql;`
     )
 }
