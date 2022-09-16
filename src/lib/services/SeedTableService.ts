@@ -349,7 +349,7 @@ class SeedTableService {
         // Start seeding with batches of input records.
         let t0 = null
         while (true) {
-            console.log('\nNEW BATCH\n')
+            logger.info(chalk.cyanBright('\nNEW INPUT BATCH\n'))
 
             // Get batch of input records from the foreign table.
             const batchInputRecords =
