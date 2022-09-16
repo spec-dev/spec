@@ -13,6 +13,7 @@
         "build:main": "tsc -p tsconfig.json"
     },
     "dependencies": {
+        "@logdna/logger": "^2.6.6",
         "@ltd/j-toml": "1.30.0",
         "@spec.dev/event-client": "^0.0.7",
         "@streamparser/json": "^0.0.8",

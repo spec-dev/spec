@@ -40,3 +40,5 @@ spec:
           value: "1"
         - name: SPEC_CONFIG_DIR
           value: /usr/app/.spec
+        - name: LOGS_API_KEY
+          value: {{LOGS_API_KEY}}

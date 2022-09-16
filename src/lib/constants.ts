@@ -45,8 +45,7 @@ const constants: StringKeyMap = {
 
     MAX_UPDATES_BEFORE_BULK_UPDATE_USED: Number(ev('MAX_UPDATES_BEFORE_BULK_UPDATE_USED', 10)),
 
-    LOGS_HOST: ev('LOGS_HOST'),
-    LOGS_PORT: Number(ev('LOGS_PORT')),
+    LOGS_API_KEY: ev('LOGS_API_KEY'),
 }
 
 constants.PROJECT_CONFIG_PATH = path.join(

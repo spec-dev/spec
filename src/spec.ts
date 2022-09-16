@@ -63,8 +63,6 @@ class Spec {
         // Ensure the 'spec' schema and associated tables within it exist.
         await ensureSpecSchemaIsReady()
 
-        logger.info('Schema is ready...')
-
         // Subscribe & react to config file changes.
         config.onUpdate = () => {
             if (this.isProcessingNewConfig) {
@@ -82,15 +80,10 @@ class Spec {
     async _onNewConfig() {
         this.isProcessingNewConfig = true
 
-        logger.info('Loading config...')
-
         // Load and validate project config file.
         if (config.load()) {
             await config.validate()
         }
-
-        logger.info('Passed config validation..', config.config, config.isValid)
-        return
 
         // If the config is invalid, just wait until the next save to try again.
         if (!config.isValid) {
