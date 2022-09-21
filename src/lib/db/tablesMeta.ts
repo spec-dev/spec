@@ -341,11 +341,12 @@ export function isColTypeArray(colPath: string): boolean {
     const [schema, table, colName] = colPath.split('.')
     const tablePath = [schema, table].join('.')
 
-    const tableColTypes = tablesMeta[tablePath]
+    const tableColTypes = (tablesMeta[tablePath] || {}).colTypes
     if (!tableColTypes) return false
 
     const colType = tableColTypes[colName]
     if (!colType) return false
-
-    return colType.includes('[]')
+    
+    return colType.includes('[]') 
+        || colType.toLowerCase().includes('array')
 }

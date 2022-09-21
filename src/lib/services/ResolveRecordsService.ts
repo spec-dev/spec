@@ -8,8 +8,9 @@ import {
     StringMap,
     LiveObjectFunctionRole,
     ResolveRecordsSpec,
+    ColumnDefaultsConfig,
 } from '../types'
-import { reverseMap, toMap, unique, getCombinations } from '../utils/formatters'
+import { reverseMap, toMap, unique, getCombinations, groupByKeys } from '../utils/formatters'
 import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
 import config from '../config'
@@ -47,9 +48,13 @@ class ResolveRecordsService {
 
     inputPropertyKeys: string[] = []
 
-    batchFunctionInputs: StringKeyMap[] = []
+    batchFunctionInputs: StringKeyMap = {}
 
     indexedPkConditions: StringKeyMap = {}
+
+    liveTableColumns: string[]
+
+    defaultColumnValues: { [key: string]: ColumnDefaultsConfig }
 
     get schemaName(): string {
         return this.tablePath.split('.')[0]
@@ -122,6 +127,8 @@ class ResolveRecordsService {
         this.seedCursorId = seedCursorId
         this.cursor = cursor
         this.resolveFunction = null
+        this.liveTableColumns = Object.keys(config.getTable(this.schemaName, this.tableName) || {})
+        this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.tablePath)
     }
 
     async perform() {
@@ -232,6 +239,8 @@ class ResolveRecordsService {
                     table: this.tableName,
                     where: entry.where,
                     data: entry.updates,
+                    liveTableColumns: this.liveTableColumns,
+                    defaultColumnValues: this.defaultColumnValues,
                 })
             }
         }
@@ -244,6 +253,8 @@ class ResolveRecordsService {
                     table: this.tableName,
                     where: bulkWhere,
                     data: bulkUpdates,
+                    liveTableColumns: this.liveTableColumns,
+                    defaultColumnValues: this.defaultColumnValues,
                 }
                 await new RunOpService(op).perform()
             } else {
@@ -288,7 +299,7 @@ class ResolveRecordsService {
             }
         }
 
-        this.batchFunctionInputs = batchFunctionInputs
+        this.batchFunctionInputs = groupByKeys(batchFunctionInputs)
         this.indexedPkConditions = indexedPkConditions
     }
 

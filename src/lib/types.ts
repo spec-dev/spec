@@ -21,6 +21,22 @@ export type SchemaConfig = { [key: string]: TableConfig }
 
 export type TablesConfig = { [key: string]: SchemaConfig }
 
+export enum ColumnDefaultsSetOn {
+    Insert = 'insert',
+    Update = 'update',
+}
+
+export interface ColumnDefaultsConfig {
+    value: string
+    setOn?: ColumnDefaultsSetOn[]
+}
+
+export type TableDefaultsConfig = { [key: string]: ColumnDefaultsConfig | string }
+
+export type SchemaDefaultsConfig = { [key: string]: TableDefaultsConfig }
+
+export type DefaultsConfig = { [key: string]: SchemaDefaultsConfig }
+
 export interface LiveObjectConfig {
     id: string
     filterBy?: StringKeyMap
@@ -30,10 +46,9 @@ export interface LiveObjectConfig {
 export type LiveObjectsConfig = { [key: string]: LiveObjectConfig }
 
 export interface ProjectConfig {
-    project_id: string
-    project_name: string
     objects?: LiveObjectsConfig
     tables?: TablesConfig
+    defaults?: DefaultsConfig
 }
 
 export type MessageClientOptions = {
@@ -67,6 +82,7 @@ export interface LiveObjectLink {
     uniqueBy?: string[]
     seedIfEmpty?: boolean
     eventsCanInsert?: boolean
+    filterBy?: StringKeyMap
 }
 
 export interface LiveObject {
@@ -152,6 +168,8 @@ export interface Op {
     where?: StringKeyMap | StringKeyMap[]
     data?: StringKeyMap | StringKeyMap[]
     conflictTargets?: string[]
+    liveTableColumns: string[]
+    defaultColumnValues: { [key: string]: ColumnDefaultsConfig }
 }
 
 export enum SeedCursorStatus {
@@ -191,6 +209,7 @@ export interface SeedSpec {
     linkProperties: StringMap
     seedWith: string[]
     uniqueBy: string[] | null
+    filterBy: StringKeyMap | null
     seedColNames: string[]
     seedIfEmpty?: boolean
 }
@@ -259,4 +278,18 @@ export interface TableLink {
 export interface TableLinkDataChanges {
     tableLink: TableLink
     events: TableSubEvent[]
+}
+
+export enum FilterOp {
+    EqualTo = '=',
+    GreaterThan = '>',
+    GreaterThanOrEqualTo = '>=',
+    LessThan = '>=',
+    LessThanOrEqualTo = '<=',
+}
+
+export interface Filter {
+    op: FilterOp
+    column?: string
+    value?: any
 }

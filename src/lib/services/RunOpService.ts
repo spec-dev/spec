@@ -1,11 +1,12 @@
 import logger from '../logger'
-import { Op, OpType } from '../types'
+import { Op, OpType, StringKeyMap } from '../types'
 import { QueryError } from '../errors'
 import { Knex } from 'knex'
 import short from 'short-uuid'
 import { tablesMeta } from '../db/tablesMeta'
 import { pool, db } from '../db'
-import { mergeByKeys } from '../utils/formatters'
+import { mergeByKeys, unique } from '../utils/formatters'
+import { applyDefaults, getUpdatedAtColName } from '../defaults'
 
 class RunOpService {
     op: Op
@@ -37,13 +38,30 @@ class RunOpService {
     async _runInsert() {
         // Start a new insert query for this table.
         let insertQuery = this.tx(this.tablePath)
-        const data = this.op.data
+        let data = Array.isArray(this.op.data) ? this.op.data : [this.op.data]
+        if (!data.length) return
+
+        // Add column defaults.
+        if (Object.keys(this.op.defaultColumnValues).length) {
+            data = applyDefaults(data, this.op.defaultColumnValues) as StringKeyMap[]
+        }
 
         // Add upsert functionality if specified.
-        if (this.op.conflictTargets) {
-            const arrData = Array.isArray(data) ? data : [data]
-            const uniqueData = mergeByKeys(arrData, this.op.conflictTargets)
-            insertQuery.insert(uniqueData).onConflict(this.op.conflictTargets).merge()
+        const conflictTargets = this.op.conflictTargets
+        if (conflictTargets) {
+            const uniqueData = mergeByKeys(data, conflictTargets)
+
+            // Only merge live columns that aren't a conflict target, or is the special updated at column.
+            let mergeColNames = this.op.liveTableColumns.filter(colName => !conflictTargets.includes(colName))
+            const updatedAtColName = getUpdatedAtColName(data[0])
+            updatedAtColName && mergeColNames.push(updatedAtColName)
+            mergeColNames = unique(mergeColNames)
+
+            if (mergeColNames.length) {
+                insertQuery.insert(uniqueData).onConflict(conflictTargets).merge(mergeColNames)
+            } else {
+                insertQuery.insert(uniqueData).onConflict(conflictTargets).ignore()
+            }
         } else {
             insertQuery.insert(data)
         }

@@ -410,6 +410,7 @@ export class TableSubscriber {
             linkProperties: link.inputs,
             seedWith: link.seedWith,
             uniqueBy: link.uniqueBy || null,
+            filterBy: link.filterBy || null,
             seedColNames: [], // not used with foreign seeds
             seedIfEmpty: link.seedIfEmpty || false,
         }

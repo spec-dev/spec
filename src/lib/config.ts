@@ -12,6 +12,7 @@ import {
     LiveObjectsConfig,
     LiveObjectConfig,
     TablesConfig,
+    DefaultsConfig,
     TableConfig,
     StringMap,
     StringKeyMap,
@@ -19,6 +20,10 @@ import {
     LiveObjectLink,
     TableLink,
     ColumnConfig,
+    Filter,
+    FilterOp,
+    ColumnDefaultsConfig,
+    ColumnDefaultsSetOn,
 } from './types'
 import { tableSubscriber } from './db/subscriber'
 
@@ -37,20 +42,16 @@ class Config {
 
     onUpdate: () => void
 
-    get projectId(): string {
-        return this.config.project_id
-    }
-
-    get projectName(): string {
-        return this.config.project_name
-    }
-
     get liveObjects(): LiveObjectsConfig {
         return this.config.objects || {}
     }
 
     get tables(): TablesConfig {
         return this.config.tables || {}
+    }
+
+    get defaults(): DefaultsConfig {
+        return this.config.defaults || {}
     }
 
     get liveObjectIds(): string[] {
@@ -126,6 +127,51 @@ class Config {
             }
         }
         return tableLinks
+    }
+
+    getDefaultColumnValuesForTable(tablePath: string): { [key: string]: ColumnDefaultsConfig } {
+        const [schemaName, tableName] = tablePath.split('.')
+        const defaults = this.defaults
+        const schema = defaults[schemaName]
+        if (!schema) return {}
+        let table = schema[tableName]
+        if (!table) return {}
+        table = toMap(table)
+
+        const acceptedSetOnValues = [
+            ColumnDefaultsSetOn.Insert,
+            ColumnDefaultsSetOn.Update,
+        ]
+
+        const defaultColValues = {}
+        for (const colName in table) {
+            let colDefaults = table[colName]
+
+            if (typeof colDefaults === 'object') {
+                if (colDefaults === null || Array.isArray(colDefaults)) continue
+                try {
+                    colDefaults = toMap(colDefaults) as ColumnDefaultsConfig
+                } catch (err) {
+                    logger.warn(`Tried to convert colDefaults into map but failed`, colDefaults)
+                    continue
+                }
+                if (!colDefaults.hasOwnProperty('value')) continue
+                const value = colDefaults.value
+
+                let setOn = (colDefaults.setOn || []).filter(v => acceptedSetOnValues.includes(v))
+                setOn = setOn.length ? setOn : [ColumnDefaultsSetOn.Insert]
+
+                defaultColValues[colName] = { value, setOn }
+                continue
+            }
+
+            defaultColValues[colName] = {
+                value: colDefaults,
+                setOn: [ColumnDefaultsSetOn.Insert]
+            }
+        }
+        
+        return defaultColValues
     }
 
     getExternalTableLinksDependentOnTableForSeed(tablePath: string): TableLink[] {
@@ -333,6 +379,53 @@ class Config {
                 (colGroup) => [...colGroup].sort().join(':') === uniqueByColNamesId
             ) || null
         )
+    }
+
+    categorizeFilters(filters: StringKeyMap): { [key: string]: Filter }[] {
+        const staticFilters = {}
+        const columnFilters = {}
+
+        for (const key in (filters || {})) {
+            let value = filters[key]
+
+            // String filter.
+            if (typeof value !== 'object') {
+                staticFilters[key] = {
+                    op: FilterOp.EqualTo,
+                    value: value,
+                }
+                continue
+            }
+
+            try {
+                value = toMap(value)
+            } catch (err) {
+                logger.warn(`Tried to convert filter into map but failed`, value)
+                continue
+            }
+
+            // Non-column, object filter.
+            if (value.hasOwnProperty('value')) {
+                staticFilters[key] = {
+                    op: value.op || FilterOp.EqualTo,
+                    value: value.value,
+                }
+                continue
+            }
+
+            // Column filter.
+            if (value.hasOwnProperty('column')) {
+                if (typeof value.column !== 'string') continue
+                const splitColPath = (value.column || '').split('.')
+                if (splitColPath.length !== 3) continue
+
+                columnFilters[key] = {
+                    op: value.op || FilterOp.EqualTo,
+                    column: value.column,
+                }
+            }
+        }
+        return [staticFilters, columnFilters]
     }
 
     load(): boolean {

@@ -117,6 +117,8 @@ async function makeRequest(
     payload: StringKeyMap | StringKeyMap[],
     abortController: AbortController
 ): Response {
+    payload = stringifyAnyDates(payload)
+
     let resp: Response
     try {
         resp = await fetch(edgeFunction.url, {
@@ -132,4 +134,35 @@ async function makeRequest(
         throw `Edge function (${edgeFunction.name}) call failed: got response code ${resp?.status}`
     }
     return resp
+}
+
+function stringifyAnyDates(value: StringKeyMap | StringKeyMap[]): StringKeyMap | StringKeyMap[] {
+    // Null.
+    if (value === null) return null
+
+    // Arrays.
+    if (Array.isArray(value)) {
+        return value.map(v => stringifyAnyDates(v))
+    }
+
+    // Objects.
+    if (typeof value === 'object') {
+        // Dates.
+        if (Object.prototype.toString.call(value) === '[object Date]') {
+            return value.toISOString()
+        }
+
+        // "Dicts".
+        if (Object.prototype.toString.call(value) === '[object Object]') {
+            const clone = {}
+            for (const key in value) {
+                clone[key] = stringifyAnyDates(value[key])
+            }
+            return clone
+        }
+        return value
+    }
+
+    // Other.
+    return value
 }

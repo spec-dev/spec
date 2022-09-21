@@ -30,6 +30,7 @@ class ApplyEventService {
     async perform() {
         this._logProcessingEvent()
         this._filterLiveObjectDiffs()
+        if (!this.liveObjectDiffs.length) return
         await this.getOps()
         await this.runOps()
     }

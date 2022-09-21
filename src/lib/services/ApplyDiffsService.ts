@@ -6,7 +6,7 @@ import {
     Op,
     OpType,
     TableDataSources,
-    ForeignKeyConstraint,
+    ColumnDefaultsConfig,
 } from '../types'
 import config from '../config'
 import { db } from '../db'
@@ -16,6 +16,8 @@ import RunOpService from './RunOpService'
 import { getRel, isColTypeArray, tablesMeta } from '../db/tablesMeta'
 import logger from '../logger'
 import constants from '../constants'
+import chalk from 'chalk'
+import { applyDefaults } from '../defaults'
 
 const valueSep = '__:__'
 
@@ -26,7 +28,11 @@ class ApplyDiffsService {
 
     liveObject: LiveObject
 
-    ops: Op[] = []  
+    ops: Op[] = []
+
+    liveTableColumns: string[]
+
+    defaultColumnValues: { [key: string]: ColumnDefaultsConfig }
 
     get linkTablePath(): string {
         return this.link.table
@@ -59,6 +65,11 @@ class ApplyDiffsService {
         return meta.primaryKey.map((pk) => pk.name)
     }
 
+    get seedTablePath(): string {
+        const [schema, table, _] = this.linkProperties[this.link.seedWith[0]].split('.')
+        return [schema, table].join('.')
+    }
+
     get linkTableUniqueConstraint(): string[] {
         const uniqueConstaint = config.getUniqueConstraintForLink(
             this.liveObject.id,
@@ -81,6 +92,8 @@ class ApplyDiffsService {
         this.liveObjectDiffs = diffs
         this.link = link
         this.liveObject = liveObject
+        this.liveTableColumns = Object.keys(config.getTable(this.linkSchemaName, this.linkTableName) || {})
+        this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.linkTablePath)
     }
 
     async perform() {
@@ -115,7 +128,7 @@ class ApplyDiffsService {
         const tablePath = this.linkTablePath
         const tableDataSources = this.tableDataSources
 
-        // Get query conditions for the linked foreign tables.
+        // Get query conditions for the linked foreign tables. 
         const foreignTableQueryConditions = {}
         for (const property in properties) {
             const colPath = properties[property]
@@ -139,12 +152,13 @@ class ApplyDiffsService {
 
             foreignTableQueryConditions[colTablePath].properties.push(property)
             foreignTableQueryConditions[colTablePath].colNames.push(colName)
+
             const values = unique(this.liveObjectDiffs.map((diff) => diff[property]).flat())
 
             if (isColTypeArray(colPath)) {
-                const arrayValuesPlaceholder = `{${values.map(_ => '?').join(',')}}`
+                // const arrayValuesPlaceholder = `'{${values.map(_ => '?').join(',')}}'`
                 foreignTableQueryConditions[colTablePath].whereRaw.push([
-                    `${colName} && ${arrayValuesPlaceholder}`,
+                    `${colName} && ARRAY[${values.map(v => '?').join(',')}]`,
                     values,
                 ])
             } else {
@@ -196,10 +210,13 @@ class ApplyDiffsService {
             }
         }
         
+        const seedTablePath = this.seedTablePath
+        const missingLinkedForeignTables = {}
+        
         // Format record objects to upsert.
         const upsertRecords = []
         for (const diff of this.liveObjectDiffs) {
-            const upsertRecord = {}
+            const upsertRecord: StringKeyMap = {}
             for (const property in diff) {
                 const colsWithThisPropertyAsDataSource = tableDataSources[property] || []
                 const value = diff[property]
@@ -207,25 +224,61 @@ class ApplyDiffsService {
                     upsertRecord[columnName] = value
                 }
             }
-
+        
             let ignoreDiff = false
             const groupedForeignKeyValues = []
             const foreignKeyColNames = []
+            const missingForeignLookups = {}
+
             for (const foreignTablePath in foreignTableQueryConditions) {
                 const queryConditions = foreignTableQueryConditions[foreignTablePath]
                 const foreignRefKey = queryConditions.properties.map((p) => diff[p]).join(valueSep)
                 const foreignRefKeyValues = referenceKeyValues[foreignTablePath][foreignRefKey] || []
+                const foreignRecordIsMissing = !(foreignRefKeyValues?.length)
 
-                // TODO: Here is where you decide whether to insert a new foreign record or not.
-                if (!foreignRefKeyValues?.length) {
-                    ignoreDiff = true
-                    break
+                // Linked foreign record is missing...
+                if (foreignRecordIsMissing) {
+                    // Don't insert any new foreign records to the relationship with the seed table.
+                    if (foreignTablePath === seedTablePath) {
+                        ignoreDiff = true
+                        break
+                    }
+
+                    // HACK/ASSUMPTION: There's only 1 property associated with this foreign table.
+                    const property = queryConditions.properties[0]
+                    const colName = queryConditions.colNames[0]
+                    const foreignKey = queryConditions.rel.foreignKey
+                    const referenceKey = queryConditions.rel.referenceKey
+                    const colValue = diff[property]
+
+                    if (!missingLinkedForeignTables.hasOwnProperty(foreignTablePath)) {
+                        missingLinkedForeignTables[foreignTablePath] = {
+                            tablePath: foreignTablePath,
+                            property,
+                            colName,
+                            foreignKey,
+                            referenceKey,
+                            colValues: [],
+                        }
+                    }
+
+                    missingLinkedForeignTables[foreignTablePath].colValues.push(colValue)
+                    missingForeignLookups[foreignTablePath] = colValue      
+
+                    // Just added for the sake of having a single value to run getCombinations against below, 
+                    // while acting as a placeholder to be replace with the reference key later.
+                    groupedForeignKeyValues.push([colValue])
+                    foreignKeyColNames.push(foreignKey)
+                } else {
+                    groupedForeignKeyValues.push(foreignRefKeyValues)
+                    foreignKeyColNames.push(queryConditions.rel.foreignKey)    
                 }
-
-                groupedForeignKeyValues.push(foreignRefKeyValues)
-                foreignKeyColNames.push(queryConditions.rel.foreignKey)
             }
             if (ignoreDiff) continue
+
+            if (Object.keys(missingForeignLookups).length > 0) {
+                upsertRecord._missingForeignLookups = missingForeignLookups
+            }   
 
             const uniqueForeignKeyCombinations = getCombinations(groupedForeignKeyValues)
 
@@ -239,16 +292,114 @@ class ApplyDiffsService {
         }
         if (!upsertRecords.length) return
 
-        // Perform all upserts in a single, bulk operation.
-        this.ops = [
-            {
-                type: OpType.Insert,
-                schema: this.linkSchemaName,
-                table: this.linkTableName,
-                data: upsertRecords,
-                conflictTargets: this.linkTableUniqueConstraint,
-            },
-        ]
+        try {
+            await db.transaction(async (tx) => {
+                const resolvedDependentForeignTables = await Promise.all(
+                    Object.values(missingLinkedForeignTables).map(v => this._findOrCreateDependentForeignTable(v, tx))
+                )
+                const resolvedDependentForeignTablesMap = {}
+                for (const resolvedDependentForeignTable of resolvedDependentForeignTables) {
+                    resolvedDependentForeignTablesMap[resolvedDependentForeignTable.tablePath] = resolvedDependentForeignTable
+                }
+
+                const finalUpsertRecords = []
+                for (const upsertRecord of upsertRecords) {
+                    if (!upsertRecord.hasOwnProperty('_missingForeignLookups')) {
+                        finalUpsertRecords.push(upsertRecord)
+                        continue
+                    }
+
+                    let ignoreRecord = false
+                    for (const foreignTablePath in upsertRecord._missingForeignLookups) {
+                        const colValueUsedAtLookup = upsertRecord._missingForeignLookups[foreignTablePath]
+                        const resolvedDependentForeignTable = resolvedDependentForeignTablesMap[foreignTablePath] || {}
+                        const { referenceKeyValuesMap = {}, foreignKey } = resolvedDependentForeignTable
+
+                        if (!referenceKeyValuesMap.hasOwnProperty(colValueUsedAtLookup)) {
+                            ignoreRecord = true
+                            break
+                        }
+
+                        upsertRecord[foreignKey] = referenceKeyValuesMap[colValueUsedAtLookup]
+                    }
+                    if (ignoreRecord) continue
+
+                    delete upsertRecord._missingForeignLookups
+                    finalUpsertRecords.push(upsertRecord)
+                }
+                if (!finalUpsertRecords.length) return
+
+                const upsertBatchOp = {
+                    type: OpType.Insert,
+                    schema: this.linkSchemaName,
+                    table: this.linkTableName,
+                    data: finalUpsertRecords,
+                    conflictTargets: this.linkTableUniqueConstraint,
+                    liveTableColumns: this.liveTableColumns,
+                    defaultColumnValues: this.defaultColumnValues,
+                }
+        
+                logger.info(chalk.green(
+                    `Upserting ${finalUpsertRecords.length} records in ${this.linkSchemaName}.${this.linkTableName}...`
+                ))
+
+                await new RunOpService(upsertBatchOp, tx).perform()
+            })
+        } catch (err) {
+            throw new QueryError('upsert', this.linkSchemaName, this.linkTableName, err)
+        }
+    }
+
+    async _findOrCreateDependentForeignTable(missingLinkedForeignTableEntry, tx) {
+        const {
+            tablePath,
+            property,
+            colName,
+            foreignKey,
+            referenceKey,
+        } = missingLinkedForeignTableEntry
+        const colValues = unique(missingLinkedForeignTableEntry.colValues)
+        console.log('_findOrCreateDependentForeignTable', colValues)
+
+        const resp = {
+            tablePath,
+            property,
+            colName,
+            foreignKey,
+            referenceKey,
+            referenceKeyValuesMap: {},
+        }
+
+        let data = colValues.map(value => ({ [colName]: value }))
+
+        const defaultColValues = config.getDefaultColumnValuesForTable(tablePath)
+        if (Object.keys(defaultColValues).length) {
+            data = applyDefaults(data, defaultColValues) as StringKeyMap[]
+        }
+
+        // TODO: If colName doesn't have a unique constraint, this method will fail 
+        // and you'll need to do a classic find...create.
+        let results = []
+        try {
+            results = await tx(tablePath)
+                .returning(unique([referenceKey, colName]))
+                .insert(data)
+                .onConflict(colName)
+                .ignore()
+        } catch (err) {
+            logger.error(err)
+            return resp
+        }
+
+        const referenceKeyValuesMap = {}
+        for (const result of (results || [])) {
+            const colValue = result[colName]
+            const referenceKeyValue = result[referenceKey]
+            referenceKeyValuesMap[colValue] = referenceKeyValue
+        }
+
+        resp.referenceKeyValuesMap = referenceKeyValuesMap
+        return resp
     }
 
     async _createUpdateOps() {
@@ -368,6 +519,8 @@ class ApplyDiffsService {
                 table: this.linkTableName,
                 where,
                 data: updates,
+                liveTableColumns: this.liveTableColumns,
+                defaultColumnValues: this.defaultColumnValues,
             })
         }
     }
@@ -469,6 +622,8 @@ class ApplyDiffsService {
             table: this.linkTableName,
             where,
             data: updates,
+            liveTableColumns: this.liveTableColumns,
+            defaultColumnValues: this.defaultColumnValues,
         })
     }
 

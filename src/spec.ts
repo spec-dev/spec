@@ -170,7 +170,6 @@ class Spec {
     }
 
     async _processEvent(event: SpecEvent<StringKeyMap | StringKeyMap[]>) {
-        return
         // Get sub for event.
         const sub = this.eventSubs[event.name]
         if (!sub) {
@@ -360,6 +359,7 @@ class Spec {
                 linkProperties: link.inputs,
                 seedWith: link.seedWith,
                 uniqueBy: link.uniqueBy || null,
+                filterBy: link.filterBy || null,
                 seedColNames,
                 seedIfEmpty: link.seedIfEmpty || false,
             })

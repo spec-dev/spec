@@ -7,11 +7,13 @@ import {
     LiveObjectFunctionRole,
     StringKeyMap,
     TableDataSources,
-    Op,
     OpType,
     ForeignKeyConstraint,
+    Filter,
+    FilterOp,
+    ColumnDefaultsConfig,
 } from '../types'
-import { reverseMap, toMap, getCombinations, unique } from '../utils/formatters'
+import { reverseMap, toMap, getCombinations, unique, groupByKeys } from '../utils/formatters'
 import { areColumnsEmpty } from '../db/ops'
 import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
@@ -23,6 +25,7 @@ import { tablesMeta, getRel, isColTypeArray } from '../db/tablesMeta'
 import chalk from 'chalk'
 import { updateCursor } from '../db/spec'
 import LRU from 'lru-cache'
+import { applyDefaults } from '../defaults'
 
 const valueSep = '__:__'
 
@@ -44,6 +47,16 @@ class SeedTableService {
     colPathToFunctionInputArg: { [key: string]: string } = {}
 
     seedCount: number = 0
+
+    tableDataSources: TableDataSources
+
+    seedTableUniqueConstraint: string[]
+
+    filters: { [key: string]: Filter }[]
+
+    liveTableColumns: string[]
+
+    defaultColumnValues: { [key: string]: ColumnDefaultsConfig }
 
     seedStrategy: () => void | null
 
@@ -69,28 +82,10 @@ class SeedTableService {
         return reverseMap(this.seedSpec.linkProperties)
     }
 
-    get tableDataSources(): TableDataSources {
-        return config.getLiveObjectTableDataSources(this.liveObject.id, this.seedTablePath)
-    }
-
     get seedTablePrimaryKeys(): string[] {
         const meta = tablesMeta[this.seedTablePath]
         if (!meta) throw `No meta registered for table ${this.seedTablePath}`
         return meta.primaryKey.map((pk) => pk.name)
-    }
-
-    get seedTableUniqueConstraint(): string[] {
-        const uniqueConstaint = config.getUniqueConstraintForLink(
-            this.liveObject.id,
-            this.seedTablePath
-        )
-        if (!uniqueConstaint)
-            throw `No unique constraint for link ${this.liveObject.id} <-> ${this.seedTablePath}`
-        return uniqueConstaint
-    }
-
-    get defaultFilters(): StringKeyMap {
-        return this.liveObject.filterBy || {}
     }
 
     constructor(seedSpec: SeedSpec, liveObject: LiveObject, seedCursorId: string, cursor: number) {
@@ -100,6 +95,11 @@ class SeedTableService {
         this.cursor = cursor || 0
         this.seedFunction = null
         this.seedColNames = new Set<string>(this.seedSpec.seedColNames)
+        this.tableDataSources = config.getLiveObjectTableDataSources(this.liveObject.id, this.seedTablePath)
+        this.seedTableUniqueConstraint = this._getUniqueConstraint()
+        this.filters = this._buildFilters()
+        this.liveTableColumns = Object.keys(config.getTable(this.seedSchemaName, this.seedTableName) || {})
+        this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.seedTablePath)
         this.seedStrategy = null
     }
 
@@ -216,12 +216,15 @@ class SeedTableService {
     async _seedFromScratch() {
         logger.info(chalk.cyanBright(`Seeding ${this.seedTablePath} from scratch...`))
 
+        // TODO: Implement filters here too.
+        const [staticFilters, _] = this.filters
+
         const sharedErrorContext = { error: null }
         const t0 = performance.now()
         try {
             await callSpecFunction(
                 this.seedFunction,
-                this.defaultFilters, 
+                {},
                 async (data) => this._handleDataOnSeedFromScratch(data as StringKeyMap[]).catch(err => {
                     sharedErrorContext.error = err
                 }),
@@ -250,6 +253,9 @@ class SeedTableService {
 
         const queryConditions = this._buildQueryForSeedWithAdjacentCols()
 
+        // TODO: Actually implement potential column filters here.
+        const [staticFilters, _] = this.filters
+
         // Get the live object property keys associated with each input column.
         const reverseLinkProperties = this.reverseLinkProperties
         const inputPropertyKeys = this.requiredArgColPaths.map(
@@ -257,7 +263,8 @@ class SeedTableService {
         )
 
         // If any of the input columns is of array type, shrink the seed input batch size to 1.
-        const seedInputBatchSize = queryConditions.hasArrayColumns ? 1 : constants.SEED_INPUT_BATCH_SIZE
+        const seedInputBatchSize = queryConditions.arrayColumns.length 
+            ? 1 : constants.SEED_INPUT_BATCH_SIZE
 
         // Start seeding with batches of input records.
         const sharedErrorContext = { error: null }
@@ -294,7 +301,7 @@ class SeedTableService {
                     colValues.push(value)
                 }
 
-                batchFunctionInputs.push({ ...this.defaultFilters, ...input })
+                batchFunctionInputs.push(input)
 
                 const recordPrimaryKeys = {}
                 for (const pk of this.seedTablePrimaryKeys) {
@@ -308,6 +315,7 @@ class SeedTableService {
                     indexedPkConditions[key].push(recordPrimaryKeys)    
                 }
             }
+            const batchFunctionInput = groupByKeys(batchFunctionInputs)
 
             // Callback to use when a batch of response data is available.
             const onFunctionRespData = async (data) =>
@@ -324,7 +332,7 @@ class SeedTableService {
             try {
                 await callSpecFunction(
                     this.seedFunction,
-                    batchFunctionInputs, 
+                    batchFunctionInput,
                     onFunctionRespData,
                     sharedErrorContext,
                 )
@@ -338,17 +346,7 @@ class SeedTableService {
             await updateCursor(this.seedCursorId, this.cursor)
 
             if (isLastBatch) {
-                const tf = performance.now()
-                const seconds = Number(((tf - t0) / 1000).toFixed(2))
-                const rate = Math.round(this.seedCount / seconds)
-                logger.info(chalk.cyanBright('Done.'))
-                logger.info(
-                    chalk.cyanBright(
-                        `Updated ${this.seedCount.toLocaleString(
-                            'en-US'
-                        )} records in ${seconds} seconds (${rate.toLocaleString('en-US')} rows/s)`
-                    )
-                )
+                this._logResults(t0)
                 break
             }
         }
@@ -404,17 +402,21 @@ class SeedTableService {
             }
         }
 
-        // If any of the input columns is of array type, shrink the seed input batch size to 1.
-        const seedInputBatchSize = arrayInputColNames.length ? 1 : constants.FOREIGN_SEED_INPUT_BATCH_SIZE
+        const [staticFilters, columnFilters] = this.filters
+        const hasColumnFilters = Object.keys(columnFilters).length > 0
+
+        // If any of the input columns is of array type, OR, column filters are being used,
+        // shrink the seed input batch size to 1.
+        const seedInputBatchSize = arrayInputColNames.length || hasColumnFilters
+            ? 1 : constants.FOREIGN_SEED_INPUT_BATCH_SIZE
 
         // Start seeding with batches of input records.
         const sharedErrorContext = { error: null }
         let t0 = null
+
         while (true) {
             if (sharedErrorContext.error) throw sharedErrorContext.error
             
-            logger.info(chalk.cyanBright('\nNEW INPUT BATCH\n'))
-
             // Get batch of input records from the foreign table.
             const batchInputRecords =
                 inputRecords ||
@@ -428,6 +430,12 @@ class SeedTableService {
             if (batchInputRecords === null) {
                 throw `Foreign input records batch came up null for ${foreignTablePath} at offset ${this.cursor}.`
             }
+            if (!batchInputRecords.length) {
+                this._logResults(t0)
+                break
+            }
+
+            logger.info(chalk.cyanBright('\nNEW INPUT BATCH\n'))
 
             this.cursor += batchInputRecords.length
             const isLastBatch = !!inputRecords || batchInputRecords.length < seedInputBatchSize
@@ -450,6 +458,8 @@ class SeedTableService {
             const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(
                 batchInputRecords,
                 foreignTablePath,
+                staticFilters,
+                columnFilters,
             )
 
             // Callback to use when a batch of response data is available.
@@ -483,17 +493,7 @@ class SeedTableService {
             await updateCursor(this.seedCursorId, this.cursor)
 
             if (isLastBatch) {
-                const tf = performance.now()
-                const seconds = Number(((tf - t0) / 1000).toFixed(2))
-                const rate = Math.round(this.seedCount / seconds)
-                logger.info(chalk.cyanBright('Done.'))
-                logger.info(
-                    chalk.cyanBright(
-                        `Upserted ${this.seedCount.toLocaleString(
-                            'en-US'
-                        )} records in ${seconds} seconds (${rate.toLocaleString('en-US')} rows/s)`
-                    )
-                )
+                this._logResults(t0)
                 break
             }
         }
@@ -525,6 +525,8 @@ class SeedTableService {
             table: this.seedTableName,
             data: insertRecords,
             conflictTargets: this.seedTableUniqueConstraint,
+            liveTableColumns: this.liveTableColumns,
+            defaultColumnValues: this.defaultColumnValues,
         }
 
         try {
@@ -641,13 +643,16 @@ class SeedTableService {
                     delete upsertRecord._otherForeignLookups
                     finalUpsertRecords.push(upsertRecord)
                 }
-                
+                if (!finalUpsertRecords.length) return
+
                 const upsertBatchOp = {
                     type: OpType.Insert,
                     schema: this.seedSchemaName,
                     table: this.seedTableName,
-                    data: upsertRecords,
+                    data: finalUpsertRecords,
                     conflictTargets: this.seedTableUniqueConstraint,
+                    liveTableColumns: this.liveTableColumns,
+                    defaultColumnValues: this.defaultColumnValues,
                 }
         
                 await new RunOpService(upsertBatchOp, tx).perform()
@@ -676,13 +681,20 @@ class SeedTableService {
             referenceKeyValuesMap: {},
         }
 
+        let data = colValues.map(value => ({ [colName]: value }))
+
+        const defaultColValues = config.getDefaultColumnValuesForTable(tablePath)
+        if (Object.keys(defaultColValues).length) {
+            data = applyDefaults(data, defaultColValues) as StringKeyMap[]
+        }
+
         // TODO: If colName doesn't have a unique constraint, this method will fail 
         // and you'll need to do a classic find...create.
         let results = []
         try {
             results = await tx(tablePath)
                 .returning(unique([referenceKey, colName]))
-                .insert(colValues.map(value => ({ [colName]: value })))
+                .insert(data)
                 .onConflict(colName)
                 .ignore()
         } catch (err) {
@@ -761,6 +773,8 @@ class SeedTableService {
                     table: this.seedTableName,
                     where: entry.where,
                     data: entry.updates,
+                    liveTableColumns: this.liveTableColumns,
+                    defaultColumnValues: this.defaultColumnValues,
                 })
             }
         }
@@ -773,6 +787,8 @@ class SeedTableService {
                     table: this.seedTableName,
                     where: bulkWhere,
                     data: bulkUpdates,
+                    liveTableColumns: this.liveTableColumns,
+                    defaultColumnValues: this.defaultColumnValues,
                 }
                 await new RunOpService(op).perform()
             } else {
@@ -787,21 +803,64 @@ class SeedTableService {
 
     _transformRecordsIntoFunctionInputs(
         records: StringKeyMap[],
-        primaryTablePath: string
-    ): StringKeyMap[] {
+        primaryTablePath: string,
+        staticFilters: { [key: string]: Filter },
+        columnFilters: { [key: string]: Filter },
+    ): StringKeyMap {
+        // Build record-agnostic filters.
+        const recordAgnosticFilters = {}
+        for (const key in staticFilters) {
+            const filter = staticFilters[key]
+            if (filter.op === FilterOp.EqualTo) {
+                recordAgnosticFilters[key] = filter.value
+            } else {
+                recordAgnosticFilters[key] = filter
+            }
+        }
+
         const inputs = []
         for (const record of records) {
-            const input = {}
+            const entry = {}
+
+            // Map each record to a function input payload.
             for (const colPath of this.requiredArgColPaths) {
                 const [colSchemaName, colTableName, colName] = colPath.split('.')
                 const colTablePath = [colSchemaName, colTableName].join('.')
                 const inputArg = this.colPathToFunctionInputArg[colPath]
                 const recordColKey = colTablePath === primaryTablePath ? colName : colPath
-                input[inputArg] = record[recordColKey]
+                entry[inputArg] = record[recordColKey]
             }
-            inputs.push({ ...this.defaultFilters, ...input })
+
+            // Build record-specific filters.
+            const recordSpecificFilters = {}
+            for (const key in columnFilters) {
+                const filter = columnFilters[key]
+                const filterColPath = filter.column
+                const [schema, table, filterColName] = filterColPath.split('.')
+                const filterColTablePath = [schema, table].join('.')
+                const filterRecordColKey = filterColTablePath === primaryTablePath ? filterColName : filterColPath
+                if (!record.hasOwnProperty(filterRecordColKey)) continue
+                const filterValue = record[filterRecordColKey]
+                if (filterValue === null) continue
+
+                if (filter.op === FilterOp.EqualTo) {
+                    recordAgnosticFilters[key] = filterValue
+                } else {
+                    recordAgnosticFilters[key] = {
+                        op: filter.op,
+                        value: filterValue
+                    }
+                }
+            }
+
+            inputs.push({
+                ...recordAgnosticFilters,
+                ...recordSpecificFilters,
+                ...entry,
+            })
         }
-        return inputs
+        
+        return groupByKeys(inputs)
     }
 
     async _findInputRecordsFromAdjacentCols(
@@ -828,6 +887,11 @@ class SeedTableService {
         }
         query.whereNot(whereNotNull)
 
+        // And are also not empty arrays.
+        for (const arrayCol of queryConditions.arrayColumns) {
+            query.where(arrayCol, '!=', '{}')
+        }
+
         // Add offset/limit for batching.
         query.offset(offset).limit(limit)
 
@@ -844,16 +908,12 @@ class SeedTableService {
             join: [],
             select: [`${this.seedTablePath}.*`],
             whereNotNull: [],
-            hasArrayColumns: false
+            arrayColumns: [],
         }
 
         for (const colPath of this.requiredArgColPaths) {
             const [colSchemaName, colTableName, colName] = colPath.split('.')
             const colTablePath = [colSchemaName, colTableName].join('.')
-
-            if (!queryConditions.hasArrayColumns && isColTypeArray(colPath)) {
-                queryConditions.hasArrayColumns = true
-            }
 
             if (colTablePath !== this.seedTablePath) {
                 const rel = getRel(this.seedTablePath, colTablePath)
@@ -867,8 +927,14 @@ class SeedTableService {
 
                 queryConditions.select.push(`${colPath} as ${colPath}`)
                 queryConditions.whereNotNull.push(colPath)
+                if (isColTypeArray(colPath)) {
+                    queryConditions.arrayColumns.push(colPath)
+                }
             } else {
                 queryConditions.whereNotNull.push(colName)
+                if (isColTypeArray(colPath)) {
+                    queryConditions.arrayColumns.push(colName)
+                }
             }
         }
 
@@ -882,21 +948,30 @@ class SeedTableService {
         offset: number,
         limit: number,
     ): Promise<StringKeyMap[] | null> {
-        // Map col names to null.
+        // Map col names to null (and separate out array column names).
         const whereNotNull = {}
+        const arrayCols = []
         for (const colName of tableInputColNames) {
             whereNotNull[colName] = null
+            if (isColTypeArray([tablePath, colName].join('.'))) {
+                arrayCols.push(colName)
+            }
         }
 
         // Find all in batch where input cols names are NOT null.
+        const query = db
+            .from(tablePath)
+            .select('*')
+            .orderBy(primaryKeys.sort())
+            .whereNot(whereNotNull)
+
+        // And are also not empty arrays.
+        for (const arrayColName of arrayCols) {
+            query.where(arrayColName, '!=', '{}')
+        }
+
         try {
-            return await db
-                .from(tablePath)
-                .select('*')
-                .orderBy(primaryKeys.sort())
-                .whereNot(whereNotNull)
-                .offset(offset)
-                .limit(limit)
+            return await query.offset(offset).limit(limit)
         } catch (err) {
             const [schema, table] = tablePath.split('.')
             logger.error(new QueryError('select', schema, table, err).message)
@@ -969,6 +1044,40 @@ class SeedTableService {
 
         this.requiredArgColPaths = requiredArgColPaths
         this.colPathToFunctionInputArg = colPathToFunctionInputArg
+    }
+
+    _buildFilters(): { [key: string]: Filter }[] {
+        const objectFilters = this.liveObject.filterBy || {}
+        const linkFilters = this.seedSpec.filterBy || {}
+        const filters = { ...objectFilters, ...linkFilters }
+        if (!Object.keys(filters).length) return [{}, {}]
+        return config.categorizeFilters(filters)
+    }
+
+    _getUniqueConstraint(): string[] {
+        const uniqueConstraint = config.getUniqueConstraintForLink(
+            this.liveObject.id,
+            this.seedTablePath
+        )
+        if (!uniqueConstraint) {
+            throw `No unique constraint for link ${this.liveObject.id} <-> ${this.seedTablePath}`
+        }
+        return uniqueConstraint
+    }
+
+    _logResults(t0) {
+        if (!t0) return
+        const tf = performance.now()
+        const seconds = Number(((tf - t0) / 1000).toFixed(2))
+        const rate = Math.round(this.seedCount / seconds)
+        logger.info(chalk.cyanBright('Done.'))
+        logger.info(
+            chalk.cyanBright(
+                `Upserted ${this.seedCount.toLocaleString(
+                    'en-US'
+                )} records in ${seconds} seconds (${rate.toLocaleString('en-US')} rows/s)`
+            )
+        )
     }
 }
 
