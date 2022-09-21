@@ -150,12 +150,16 @@ class ResolveRecordsService {
         )
 
         // Call spec function and handle response data.
+        const sharedErrorContext = { error: null}
         const t0 = performance.now()
         try {
             await callSpecFunction(
                 this.resolveFunction,
                 this.batchFunctionInputs,
-                async (data) => await this._handleFunctionRespData(data as StringKeyMap[])
+                async (data) => await this._handleFunctionRespData(data as StringKeyMap[]).catch(err => {
+                    sharedErrorContext.error = err
+                }),
+                sharedErrorContext,
             )
         } catch (err) {
             logger.error(err)

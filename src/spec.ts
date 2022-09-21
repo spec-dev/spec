@@ -189,8 +189,7 @@ class Spec {
 
             const onError = (err: any) =>
                 logger.error(
-                    `Failed to apply event to live object - 
-                (event=${event.name}; liveObject=${liveObjectId}): ${err}`
+                    `Failed to apply event to live object - (event=${event.name}; liveObject=${liveObjectId}): ${err}`
                 )
             try {
                 new ApplyEventService(event, liveObject).perform().catch(onError)

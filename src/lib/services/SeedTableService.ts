@@ -216,11 +216,17 @@ class SeedTableService {
     async _seedFromScratch() {
         logger.info(chalk.cyanBright(`Seeding ${this.seedTablePath} from scratch...`))
 
+        const sharedErrorContext = { error: null }
         const t0 = performance.now()
         try {
-            await callSpecFunction(this.seedFunction, this.defaultFilters, async (data) => {
-                await this._handleDataOnSeedFromScratch(data as StringKeyMap[])
-            })
+            await callSpecFunction(
+                this.seedFunction,
+                this.defaultFilters, 
+                async (data) => this._handleDataOnSeedFromScratch(data as StringKeyMap[]).catch(err => {
+                    sharedErrorContext.error = err
+                }),
+                sharedErrorContext,
+            )
         } catch (err) {
             logger.error(err)
             throw err
@@ -254,8 +260,11 @@ class SeedTableService {
         const seedInputBatchSize = queryConditions.hasArrayColumns ? 1 : constants.SEED_INPUT_BATCH_SIZE
 
         // Start seeding with batches of input records.
+        const sharedErrorContext = { error: null }
         let t0 = null
         while (true) {
+            if (sharedErrorContext.error) throw sharedErrorContext.error
+
             // Get batch of input records from the seed table.
             const batchInputRecords = await this._findInputRecordsFromAdjacentCols(
                 queryConditions,
@@ -302,20 +311,29 @@ class SeedTableService {
 
             // Callback to use when a batch of response data is available.
             const onFunctionRespData = async (data) =>
-                await this._handleDataOnAdjacentColsSeed(
+                this._handleDataOnAdjacentColsSeed(
                     data,
                     inputPropertyKeys,
                     indexedPkConditions
-                )
+                ).catch(err => {
+                    sharedErrorContext.error = err
+                })
 
             // Call spec function and handle response data.
             t0 = t0 || performance.now()
             try {
-                await callSpecFunction(this.seedFunction, batchFunctionInputs, onFunctionRespData)
+                await callSpecFunction(
+                    this.seedFunction,
+                    batchFunctionInputs, 
+                    onFunctionRespData,
+                    sharedErrorContext,
+                )
             } catch (err) {
                 logger.error(err)
                 throw err
             }
+
+            if (sharedErrorContext.error) throw sharedErrorContext.error
 
             await updateCursor(this.seedCursorId, this.cursor)
 
@@ -390,8 +408,11 @@ class SeedTableService {
         const seedInputBatchSize = arrayInputColNames.length ? 1 : constants.FOREIGN_SEED_INPUT_BATCH_SIZE
 
         // Start seeding with batches of input records.
+        const sharedErrorContext = { error: null }
         let t0 = null
         while (true) {
+            if (sharedErrorContext.error) throw sharedErrorContext.error
+            
             logger.info(chalk.cyanBright('\nNEW INPUT BATCH\n'))
 
             // Get batch of input records from the foreign table.
@@ -433,22 +454,31 @@ class SeedTableService {
 
             // Callback to use when a batch of response data is available.
             const onFunctionRespData = async (data) =>
-                this._handleDataOnForeignTableSeed(
+                 this._handleDataOnForeignTableSeed(
                     data,
                     rel,
                     inputPropertyKeys,
                     referenceKeyValues,
                     nonSeedLinkedForeignTableData,
-                )
+                ).catch(err => {
+                    sharedErrorContext.error = err
+                })
 
             // Call spec function and handle response data.
             t0 = t0 || performance.now()
             try {
-                await callSpecFunction(this.seedFunction, batchFunctionInputs, onFunctionRespData)
+                await callSpecFunction(
+                    this.seedFunction, 
+                    batchFunctionInputs, 
+                    onFunctionRespData, 
+                    sharedErrorContext,
+                )
             } catch (err) {
                 logger.error(err)
                 throw err
             }
+
+            if (sharedErrorContext.error) throw sharedErrorContext.error
 
             await updateCursor(this.seedCursorId, this.cursor)
 

@@ -13,6 +13,7 @@ export async function callSpecFunction(
     edgeFunction: EdgeFunction,
     payload: StringKeyMap | StringKeyMap[],
     onData: onDataCallbackType,
+    sharedErrorContext: StringKeyMap,
     hasRetried?: boolean
 ) {
     const abortController = new AbortController()
@@ -26,12 +27,12 @@ export async function callSpecFunction(
     }
 
     try {
-        await handleStreamingResp(resp, abortController, onData)
+        await handleStreamingResp(resp, abortController, onData, sharedErrorContext)
     } catch (err) {
         const message = err.message || err || ''
         if (!hasRetried && message.toLowerCase().includes('user aborted')) {
             logger.warn('Retrying spec function request...')
-            await callSpecFunction(edgeFunction, payload, onData, true)
+            await callSpecFunction(edgeFunction, payload, onData, sharedErrorContext, true)
         } else {
             throw err
         }
@@ -57,7 +58,8 @@ async function handleJSONResp(
 async function handleStreamingResp(
     resp: Response,
     abortController: AbortController,
-    onData: onDataCallbackType
+    onData: onDataCallbackType,
+    sharedErrorContext: StringKeyMap,
 ) {
     // Create JSON parser for streamed response.
     const jsonParser = new JSONParser({
@@ -91,6 +93,11 @@ async function handleStreamingResp(
     try {
         for await (chunk of resp.body) {
             renewTimer()
+
+            if (sharedErrorContext.error) {
+                throw `Error handling streaming response batch: ${sharedErrorContext.error}`
+            }
+
             jsonParser.write(chunk)
         }
     } catch (err) {
