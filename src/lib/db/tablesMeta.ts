@@ -107,7 +107,7 @@ export async function getTableConstraints(
         requiredConstraintTypes.has(ConstraintType.PrimaryKey) ||
         requiredConstraintTypes.has(ConstraintType.Unique)
     ) {
-        const { rows } = await db.raw(
+        const query = db.raw(
             `SELECT
                 pg_get_constraintdef(c.oid) AS constraint,
                 contype,
@@ -117,9 +117,14 @@ export async function getTableConstraints(
                 ON n.oid = c.connamespace 
             WHERE contype IN ('p', 'f', 'u')
             AND n.nspname = ?
-            AND conrelid::regclass::text = ?`,
-            [schema, table]
+            AND (
+                conrelid::regclass::text = ? OR
+                conrelid::regclass::text = ?
+            )`,
+            [schema, table, `"${table}"`]
         )
+
+        const { rows } = await query
         rawConstraints = rows
     }
 
@@ -132,8 +137,8 @@ export async function getTableConstraints(
                 indexdef as constraint
             FROM pg_indexes 
             WHERE schemaname = ? 
-            AND tablename = ?`,
-            [schema, table]
+            AND (tablename = ? OR tablename = ?)`,
+            [schema, table, `"${table}"`]
         )
 
         const otherUniqueIndexes = rows
@@ -276,8 +281,8 @@ export async function getColTypes(
             information_schema.columns
         WHERE
             table_schema = ? AND
-            table_name = ?`
-    let bindings = [schema, table]
+            (table_name = ? OR table_name = ?)`
+    let bindings = [schema, table, `"${table}"`]
     if (colNames?.length) {
         query += ` AND column_name in (${colNames.map((c) => '?').join(', ')})`
         bindings.push(...colNames)
@@ -300,7 +305,7 @@ export function parseForeignKeyConstraint(
     fallbackSchema: string
 ): StringKeyMap | null {
     const matches = raw.match(
-        /FOREIGN KEY \(([a-zA-Z0-9_-]+)\) REFERENCES ([a-zA-Z0-9_.-]+)\(([a-zA-Z0-9_-]+)\)/i
+        /FOREIGN KEY \(([-a-zA-Z0-9_]+)\) REFERENCES ([-a-zA-Z0-9_."]+)\(([-a-zA-Z0-9_]+)\)/i
     )
     if (!matches || matches.length !== 4) return null
 
@@ -316,18 +321,31 @@ export function parseForeignKeyConstraint(
 
     return {
         foreignSchema: foreignSchema || fallbackSchema,
-        foreignTable,
+        foreignTable: foreignTable.replace(/"/gi, ''),
         foreignKey,
         referenceKey,
     }
 }
 
 export function parseColNamesFromConstraint(raw: string): StringKeyMap | null {
-    const matches = raw.match(/\(([a-zA-Z0-9-_, ]+)\)/i)
+    const matches = raw.match(/\(([-a-zA-Z0-9_, ]+)\)/i)
     if (!matches || matches.length !== 2) return null
     const colNames = matches[1]
         .split(',')
         .map((col) => col.trim())
         .sort()
     return { colNames }
+}
+
+export function isColTypeArray(colPath: string): boolean {
+    const [schema, table, colName] = colPath.split('.')
+    const tablePath = [schema, table].join('.')
+
+    const tableColTypes = tablesMeta[tablePath]
+    if (!tableColTypes) return false
+
+    const colType = tableColTypes[colName]
+    if (!colType) return false
+
+    return colType.includes('[]')
 }

@@ -10,10 +10,10 @@ import {
 } from '../types'
 import config from '../config'
 import { db } from '../db'
-import { toMap, unique } from '../utils/formatters'
+import { toMap, unique, getCombinations } from '../utils/formatters'
 import { QueryError } from '../errors'
 import RunOpService from './RunOpService'
-import { getRel, tablesMeta } from '../db/tablesMeta'
+import { getRel, isColTypeArray, tablesMeta } from '../db/tablesMeta'
 import logger from '../logger'
 import constants from '../constants'
 
@@ -26,7 +26,7 @@ class ApplyDiffsService {
 
     liveObject: LiveObject
 
-    ops: Op[] = []
+    ops: Op[] = []  
 
     get linkTablePath(): string {
         return this.link.table
@@ -131,6 +131,7 @@ class ApplyDiffsService {
                     rel,
                     tablePath: colTablePath,
                     whereIn: [],
+                    whereRaw: [],
                     properties: [],
                     colNames: [],
                 }
@@ -138,10 +139,20 @@ class ApplyDiffsService {
 
             foreignTableQueryConditions[colTablePath].properties.push(property)
             foreignTableQueryConditions[colTablePath].colNames.push(colName)
-            foreignTableQueryConditions[colTablePath].whereIn.push([
-                colName,
-                unique(this.liveObjectDiffs.map((diff) => diff[property])),
-            ])
+            const values = unique(this.liveObjectDiffs.map((diff) => diff[property]).flat())
+
+            if (isColTypeArray(colPath)) {
+                const arrayValuesPlaceholder = `{${values.map(_ => '?').join(',')}}`
+                foreignTableQueryConditions[colTablePath].whereRaw.push([
+                    `${colName} && ${arrayValuesPlaceholder}`,
+                    values,
+                ])
+            } else {
+                foreignTableQueryConditions[colTablePath].whereIn.push([
+                    colName,
+                    values,
+                ])
+            }
         }
 
         // Find foreign table records potentially needed for reference during inserts.
@@ -153,6 +164,11 @@ class ApplyDiffsService {
             for (let i = 0; i < queryConditions.whereIn.length; i++) {
                 const [col, vals] = queryConditions.whereIn[i]
                 query.whereIn(col, vals)
+            }
+
+            for (let j = 0; j < queryConditions.whereRaw.length; j++) {
+                const [sql, bindings] = queryConditions.whereRaw[j]
+                query.whereRaw(sql, bindings)
             }
 
             let records
@@ -169,14 +185,17 @@ class ApplyDiffsService {
 
             referenceKeyValues[foreignTablePath] = {}
             for (const record of records) {
-                const key = queryConditions.colNames
-                    .map((colName) => record[colName])
-                    .join(valueSep)
-                if (referenceKeyValues[foreignTablePath].hasOwnProperty(key)) continue
-                referenceKeyValues[foreignTablePath][key] = record[queryConditions.rel.referenceKey]
+                const colValues = queryConditions.colNames.map((colName) => record[colName])
+                const colValueOptions = getCombinations(colValues)
+
+                for (const valueOptions of colValueOptions) {
+                    const key = valueOptions.join(valueSep)
+                    referenceKeyValues[foreignTablePath][key] = referenceKeyValues[foreignTablePath][key] || []
+                    referenceKeyValues[foreignTablePath][key].push(record[queryConditions.rel.referenceKey])    
+                }
             }
         }
-
+        
         // Format record objects to upsert.
         const upsertRecords = []
         for (const diff of this.liveObjectDiffs) {
@@ -190,25 +209,37 @@ class ApplyDiffsService {
             }
 
             let ignoreDiff = false
+            const groupedForeignKeyValues = []
+            const foreignKeyColNames = []
             for (const foreignTablePath in foreignTableQueryConditions) {
                 const queryConditions = foreignTableQueryConditions[foreignTablePath]
-                const uniqueForeignRefKey = queryConditions.properties
-                    .map((property) => diff[property])
-                    .join(valueSep)
-                if (!referenceKeyValues[foreignTablePath].hasOwnProperty(uniqueForeignRefKey)) {
+                const foreignRefKey = queryConditions.properties.map((p) => diff[p]).join(valueSep)
+                const foreignRefKeyValues = referenceKeyValues[foreignTablePath][foreignRefKey] || []
+
+                // TODO: Here is where you decide whether to insert a new foreign record or not.
+                if (!foreignRefKeyValues?.length) {
                     ignoreDiff = true
                     break
                 }
-                const referenceKeyValue = referenceKeyValues[foreignTablePath][uniqueForeignRefKey]
-                upsertRecord[queryConditions.rel.foreignKey] = referenceKeyValue
+
+                groupedForeignKeyValues.push(foreignRefKeyValues)
+                foreignKeyColNames.push(queryConditions.rel.foreignKey)
             }
             if (ignoreDiff) continue
 
-            upsertRecords.push(upsertRecord)
+            const uniqueForeignKeyCombinations = getCombinations(groupedForeignKeyValues)
+
+            for (const foreignKeyValues of uniqueForeignKeyCombinations) {
+                const record = { ...upsertRecord }
+                for (let i = 0; i < foreignKeyValues.length; i++) {
+                    record[foreignKeyColNames[i]] = foreignKeyValues[i]
+                }
+                upsertRecords.push(record)
+            }
         }
         if (!upsertRecords.length) return
 
-        // Perform all upserts in a single, bulk insert operation.
+        // Perform all upserts in a single, bulk operation.
         this.ops = [
             {
                 type: OpType.Insert,

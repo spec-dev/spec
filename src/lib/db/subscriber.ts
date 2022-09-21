@@ -121,6 +121,7 @@ export class TableSubscriber {
 
     _onTableDataChange(event: TableSubEvent) {
         if (!event) return
+        event.table = event.table.replace(/"/g, '')
         const { schema, table } = event
         const tablePath = [schema, table].join('.')
 

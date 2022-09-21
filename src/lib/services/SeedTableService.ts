@@ -11,7 +11,7 @@ import {
     OpType,
     ForeignKeyConstraint,
 } from '../types'
-import { reverseMap, toMap } from '../utils/formatters'
+import { reverseMap, toMap, getCombinations, unique } from '../utils/formatters'
 import { areColumnsEmpty } from '../db/ops'
 import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
@@ -19,9 +19,10 @@ import config from '../config'
 import { db } from '../db'
 import { QueryError } from '../errors'
 import constants from '../constants'
-import { tablesMeta, getRel } from '../db/tablesMeta'
+import { tablesMeta, getRel, isColTypeArray } from '../db/tablesMeta'
 import chalk from 'chalk'
 import { updateCursor } from '../db/spec'
+import LRU from 'lru-cache'
 
 const valueSep = '__:__'
 
@@ -45,6 +46,8 @@ class SeedTableService {
     seedCount: number = 0
 
     seedStrategy: () => void | null
+
+    foreignKeyMappings: LRU<string, any> = new LRU({ max: 5000 })
 
     get seedTablePath(): string {
         return this.seedSpec.tablePath
@@ -247,26 +250,31 @@ class SeedTableService {
             (colPath) => reverseLinkProperties[colPath]
         )
 
+        // If any of the input columns is of array type, shrink the seed input batch size to 1.
+        const seedInputBatchSize = queryConditions.hasArrayColumns ? 1 : constants.SEED_INPUT_BATCH_SIZE
+
         // Start seeding with batches of input records.
         let t0 = null
         while (true) {
             // Get batch of input records from the seed table.
             const batchInputRecords = await this._findInputRecordsFromAdjacentCols(
                 queryConditions,
-                this.cursor
+                this.cursor,
+                seedInputBatchSize,
             )
             if (batchInputRecords === null) {
                 throw `Foreign input records batch came up null for ${this.seedTablePath} at offset ${this.cursor}.`
             }
 
             this.cursor += batchInputRecords.length
-            const isLastBatch = batchInputRecords.length < constants.SEED_INPUT_BATCH_SIZE
+            const isLastBatch = batchInputRecords.length < seedInputBatchSize
 
             const batchFunctionInputs = []
             const indexedPkConditions = {}
             for (const record of batchInputRecords) {
                 const input = {}
-                const keyComps = []
+                const colValues = []
+
                 for (const colPath of this.requiredArgColPaths) {
                     const [colSchemaName, colTableName, colName] = colPath.split('.')
                     const colTablePath = [colSchemaName, colTableName].join('.')
@@ -274,18 +282,22 @@ class SeedTableService {
                     const recordColKey = colTablePath === this.seedTablePath ? colName : colPath
                     const value = record[recordColKey]
                     input[inputArg] = value
-                    keyComps.push(value)
+                    colValues.push(value)
                 }
+
                 batchFunctionInputs.push({ ...this.defaultFilters, ...input })
-                const key = keyComps.join(valueSep)
-                if (!indexedPkConditions.hasOwnProperty(key)) {
-                    indexedPkConditions[key] = []
-                }
+
                 const recordPrimaryKeys = {}
                 for (const pk of this.seedTablePrimaryKeys) {
                     recordPrimaryKeys[pk] = record[pk]
                 }
-                indexedPkConditions[key].push(recordPrimaryKeys)
+
+                const colValueOptions = getCombinations(colValues)
+                for (const valueOptions of colValueOptions) {
+                    const key = valueOptions.join(valueSep)
+                    indexedPkConditions[key] = indexedPkConditions[key] || []
+                    indexedPkConditions[key].push(recordPrimaryKeys)    
+                }
             }
 
             // Callback to use when a batch of response data is available.
@@ -345,6 +357,37 @@ class SeedTableService {
         const inputPropertyKeys = inputColNames.map(
             (colName) => reverseLinkProperties[`${foreignTablePath}.${colName}`]
         )
+        const arrayInputColNames = inputColNames
+            .filter(colName => isColTypeArray([foreignTablePath, colName].join('.')))
+
+        // Get link properties / reference keys associated with any *OTHER* linked foreign tables.
+        const linkProperties = this.linkProperties
+        const nonSeedLinkedForeignTableData = []
+        const seen = new Set()
+        for (const property in linkProperties) {
+            const colPath = linkProperties[property]
+            const [schema, table, colName] = colPath.split('.')
+            const tablePath = [schema, table].join('.')
+
+            if (seen.has(tablePath)) continue
+            seen.add(tablePath)
+
+            if (tablePath !== this.seedTablePath && tablePath !== foreignTablePath) {
+                const rel = getRel(this.seedTablePath, tablePath)
+                if (!rel) throw `No relationship ${this.seedTablePath} -> ${tablePath} exists.`
+
+                nonSeedLinkedForeignTableData.push({
+                    tablePath,
+                    property,
+                    colName,
+                    foreignKey: rel.foreignKey,
+                    referenceKey: rel.referenceKey,
+                })
+            }
+        }
+
+        // If any of the input columns is of array type, shrink the seed input batch size to 1.
+        const seedInputBatchSize = arrayInputColNames.length ? 1 : constants.FOREIGN_SEED_INPUT_BATCH_SIZE
 
         // Start seeding with batches of input records.
         let t0 = null
@@ -358,29 +401,34 @@ class SeedTableService {
                     foreignTablePath,
                     foreignTablePrimaryKeys as string[],
                     inputColNames,
-                    this.cursor
+                    this.cursor,
+                    seedInputBatchSize,
                 ))
             if (batchInputRecords === null) {
                 throw `Foreign input records batch came up null for ${foreignTablePath} at offset ${this.cursor}.`
             }
 
             this.cursor += batchInputRecords.length
-            const isLastBatch =
-                !!inputRecords || batchInputRecords.length < constants.FOREIGN_SEED_INPUT_BATCH_SIZE
+            const isLastBatch = !!inputRecords || batchInputRecords.length < seedInputBatchSize
 
-            // Map the input records to their reference key value, so that records being added
-            // to the seed table later can easily find/assign their foreign keys.
+            // Map the input records to their reference key values so that records being added
+            // to the seed table (later) can easily find/assign their foreign keys.
             const referenceKeyValues = {}
             for (const record of batchInputRecords) {
-                const key = inputColNames.map((colName) => record[colName]).join(valueSep)
-                if (referenceKeyValues.hasOwnProperty(key)) continue
-                referenceKeyValues[key] = record[rel.referenceKey]
+                const colValues = inputColNames.map((colName) => record[colName])
+                const colValueOptions = getCombinations(colValues)
+
+                for (const valueOptions of colValueOptions) {
+                    const key = valueOptions.join(valueSep)
+                    referenceKeyValues[key] = referenceKeyValues[key] || []
+                    referenceKeyValues[key].push(record[rel.referenceKey])    
+                }
             }
 
             // Transform the records into seed-function inputs.
             const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(
                 batchInputRecords,
-                foreignTablePath
+                foreignTablePath,
             )
 
             // Callback to use when a batch of response data is available.
@@ -389,8 +437,8 @@ class SeedTableService {
                     data,
                     rel,
                     inputPropertyKeys,
-                    foreignTablePath,
-                    referenceKeyValues
+                    referenceKeyValues,
+                    nonSeedLinkedForeignTableData,
                 )
 
             // Call spec function and handle response data.
@@ -427,6 +475,7 @@ class SeedTableService {
 
         const tableDataSources = this.tableDataSources
         const insertRecords = []
+
         for (const liveObjectData of batch) {
             // Format a seed table record for this live object data.
             const insertRecord = {}
@@ -461,17 +510,24 @@ class SeedTableService {
         batch: StringKeyMap[],
         rel: ForeignKeyConstraint,
         inputPropertyKeys: string[],
-        foreignTablePath: string,
-        referenceKeyValues: StringKeyMap
+        referenceKeyValues: StringKeyMap,
+        nonSeedLinkedForeignTableData: StringKeyMap[],
     ) {
         this.seedCount += batch.length
         logger.info(chalk.cyanBright(`  ${this.seedCount.toLocaleString('en-US')}`))
 
+        // Clone this so we can add to it with each batch independently.
+        const otherLinkedForeignTables: StringKeyMap[] = [
+            ...nonSeedLinkedForeignTableData
+        ].map(v => ({ ...v, colValues: [] }))
+
+        const linkProperties = this.linkProperties
         const tableDataSources = this.tableDataSources
         const upsertRecords = []
+
         for (const liveObjectData of batch) {
             // Format a seed table record for this live object data.
-            const upsertRecord = {}
+            const upsertRecord: StringKeyMap = {}
             for (const property in liveObjectData) {
                 const colsWithThisPropertyAsDataSource = tableDataSources[property] || []
                 const value = liveObjectData[property]
@@ -480,37 +536,140 @@ class SeedTableService {
                 }
             }
 
-            // Find and set the reference key for the foreign table.
-            const uniqueInputRecordKey = inputPropertyKeys
-                .map((propertyKey) => liveObjectData[propertyKey])
-                .join(valueSep)
-            if (!referenceKeyValues.hasOwnProperty(uniqueInputRecordKey)) {
-                logger.warn(
-                    `Could not find reference key on foreign table ${foreignTablePath} for value ${uniqueInputRecordKey}`
-                )
-                continue
+            // Ensure all linked properties have values.
+            let ignoreData = false
+            for (const property in linkProperties) {
+                if (!liveObjectData.hasOwnProperty(property) || liveObjectData[property] === null) {
+                    ignoreData = true
+                    break
+                }
             }
-            const referenceKeyValue = referenceKeyValues[uniqueInputRecordKey]
-            upsertRecord[rel.foreignKey] = referenceKeyValue
-            upsertRecords.push(upsertRecord)
+            if (ignoreData) continue
+
+            const foreignInputRecordKey = inputPropertyKeys.map(k => liveObjectData[k]).join(valueSep)
+            if (!referenceKeyValues.hasOwnProperty(foreignInputRecordKey)) continue
+
+            const otherForeignLookups = {}
+            for (let i = 0; i < otherLinkedForeignTables.length; i++) {
+                const otherLinkedForeignTableEntry = otherLinkedForeignTables[i]
+                const { tablePath, colName, property, foreignKey } = otherLinkedForeignTableEntry
+                const foreignColValue = liveObjectData[property]
+                const foreignMappingKey = [tablePath, colName, property, foreignColValue].join('.')
+
+                if (this.foreignKeyMappings.has(foreignMappingKey)) {
+                    upsertRecord[foreignKey] = this.foreignKeyMappings.get(foreignMappingKey)
+                } else {
+                    otherLinkedForeignTables[i].colValues.push(foreignColValue)
+                    otherForeignLookups[tablePath] = foreignColValue
+                }
+            }
+            if (Object.keys(otherForeignLookups).length > 0) {
+                upsertRecord._otherForeignLookups = otherForeignLookups
+            }
+
+            const foreignInputRecordReferenceKeyValues = referenceKeyValues[foreignInputRecordKey] || []
+            for (const referenceKeyValue of foreignInputRecordReferenceKeyValues) {
+                const record = { ...upsertRecord }
+                record[rel.foreignKey] = referenceKeyValue
+                upsertRecords.push(record)
+            }
         }
         if (!upsertRecords.length) return
 
-        const upsertBatchOp = {
-            type: OpType.Insert,
-            schema: this.seedSchemaName,
-            table: this.seedTableName,
-            data: upsertRecords,
-            conflictTargets: this.seedTableUniqueConstraint,
-        }
-
         try {
             await db.transaction(async (tx) => {
+                const resolvedDependentForeignTables = await Promise.all(
+                    otherLinkedForeignTables.map(v => this._findOrCreateDependentForeignTable(v, tx))
+                )
+                const resolvedDependentForeignTablesMap = {}
+                for (const resolvedDependentForeignTable of resolvedDependentForeignTables) {
+                    resolvedDependentForeignTablesMap[resolvedDependentForeignTable.tablePath] = resolvedDependentForeignTable
+                }
+
+                const finalUpsertRecords = []
+                for (const upsertRecord of upsertRecords) {
+                    if (!upsertRecord.hasOwnProperty('_otherForeignLookups')) {
+                        finalUpsertRecords.push(upsertRecord)
+                        continue
+                    }
+
+                    let ignoreRecord = false
+                    for (const foreignTablePath in upsertRecord._otherForeignLookups) {
+                        const colValueUsedAtLookup = upsertRecord._otherForeignLookups[foreignTablePath]
+                        const resolvedDependentForeignTable = resolvedDependentForeignTablesMap[foreignTablePath] || {}
+                        const { referenceKeyValuesMap = {}, foreignKey } = resolvedDependentForeignTable
+
+                        if (!referenceKeyValuesMap.hasOwnProperty(colValueUsedAtLookup)) {
+                            ignoreRecord = true
+                            break
+                        }
+
+                        upsertRecord[foreignKey] = referenceKeyValuesMap[colValueUsedAtLookup]
+                    }
+                    if (ignoreRecord) continue
+
+                    delete upsertRecord._otherForeignLookups
+                    finalUpsertRecords.push(upsertRecord)
+                }
+                
+                const upsertBatchOp = {
+                    type: OpType.Insert,
+                    schema: this.seedSchemaName,
+                    table: this.seedTableName,
+                    data: upsertRecords,
+                    conflictTargets: this.seedTableUniqueConstraint,
+                }
+        
                 await new RunOpService(upsertBatchOp, tx).perform()
             })
         } catch (err) {
             throw new QueryError('upsert', this.seedSchemaName, this.seedTableName, err)
         }
+    }
+
+    async _findOrCreateDependentForeignTable(otherLinkedForeignTableEntry, tx) {
+        const {
+            tablePath,
+            property,
+            colName,
+            foreignKey,
+            referenceKey,
+        } = otherLinkedForeignTableEntry
+        const colValues = unique(otherLinkedForeignTableEntry.colValues)
+
+        const resp = {
+            tablePath,
+            property,
+            colName,
+            foreignKey,
+            referenceKey,
+            referenceKeyValuesMap: {},
+        }
+
+        // TODO: If colName doesn't have a unique constraint, this method will fail 
+        // and you'll need to do a classic find...create.
+        let results = []
+        try {
+            results = await tx(tablePath)
+                .returning(unique([referenceKey, colName]))
+                .insert(colValues.map(value => ({ [colName]: value })))
+                .onConflict(colName)
+                .ignore()
+        } catch (err) {
+            logger.error(err)
+            return resp
+        }
+
+        const referenceKeyValuesMap = {}
+        for (const result of (results || [])) {
+            const colValue = result[colName]
+            const referenceKeyValue = result[referenceKey]
+            referenceKeyValuesMap[colValue] = referenceKeyValue
+            this.foreignKeyMappings.set([tablePath, colName, property, colValue].join('.'), referenceKeyValue)
+        }
+
+        resp.referenceKeyValuesMap = referenceKeyValuesMap
+        return resp
     }
 
     async _handleDataOnAdjacentColsSeed(
@@ -523,10 +682,8 @@ class SeedTableService {
 
         const tableDataSources = this.tableDataSources
         const linkProperties = this.linkProperties
-        const useBulkUpdate = batch.length > constants.MAX_UPDATES_BEFORE_BULK_UPDATE_USED
-        const updateOps = []
-        const where = []
-        const updates = []
+        const updates: StringKeyMap = {}
+
         for (const liveObjectData of batch) {
             // Format a seed table record for this live object data.
             const recordUpdates = {}
@@ -542,53 +699,55 @@ class SeedTableService {
             }
             if (!Object.keys(recordUpdates).length) continue
 
-            const liveObjectToPkConditionsKey = inputPropertyKeys
-                .map((k) => liveObjectData[k])
-                .join(valueSep)
-            const primaryKeyConditions = indexedPkConditions[liveObjectToPkConditionsKey] || []
-            if (!primaryKeyConditions?.length) {
-                logger.warn(
-                    `Could not find primary keys on ${this.seedTablePath} for value ${liveObjectToPkConditionsKey}`
-                )
-                continue
-            }
+            // Find the primary key groups to apply the updates to.
+            const pkConditionsKey = inputPropertyKeys.map(k => liveObjectData[k]).join(valueSep)
+            const primaryKeyConditions = indexedPkConditions[pkConditionsKey] || []
+            if (!primaryKeyConditions?.length) continue
 
-            // Bulk update.
-            if (useBulkUpdate) {
-                for (const pkConditions of primaryKeyConditions) {
-                    where.push(pkConditions)
-                    updates.push(recordUpdates)
+            // Merge updates by the actual primary key values.
+            for (const pkConditions of primaryKeyConditions) {
+                const uniquePkKey = Object.keys(pkConditions).sort().map(k => pkConditions[k]).join(valueSep)
+                updates[uniquePkKey] = updates[uniquePkKey] || {
+                    where: pkConditions,
+                    updates: {}
                 }
+                updates[uniquePkKey].updates = { ...updates[uniquePkKey].updates, ...recordUpdates }
             }
-            // Individual updates.
-            else {
-                for (const pkConditions of primaryKeyConditions) {
-                    updateOps.push({
-                        type: OpType.Update,
-                        schema: this.seedSchemaName,
-                        table: this.seedTableName,
-                        where: pkConditions,
-                        data: recordUpdates,
-                    })
-                }
+        }
+        if (!Object.keys(updates)) return
+
+        const useBulkUpdate = batch.length > constants.MAX_UPDATES_BEFORE_BULK_UPDATE_USED
+        const bulkWhere = []
+        const bulkUpdates = []
+        const indivUpdateOps = []
+        for (const entry of Object.values(updates)) {
+            if (useBulkUpdate) {
+                bulkWhere.push(entry.where)
+                bulkUpdates.push(entry.updates)    
+            } else {
+                indivUpdateOps.push({
+                    type: OpType.Update,
+                    schema: this.seedSchemaName,
+                    table: this.seedTableName,
+                    where: entry.where,
+                    data: entry.updates,
+                })
             }
         }
 
         try {
             if (useBulkUpdate) {
-                if (!updates.length) return
                 const op = {
                     type: OpType.Update,
                     schema: this.seedSchemaName,
                     table: this.seedTableName,
-                    where,
-                    data: updates,
+                    where: bulkWhere,
+                    data: bulkUpdates,
                 }
                 await new RunOpService(op).perform()
             } else {
-                if (!updateOps.length) return
                 await db.transaction(async (tx) => {
-                    await Promise.all(updateOps.map((op) => new RunOpService(op, tx).perform()))
+                    await Promise.all(indivUpdateOps.map((op) => new RunOpService(op, tx).perform()))
                 })
             }
         } catch (err) {
@@ -617,7 +776,8 @@ class SeedTableService {
 
     async _findInputRecordsFromAdjacentCols(
         queryConditions: StringKeyMap,
-        offset: number
+        offset: number,
+        limit: number,
     ): Promise<StringKeyMap[]> {
         // Start a new query on the table this live object is linked to.
         let query = db.from(this.seedTablePath)
@@ -639,7 +799,7 @@ class SeedTableService {
         query.whereNot(whereNotNull)
 
         // Add offset/limit for batching.
-        query.offset(offset).limit(constants.SEED_INPUT_BATCH_SIZE)
+        query.offset(offset).limit(limit)
 
         // Perform the query.
         try {
@@ -654,11 +814,16 @@ class SeedTableService {
             join: [],
             select: [`${this.seedTablePath}.*`],
             whereNotNull: [],
+            hasArrayColumns: false
         }
 
         for (const colPath of this.requiredArgColPaths) {
             const [colSchemaName, colTableName, colName] = colPath.split('.')
             const colTablePath = [colSchemaName, colTableName].join('.')
+
+            if (!queryConditions.hasArrayColumns && isColTypeArray(colPath)) {
+                queryConditions.hasArrayColumns = true
+            }
 
             if (colTablePath !== this.seedTablePath) {
                 const rel = getRel(this.seedTablePath, colTablePath)
@@ -684,7 +849,8 @@ class SeedTableService {
         tablePath: string,
         primaryKeys: string[],
         tableInputColNames: string[],
-        offset: number
+        offset: number,
+        limit: number,
     ): Promise<StringKeyMap[] | null> {
         // Map col names to null.
         const whereNotNull = {}
@@ -700,7 +866,7 @@ class SeedTableService {
                 .orderBy(primaryKeys.sort())
                 .whereNot(whereNotNull)
                 .offset(offset)
-                .limit(constants.FOREIGN_SEED_INPUT_BATCH_SIZE)
+                .limit(limit)
         } catch (err) {
             const [schema, table] = tablePath.split('.')
             logger.error(new QueryError('select', schema, table, err).message)

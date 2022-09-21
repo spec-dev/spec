@@ -5,6 +5,7 @@ import { Knex } from 'knex'
 import short from 'short-uuid'
 import { tablesMeta } from '../db/tablesMeta'
 import { pool, db } from '../db'
+import { mergeByKeys } from '../utils/formatters'
 
 class RunOpService {
     op: Op
@@ -35,11 +36,16 @@ class RunOpService {
 
     async _runInsert() {
         // Start a new insert query for this table.
-        let insertQuery = this.tx(this.tablePath).insert(this.op.data)
+        let insertQuery = this.tx(this.tablePath)
+        const data = this.op.data
 
         // Add upsert functionality if specified.
         if (this.op.conflictTargets) {
-            insertQuery.onConflict(this.op.conflictTargets).merge()
+            const arrData = Array.isArray(data) ? data : [data]
+            const uniqueData = mergeByKeys(arrData, this.op.conflictTargets)
+            insertQuery.insert(uniqueData).onConflict(this.op.conflictTargets).merge()
+        } else {
+            insertQuery.insert(data)
         }
 
         // Perform the query, inserting the record(s).

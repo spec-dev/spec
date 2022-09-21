@@ -170,6 +170,7 @@ class Spec {
     }
 
     async _processEvent(event: SpecEvent<StringKeyMap | StringKeyMap[]>) {
+        return
         // Get sub for event.
         const sub = this.eventSubs[event.name]
         if (!sub) {

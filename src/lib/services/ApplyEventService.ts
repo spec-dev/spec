@@ -117,7 +117,7 @@ class ApplyEventService {
 
             for (const property in link.inputs) {
                 for (const diff of this.liveObjectDiffs) {
-                    if (!diff.hasOwnProperty(property)) {
+                    if (!diff.hasOwnProperty(property) || diff[property] === null) {
                         allLinkPropertiesIncludedInDiff = false
                         break
                     }

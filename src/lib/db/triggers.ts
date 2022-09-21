@@ -37,19 +37,19 @@ export function formatTriggerName(
 ): string {
     const suffix = (primaryKeys || []).sort().join('_')
     const prefix = triggerName.prefixForEvent(event)
-    return prefix ? `${prefix}_${schema}_${table}${triggerName.PK_SEP}${suffix}` : ''
+    return prefix ? `${prefix}_${schema}_${table}${triggerName.PK_SEP}${suffix}`.toLowerCase() : ''
 }
 
 export function formatFunctionName(schema: string, table: string, event: TriggerEvent): string {
     const prefix = functionName.prefixForEvent(event)
-    return prefix ? `${prefix}__${schema}_${table}` : ''
+    return prefix ? `${prefix}__${schema}_${table}`.toLowerCase() : ''
 }
 
 export function formatRecordAsTrigger(record: StringKeyMap): Trigger | null {
     const { schema, table, event, trigger_name } = record
     const trigger = {
         schema,
-        table,
+        table: table.replace(/"/gi, ''),
         event: event as TriggerEvent,
         name: trigger_name,
     } as Trigger
@@ -88,6 +88,10 @@ export async function createTrigger(
     options: StringKeyMap = {}
 ) {
     const tablePath = [schema, table].join('.')
+    const tableHasUppercaseLetters = table.match(/[A-Z]/g) !== null
+    const officialTableName = tableHasUppercaseLetters ? `"${table}"` : table
+    const officialTablePath = [schema, officialTableName].join('.')
+
     // Whether to also create the database function associated with the trigger.
     const withFunction = options.hasOwnProperty('withFunction') ? options.withFunction : true
 
@@ -109,9 +113,8 @@ export async function createTrigger(
             withFunction && (await createInsertFunction(functionName, schema))
             logger.info(`Creating INSERT trigger ${schema}.${triggerName}...`)
             await db.raw(
-                `CREATE TRIGGER ${triggerName} AFTER INSERT ON ??
-                FOR EACH ROW EXECUTE PROCEDURE ${schema}.${functionName}(${primaryKeysAsArgs})`,
-                [tablePath]
+                `CREATE TRIGGER ${triggerName} AFTER INSERT ON ${officialTablePath}
+                FOR EACH ROW EXECUTE PROCEDURE ${schema}.${functionName}(${primaryKeysAsArgs})`
             )
             break
 
@@ -119,9 +122,8 @@ export async function createTrigger(
             withFunction && (await createUpdateFunction(functionName, schema))
             logger.info(`Creating UPDATE trigger ${schema}.${triggerName}...`)
             await db.raw(
-                `CREATE TRIGGER ${triggerName} AFTER UPDATE ON ?? 
-                FOR EACH ROW EXECUTE PROCEDURE ${schema}.${functionName}(${primaryKeysAsArgs})`,
-                [tablePath]
+                `CREATE TRIGGER ${triggerName} AFTER UPDATE ON ${officialTablePath}
+                FOR EACH ROW EXECUTE PROCEDURE ${schema}.${functionName}(${primaryKeysAsArgs})`
             )
             break
 
@@ -132,8 +134,10 @@ export async function createTrigger(
 
 export async function dropTrigger(trigger: Trigger) {
     logger.info(`Dropping trigger ${trigger.name}...`)
-    const tablePath = [trigger.schema, trigger.table].join('.')
-    await db.raw(`DROP TRIGGER ${trigger.name} ON ??`, [tablePath])
+    const tableHasUppercaseLetters = trigger.table.match(/[A-Z]/g) !== null
+    const officialTableName = tableHasUppercaseLetters ? `"${trigger.table}"` : trigger.table
+    const officialTablePath = [trigger.schema, officialTableName].join('.')
+    await db.raw(`DROP TRIGGER ${trigger.name} ON ${officialTablePath}`)
 }
 
 export async function createInsertFunction(name: string, schema: string) {

@@ -9,7 +9,7 @@ import {
     LiveObjectFunctionRole,
     ResolveRecordsSpec,
 } from '../types'
-import { reverseMap, toMap, unique } from '../utils/formatters'
+import { reverseMap, toMap, unique, getCombinations } from '../utils/formatters'
 import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
 import config from '../config'
@@ -181,10 +181,8 @@ class ResolveRecordsService {
 
         const tableDataSources = this.tableDataSources
         const updateableColNames = this.updateableColNames
-        const useBulkUpdate = batch.length > constants.MAX_UPDATES_BEFORE_BULK_UPDATE_USED
-        const updateOps = []
-        const where = []
-        const updates = []
+        const updates: StringKeyMap = {}
+        
         for (const liveObjectData of batch) {
             const recordUpdates = {}
             for (const property in liveObjectData) {
@@ -198,35 +196,39 @@ class ResolveRecordsService {
             }
             if (!Object.keys(recordUpdates).length) continue
 
-            const liveObjectToPkConditionsKey = this.inputPropertyKeys
-                .map((k) => liveObjectData[k])
-                .join(valueSep)
-            const primaryKeyConditions = this.indexedPkConditions[liveObjectToPkConditionsKey] || []
-            if (!primaryKeyConditions?.length) {
-                logger.error(
-                    `Could not find primary keys on ${this.tablePath} for value ${liveObjectToPkConditionsKey}`
-                )
-                continue
-            }
+            // Find the primary key groups to apply the updates to.
+            const pkConditionsKey = this.inputPropertyKeys.map(k => liveObjectData[k]).join(valueSep)
+            const primaryKeyConditions = this.indexedPkConditions[pkConditionsKey] || []
+            if (!primaryKeyConditions?.length) continue
 
-            // Bulk update.
-            if (useBulkUpdate) {
-                for (const pkConditions of primaryKeyConditions) {
-                    where.push(pkConditions)
-                    updates.push(recordUpdates)
+            // Merge updates by the actual primary key values.
+            for (const pkConditions of primaryKeyConditions) {
+                const uniquePkKey = Object.keys(pkConditions).sort().map(k => pkConditions[k]).join(valueSep)
+                updates[uniquePkKey] = updates[uniquePkKey] || {
+                    where: pkConditions,
+                    updates: {}
                 }
+                updates[uniquePkKey].updates = { ...updates[uniquePkKey].updates, ...recordUpdates }
             }
-            // Individual updates.
-            else {
-                for (const pkConditions of primaryKeyConditions) {
-                    updateOps.push({
-                        type: OpType.Update,
-                        schema: this.schemaName,
-                        table: this.tableName,
-                        where: pkConditions,
-                        data: recordUpdates,
-                    })
-                }
+        }
+        if (!Object.keys(updates)) return
+
+        const useBulkUpdate = batch.length > constants.MAX_UPDATES_BEFORE_BULK_UPDATE_USED
+        const bulkWhere = []
+        const bulkUpdates = []
+        const indivUpdateOps = []
+        for (const entry of Object.values(updates)) {
+            if (useBulkUpdate) {
+                bulkWhere.push(entry.where)
+                bulkUpdates.push(entry.updates)
+            } else {
+                indivUpdateOps.push({
+                    type: OpType.Update,
+                    schema: this.schemaName,
+                    table: this.tableName,
+                    where: entry.where,
+                    data: entry.updates,
+                })
             }
         }
 
@@ -236,13 +238,13 @@ class ResolveRecordsService {
                     type: OpType.Update,
                     schema: this.schemaName,
                     table: this.tableName,
-                    where,
-                    data: updates,
+                    where: bulkWhere,
+                    data: bulkUpdates,
                 }
                 await new RunOpService(op).perform()
             } else {
                 await db.transaction(async (tx) => {
-                    await Promise.all(updateOps.map((op) => new RunOpService(op, tx).perform()))
+                    await Promise.all(indivUpdateOps.map((op) => new RunOpService(op, tx).perform()))
                 })
             }
         } catch (err) {
@@ -253,9 +255,11 @@ class ResolveRecordsService {
     _createAndMapFunctionInputs() {
         const batchFunctionInputs = []
         const indexedPkConditions = {}
+
         for (const record of this.inputRecords) {
             const input = {}
-            const keyComps = []
+            const colValues = []
+
             for (const colPath of this.inputArgColPaths) {
                 const [colSchemaName, colTableName, colName] = colPath.split('.')
                 const colTablePath = [colSchemaName, colTableName].join('.')
@@ -263,19 +267,23 @@ class ResolveRecordsService {
                 const recordColKey = colTablePath === this.tablePath ? colName : colPath
                 const value = record[recordColKey]
                 input[inputArg] = value
-                keyComps.push(value)
+                colValues.push(value)
             }
             batchFunctionInputs.push({ ...this.defaultFilters, ...input })
-            const key = keyComps.join(valueSep)
-            if (!indexedPkConditions.hasOwnProperty(key)) {
-                indexedPkConditions[key] = []
-            }
+
             const recordPrimaryKeys = {}
             for (const pk of this.tablePrimaryKeys) {
                 recordPrimaryKeys[pk] = record[pk]
             }
-            indexedPkConditions[key].push(recordPrimaryKeys)
+
+            const colValueOptions = getCombinations(colValues)
+            for (const valueOptions of colValueOptions) {
+                const key = valueOptions.join(valueSep)
+                indexedPkConditions[key] = indexedPkConditions[key] || []
+                indexedPkConditions[key].push(recordPrimaryKeys)    
+            }
         }
+
         this.batchFunctionInputs = batchFunctionInputs
         this.indexedPkConditions = indexedPkConditions
     }
