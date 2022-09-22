@@ -141,7 +141,7 @@ export class TableSubscriber {
         if (tableSub.blacklist.has(this._primaryKeysToBlacklistKey(event.primaryKeys))) {
             return
         }
-
+        
         // Immediately process events if buffer hits max capacity.
         this.tableSubs[tablePath].buffer.push(event)
         if (this.tableSubs[tablePath].buffer.length >= constants.TABLE_SUB_BUFFER_MAX_SIZE) {
@@ -529,8 +529,8 @@ export class TableSubscriber {
         for (const depTableLink of depTableLinks) {
             const insertsCausingDownstreamSeeds = []
             for (const event of events) {
-                // We only care about inserts and missed events for dependent table reactions.
-                if (![TriggerEvent.INSERT, TriggerEvent.MISSED].includes(event.operation)) continue
+                // // We only care about inserts and missed events for dependent table reactions.
+                // if (![TriggerEvent.INSERT, TriggerEvent.MISSED].includes(event.operation)) continue
 
                 const colNamesWithValues = this._getColNamesAffectedByEvent(event)
                 const colPathsWithValues = new Set<string>(

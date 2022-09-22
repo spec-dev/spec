@@ -208,9 +208,28 @@ class SeedTableService {
 
             inputColNames.push(colName)
         }
+        if (!inputColNames.length) {
+            logger.info(`Not seeding ${foreignTablePath} -- inputColNames came up empty.`)
+        }
+
+        // Only act on records where all input columns are non-empty.
+        const filteredRecords = []
+        for (const record of records) {
+            let ignoreRecord = false
+            for (const inputColName of inputColNames) {
+                const val = record[inputColName]
+                if (val === null || (Array.isArray(val) && !val.length)) {
+                    ignoreRecord = true
+                    break
+                }
+            }
+            if (ignoreRecord) continue
+            filteredRecords.push(record)
+        }
+        if (!filteredRecords.length) return
 
         // Seed with the explicitly given foreign input records.
-        await this._seedWithForeignTable(foreignTablePath, inputColNames, records)
+        await this._seedWithForeignTable(foreignTablePath, inputColNames, filteredRecords)
     }
 
     async _seedFromScratch() {
@@ -357,9 +376,12 @@ class SeedTableService {
         inputColNames: string[],
         inputRecords?: StringKeyMap[]
     ) {
+        if (Array.isArray(inputRecords) && !inputRecords.length) return
+
+        const foreignTableName = foreignTablePath.split('.')[1]
         logger.info(
             chalk.cyanBright(
-                `Seeding ${this.seedTablePath} with foreign table ${foreignTablePath}...`
+                `Seeding "${this.seedTableName}" using "${foreignTableName}"(${inputColNames.join(', ')})...`
             )
         )
 
@@ -417,16 +439,19 @@ class SeedTableService {
         while (true) {
             if (sharedErrorContext.error) throw sharedErrorContext.error
             
-            // Get batch of input records from the foreign table.
-            const batchInputRecords =
-                inputRecords ||
-                (await this._getForeignInputRecordsBatch(
+            let batchInputRecords
+            if (inputRecords) {
+                batchInputRecords = inputRecords.slice(this.cursor, this.cursor + seedInputBatchSize)
+            } else {
+                batchInputRecords = await this._getForeignInputRecordsBatch(
                     foreignTablePath,
                     foreignTablePrimaryKeys as string[],
                     inputColNames,
                     this.cursor,
                     seedInputBatchSize,
-                ))
+                )
+            }
+
             if (batchInputRecords === null) {
                 throw `Foreign input records batch came up null for ${foreignTablePath} at offset ${this.cursor}.`
             }
@@ -435,10 +460,15 @@ class SeedTableService {
                 break
             }
 
-            logger.info(chalk.cyanBright('\nNEW INPUT BATCH\n'))
+            if (batchInputRecords.length > 1) {
+                logger.info(chalk.cyanBright(`\n[New input batch of ${batchInputRecords.length} records]:\n`))
+            } else {
+                const kvs = inputColNames.map(colName => `${colName} = ${batchInputRecords[0][colName]}`).join(', ')
+                logger.info(chalk.cyanBright(`\n[${kvs}]:\n`))
+            }
 
             this.cursor += batchInputRecords.length
-            const isLastBatch = !!inputRecords || batchInputRecords.length < seedInputBatchSize
+            const isLastBatch = batchInputRecords.length < seedInputBatchSize
 
             // Map the input records to their reference key values so that records being added
             // to the seed table (later) can easily find/assign their foreign keys.
@@ -1093,12 +1123,12 @@ class SeedTableService {
         const tf = performance.now()
         const seconds = Number(((tf - t0) / 1000).toFixed(2))
         const rate = Math.round(this.seedCount / seconds)
-        logger.info(chalk.cyanBright('Done.'))
+        logger.info(chalk.cyanBright('\nDone.'))
         logger.info(
             chalk.cyanBright(
                 `Upserted ${this.seedCount.toLocaleString(
                     'en-US'
-                )} records in ${seconds} seconds (${rate.toLocaleString('en-US')} rows/s)`
+                )} records in ${seconds} seconds (${this.seedCount === 0 ? 0 : rate.toLocaleString('en-US')} rows/s)`
             )
         )
     }

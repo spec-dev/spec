@@ -341,8 +341,6 @@ class ApplyDiffsService {
                     defaultColumnValues: this.defaultColumnValues,
                 }
         
-                console.log(finalUpsertRecords)
-
                 logger.info(chalk.green(
                     `Upserting ${finalUpsertRecords.length} records in ${this.linkSchemaName}.${this.linkTableName}...`
                 ))
