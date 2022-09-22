@@ -683,6 +683,7 @@ class SeedTableService {
 
         let data = colValues.map(value => ({ [colName]: value }))
 
+        // Apply any default column values configured by the user.
         const defaultColValues = config.getDefaultColumnValuesForTable(tablePath)
         if (Object.keys(defaultColValues).length) {
             data = applyDefaults(data, defaultColValues) as StringKeyMap[]

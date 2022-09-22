@@ -38,10 +38,12 @@ class RunOpService {
     async _runInsert() {
         // Start a new insert query for this table.
         let insertQuery = this.tx(this.tablePath)
+
+        // Format data as an array.
         let data = Array.isArray(this.op.data) ? this.op.data : [this.op.data]
         if (!data.length) return
 
-        // Add column defaults.
+        // Apply any default column values configured by the user.
         if (Object.keys(this.op.defaultColumnValues).length) {
             data = applyDefaults(data, this.op.defaultColumnValues) as StringKeyMap[]
         }
@@ -51,7 +53,7 @@ class RunOpService {
         if (conflictTargets) {
             const uniqueData = mergeByKeys(data, conflictTargets)
 
-            // Only merge live columns that aren't a conflict target, or is the special updated at column.
+            // Only merge live columns that aren't a conflict target (exception for the special updated at column).
             let mergeColNames = this.op.liveTableColumns.filter(colName => !conflictTargets.includes(colName))
             const updatedAtColName = getUpdatedAtColName(data[0])
             updatedAtColName && mergeColNames.push(updatedAtColName)

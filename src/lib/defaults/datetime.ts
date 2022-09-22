@@ -6,8 +6,8 @@ export const updatedAtColNames = [
     'updated_at',
 ]
 
-export const now = () => db.raw('CURRENT_TIMESTAMP')
-
 export function getUpdatedAtColName(data: StringKeyMap): string | null {
     return Object.keys(data).find(key => updatedAtColNames.includes(key)) || null
 }
+
+export const now = () => db.raw('CURRENT_TIMESTAMP')

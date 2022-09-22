@@ -1,7 +1,8 @@
-import { uuid } from './identity'
 import { StringKeyMap, ColumnDefaultsConfig } from '../types'
+import { uuid } from './identity'
 import { updatedAtColNames, now } from './datetime'
 export * from './datetime'
+export * from './identity'
 
 const defaultFunctions = {
     'uuid': uuid,
@@ -27,12 +28,10 @@ export function applyDefaults(
     if (Array.isArray(data)) {
         return data.map(d => applyDefaults(d, defaultColumnValues))
     }
-
     for (const colName in defaultColumnValues) {
         if (!data.hasOwnProperty(colName) || updatedAtColNames.includes(colName)) {
             data[colName] = getDefault(defaultColumnValues[colName].value)
         }
     }
-
     return data
 }
