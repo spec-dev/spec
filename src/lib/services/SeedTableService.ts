@@ -611,7 +611,9 @@ class SeedTableService {
         try {
             await db.transaction(async (tx) => {
                 const resolvedDependentForeignTables = await Promise.all(
-                    otherLinkedForeignTables.map(v => this._findOrCreateDependentForeignTable(v, tx))
+                    otherLinkedForeignTables
+                        .filter(v => v.colValues.length > 0)
+                        .map(v => this._findOrCreateDependentForeignTable(v, tx))
                 )
                 const resolvedDependentForeignTablesMap = {}
                 for (const resolvedDependentForeignTable of resolvedDependentForeignTables) {
@@ -629,7 +631,8 @@ class SeedTableService {
                     for (const foreignTablePath in upsertRecord._otherForeignLookups) {
                         const colValueUsedAtLookup = upsertRecord._otherForeignLookups[foreignTablePath]
                         const resolvedDependentForeignTable = resolvedDependentForeignTablesMap[foreignTablePath] || {}
-                        const { referenceKeyValuesMap = {}, foreignKey } = resolvedDependentForeignTable
+                        const referenceKeyValuesMap = resolvedDependentForeignTable.referenceKeyValuesMap || {}
+                        const foreignKey = resolvedDependentForeignTable.foreignKey
 
                         if (!referenceKeyValuesMap.hasOwnProperty(colValueUsedAtLookup)) {
                             ignoreRecord = true
@@ -671,7 +674,6 @@ class SeedTableService {
             referenceKey,
         } = otherLinkedForeignTableEntry
         const colValues = unique(otherLinkedForeignTableEntry.colValues)
-
         const resp = {
             tablePath,
             property,
@@ -680,8 +682,11 @@ class SeedTableService {
             referenceKey,
             referenceKeyValuesMap: {},
         }
+        if (!colValues.length) return resp
 
-        let data = colValues.map(value => ({ [colName]: value }))
+        const colValuesSet = new Set(colValues)
+
+        let data = colValues.map(colValue => ({ [colName]: colValue }))
 
         // Apply any default column values configured by the user.
         const defaultColValues = config.getDefaultColumnValuesForTable(tablePath)
@@ -698,8 +703,23 @@ class SeedTableService {
                 .insert(data)
                 .onConflict(colName)
                 .ignore()
+
+            results = results || []
+
+            if (results.length < data.length) {
+                for (const newRecord of results) {
+                    colValuesSet.delete(newRecord[colName])
+                }
+                const existingRecordColValues = Array.from(colValuesSet)
+                if (existingRecordColValues.length) {
+                    const existingResults = await tx(tablePath)
+                        .select(unique([referenceKey, colName]))
+                        .whereIn(colName, existingRecordColValues)
+                    results.push(...(existingResults || []))
+                }
+            }
         } catch (err) {
-            logger.error(err)
+            logger.error(`Error creating dependent foreign table ${tablePath}: ${err}`)
             return resp
         }
 
@@ -708,7 +728,9 @@ class SeedTableService {
             const colValue = result[colName]
             const referenceKeyValue = result[referenceKey]
             referenceKeyValuesMap[colValue] = referenceKeyValue
-            this.foreignKeyMappings.set([tablePath, colName, property, colValue].join('.'), referenceKeyValue)
+
+            // TODO: Only bring back once you've debugged issue with duplicate seed col values.
+            // this.foreignKeyMappings.set([tablePath, colName, property, colValue].join('.'), referenceKeyValue)
         }
 
         resp.referenceKeyValuesMap = referenceKeyValuesMap

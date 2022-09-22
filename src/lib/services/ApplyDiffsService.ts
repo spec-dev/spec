@@ -295,7 +295,9 @@ class ApplyDiffsService {
         try {
             await db.transaction(async (tx) => {
                 const resolvedDependentForeignTables = await Promise.all(
-                    Object.values(missingLinkedForeignTables).map(v => this._findOrCreateDependentForeignTable(v, tx))
+                    Object.values(missingLinkedForeignTables)
+                        .filter(v => (v as any).colValues.length > 0)
+                        .map(v => this._findOrCreateDependentForeignTable(v, tx))
                 )
                 const resolvedDependentForeignTablesMap = {}
                 for (const resolvedDependentForeignTable of resolvedDependentForeignTables) {
@@ -339,6 +341,8 @@ class ApplyDiffsService {
                     defaultColumnValues: this.defaultColumnValues,
                 }
         
+                console.log(finalUpsertRecords)
+
                 logger.info(chalk.green(
                     `Upserting ${finalUpsertRecords.length} records in ${this.linkSchemaName}.${this.linkTableName}...`
                 ))
@@ -359,8 +363,6 @@ class ApplyDiffsService {
             referenceKey,
         } = missingLinkedForeignTableEntry
         const colValues = unique(missingLinkedForeignTableEntry.colValues)
-        console.log('_findOrCreateDependentForeignTable', colValues)
-
         const resp = {
             tablePath,
             property,
@@ -369,6 +371,9 @@ class ApplyDiffsService {
             referenceKey,
             referenceKeyValuesMap: {},
         }
+        if (!colValues.length) return resp
+
+        const colValuesSet = new Set(colValues)
 
         let data = colValues.map(value => ({ [colName]: value }))
 
@@ -387,8 +392,23 @@ class ApplyDiffsService {
                 .insert(data)
                 .onConflict(colName)
                 .ignore()
+
+            results = results || []
+
+            if (results.length < data.length) {
+                for (const newRecord of results) {
+                    colValuesSet.delete(newRecord[colName])
+                }
+                const existingRecordColValues = Array.from(colValuesSet)
+                if (existingRecordColValues.length) {
+                    const existingResults = await tx(tablePath)
+                        .select(unique([referenceKey, colName]))
+                        .whereIn(colName, existingRecordColValues)
+                    results.push(...(existingResults || []))
+                }
+            }
         } catch (err) {
-            logger.error(err)
+            logger.error(`Error creating dependent foreign table ${tablePath}: ${err}`)
             return resp
         }
 
