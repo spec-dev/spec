@@ -374,11 +374,18 @@ class Config {
         const uniqueByColNamesId = uniqueByColNames.sort().join(':')
 
         // Find the matching unique col group (if any).
-        return (
-            uniqueColGroups.find(
-                (colGroup) => [...colGroup].sort().join(':') === uniqueByColNamesId
-            ) || null
+        let uniqueColGroup = uniqueColGroups.find(
+            (colGroup) => [...colGroup].sort().join(':') === uniqueByColNamesId
         )
+
+        // If no matching col group exactly, find one that's even more unique.
+        if (!uniqueColGroup) {
+            uniqueColGroup = uniqueColGroups.find(
+                (colGroup) => uniqueByColNames.every(val => colGroup.includes(val))
+            )
+        }
+        
+        return uniqueColGroup || null
     }
 
     categorizeFilters(filters: StringKeyMap): { [key: string]: Filter }[] {
