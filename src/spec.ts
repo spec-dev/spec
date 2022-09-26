@@ -165,7 +165,6 @@ class Spec {
         }
 
         this._processEvent(event)
-
         this._updateEventCursor(event)
     }
 
