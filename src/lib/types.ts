@@ -298,6 +298,7 @@ export interface Log {
     message: string
     level: LogLevel
     timestamp: string
+    projectId: string
 }
 
 export enum LogLevel {

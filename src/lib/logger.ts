@@ -20,7 +20,7 @@ export class Logger {
         this.client = createEventClient({
             hostname: constants.LOGS_HOSTNAME,
             port: constants.LOGS_PORT,
-            signedAuthToken: constants.LOGS_API_KEY,
+            signedAuthToken: constants.PROJECT_ADMIN_KEY,
             ackTimeout: 30000,
             onConnect: () => {
                 this._transmitBufferedLogs()
@@ -52,6 +52,7 @@ export class Logger {
             level,
             message: this._formatArgsAsMessage(args, level),
             timestamp: new Date(new Date().toUTCString()).toISOString(),
+            projectId: constants.PROJECT_ID,
         }
     }
 
