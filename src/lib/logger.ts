@@ -1,7 +1,6 @@
 import { createEventClient, SpecEventClient } from '@spec.dev/event-client'
 import { Log, LogLevel } from './types'
 import constants from './constants'
-import chalk from 'chalk'
 
 enum RPC {
     Ping = 'ping',
@@ -50,7 +49,7 @@ export class Logger {
     _newLog(args: any[], level: LogLevel): Log {
         return {
             level,
-            message: this._formatArgsAsMessage(args, level),
+            message: this._formatArgsAsMessage(args),
             timestamp: new Date(new Date().toUTCString()).toISOString(),
             projectId: constants.PROJECT_ID,
         }
@@ -76,20 +75,13 @@ export class Logger {
         }
     }
 
-    _formatArgsAsMessage(args: any[], level: LogLevel): string {
+    _formatArgsAsMessage(args: any[]): string {
         let message = ''
         try {
             message = args.join(' ')
         } catch (err) {
             message = (args[0] || '').toString()
         }
-
-        if (level === LogLevel.Warn) {
-            message = chalk.yellow(message)
-        } else if (level === LogLevel.Error) {
-            message = chalk.red(message)
-        }
-
         return message
     }
 
@@ -97,7 +89,7 @@ export class Logger {
         try {
             await this.client.socket?.invoke(functionName, payload)
         } catch (err) {
-            this.error(err)
+            console.error(err)
         }
     }
 

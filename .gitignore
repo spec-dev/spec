@@ -12,6 +12,7 @@ typings/
 .npm
 in/
 envs/
+*.rdb
 
 # Runtime data
 pids
