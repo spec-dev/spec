@@ -8,6 +8,7 @@ const constants: StringKeyMap = {
     PROJECT_CONFIG_FILE_NAME: ev('PROJECT_CONFIG_FILE_NAME', 'project.toml'),
 
     // Project credentials.
+    PROJECT_ID: ev('PROJECT_ID'),
     PROJECT_API_KEY: ev('PROJECT_API_KEY'),
     PROJECT_ADMIN_KEY: ev('PROJECT_ADMIN_KEY'),
 
@@ -45,7 +46,8 @@ const constants: StringKeyMap = {
 
     MAX_UPDATES_BEFORE_BULK_UPDATE_USED: Number(ev('MAX_UPDATES_BEFORE_BULK_UPDATE_USED', 10)),
 
-    LOGS_API_KEY: ev('LOGS_API_KEY'),
+    LOGS_HOSTNAME: ev('LOGS_HOSTNAME', 'logs.spec.dev'),
+    LOGS_PORT: Number(ev('LOGS_PORT', 443)),
 }
 
 constants.PROJECT_CONFIG_PATH = path.join(

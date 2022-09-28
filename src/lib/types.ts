@@ -293,3 +293,16 @@ export interface Filter {
     column?: string
     value?: any
 }
+
+export interface Log {
+    message: string
+    level: LogLevel
+    timestamp: string
+    projectId: string
+}
+
+export enum LogLevel {
+    Info = 'info',
+    Warn = 'warn',
+    Error = 'error',
+}

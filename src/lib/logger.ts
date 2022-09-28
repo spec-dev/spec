@@ -1,27 +1,105 @@
+import { createEventClient, SpecEventClient } from '@spec.dev/event-client'
+import { Log, LogLevel } from './types'
 import constants from './constants'
-import logdna from '@logdna/logger'
 
-const dnaLogger = constants.LOGS_API_KEY 
-    ? logdna.createLogger(constants.LOGS_API_KEY, {
-        app: 'spec',
-        level: 'info',
-    })
-    : null
+enum RPC {
+    Ping = 'ping',
+    Log = 'log',
+}
 
-class Logger {
+export class Logger {
+    
+    client: SpecEventClient
+
+    pingJob: any = null
+
+    buffer: Log[] = []
+
+    constructor() {
+        this.client = createEventClient({
+            hostname: constants.LOGS_HOSTNAME,
+            port: constants.LOGS_PORT,
+            signedAuthToken: constants.PROJECT_ADMIN_KEY,
+            ackTimeout: 30000,
+            onConnect: () => {
+                this._transmitBufferedLogs()
+                this._createPingJobIfNotExists()
+            },
+        })
+    }
+
     info(...args: any[]) {
-        console.log(...args)
-        dnaLogger?.log(args[0])
+        const log = this._newLog(args, LogLevel.Info)
+        console.log(log.message)
+        this._processLog(log)
     }
+
     warn(...args: any[]) {
-        console.warn(...args)
-        dnaLogger?.warn(args[0])
+        const log = this._newLog(args, LogLevel.Warn) 
+        console.warn(log.message)
+        this._processLog(log)
     }
+
     error(...args: any[]) {
-        console.error(...args)
-        dnaLogger?.error(args[0])
+        const log = this._newLog(args, LogLevel.Error)
+        console.error(log.message)
+        this._processLog(log)
+    }
+
+    _newLog(args: any[], level: LogLevel): Log {
+        return {
+            level,
+            message: this._formatArgsAsMessage(args),
+            timestamp: new Date(new Date().toUTCString()).toISOString(),
+            projectId: constants.PROJECT_ID,
+        }
+    }
+
+    _processLog(log: Log) {
+        if (!this.client.isConnected) {
+            this.buffer.push(log)
+            return
+        }
+        this._transmitBufferedLogs()
+        this._transmitLog(log)
+    }
+
+    _transmitLog(log: Log) {
+        this.client.socket?.transmit(RPC.Log, log)
+    }
+
+    _transmitBufferedLogs() {
+        while (this.buffer.length > 0) {
+            const log = this.buffer.shift()
+            this._transmitLog(log)
+        }
+    }
+
+    _formatArgsAsMessage(args: any[]): string {
+        let message = ''
+        try {
+            message = args.join(' ')
+        } catch (err) {
+            message = (args[0] || '').toString()
+        }
+        return message
+    }
+
+    async invoke(functionName: RPC, payload?: any) {
+        try {
+            await this.client.socket?.invoke(functionName, payload)
+        } catch (err) {
+            console.error(err)
+        }
+    }
+
+    _createPingJobIfNotExists() {
+        this.pingJob = this.pingJob || setInterval(
+            () => this.invoke(RPC.Ping, { ping: true }),
+            constants.LOGS_PING_INTERVAL,
+        )
     }
 }
 
-const logger: Logger = new Logger()
+const logger = new Logger()
 export default logger
