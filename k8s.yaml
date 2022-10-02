@@ -32,15 +32,17 @@ spec:
           value: {{DB_USER}}
         - name: DB_PASSWORD
           value: {{DB_PASSWORD}}
+        - name: PROJECT_ID
+          value: {{PROJECT_ID}}
         - name: PROJECT_API_KEY
           value: {{PROJECT_API_KEY}}
+        - name: PROJECT_ADMIN_KEY
+          value: {{PROJECT_ADMIN_KEY}}
         - name: DEBUG
           value: {{DEBUG}}
         - name: FORCE_COLOR
           value: "1"
         - name: SPEC_CONFIG_DIR
           value: /usr/app/.spec
-        - name: LOGS_API_KEY
-          value: {{LOGS_API_KEY}}
         - name: FLIP
-          value: heads
+          value: tails
