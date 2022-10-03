@@ -77,8 +77,8 @@ export interface EdgeFunction {
 
 export interface LiveObjectLink {
     table: string
-    inputs: StringMap
-    seedWith: string[]
+    linkOn: StringMap
+    seedWith: string | string[] | StringMap
     uniqueBy?: string[]
     seedIfEmpty?: boolean
     eventsCanInsert?: boolean
@@ -207,7 +207,7 @@ export interface SeedSpec {
     liveObjectId: string
     tablePath: string
     linkProperties: StringMap
-    seedWith: string[]
+    seedWith: string | string[] | StringMap
     uniqueBy: string[] | null
     filterBy: StringKeyMap | null
     seedColNames: string[]
@@ -273,6 +273,7 @@ export interface TablesMeta {
 export interface TableLink {
     liveObjectId: string
     link: LiveObjectLink
+    seedColPaths?: string[]
 }
 
 export interface TableLinkDataChanges {

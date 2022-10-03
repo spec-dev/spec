@@ -116,7 +116,7 @@ class ApplyEventService {
         for (const link of this.links) {
             let allLinkPropertiesIncludedInDiff = true
 
-            for (const property in link.inputs) {
+            for (const property in link.linkOn) {
                 for (const diff of this.liveObjectDiffs) {
                     if (!diff.hasOwnProperty(property) || diff[property] === null) {
                         allLinkPropertiesIncludedInDiff = false

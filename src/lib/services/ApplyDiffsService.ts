@@ -47,7 +47,7 @@ class ApplyDiffsService {
     }
 
     get linkProperties(): StringMap {
-        return toMap(this.link.inputs || {})
+        return toMap(this.link.linkOn || {})
     }
 
     get canInsertRecords(): boolean {

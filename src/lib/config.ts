@@ -104,7 +104,7 @@ class Config {
                 if (link.table === tablePath) {
                     return {
                         ...link,
-                        inputs: toMap(link.inputs || {}),
+                        linkOn: toMap(link.linkOn || {}),
                     }
                 }
             }
@@ -174,6 +174,29 @@ class Config {
         return defaultColValues
     }
 
+    getSeedColPaths(seedWith: string | string[] | StringMap, linkOn: StringMap): StringMap {
+        const isString = typeof seedWith === 'string'
+        const isArray = Array.isArray(seedWith)
+
+        // String or array of object properties.
+        if (isString || isArray) {
+            const seedProperties = (isArray ? seedWith : [seedWith]) as string[]
+            linkOn = toMap(linkOn || {})
+            const m = {}
+            for (const property of seedProperties) {
+                m[property] = linkOn[property]
+            }
+            return m
+        }
+
+        // Map of property:colPath
+        if (typeof seedWith === 'object') {
+            return seedWith
+        }
+        
+        return {}
+    }
+
     getExternalTableLinksDependentOnTableForSeed(tablePath: string): TableLink[] {
         const depTableLinks = []
         const objects = this.liveObjects
@@ -183,13 +206,13 @@ class Config {
             for (const link of obj.links || []) {
                 if (link.table === tablePath) continue
 
+                const seedColPaths = this.getSeedColPaths(link.seedWith, link.linkOn)
+                if (!Object.keys(seedColPaths).length) continue
+
                 let allSeedColsOnTable = true
-                for (const seedProperty of link.seedWith) {
-                    const inputs = toMap(link.inputs || {})
-                    const seedColPath = inputs[seedProperty]
+                for (const seedColPath of Object.values(seedColPaths)) {
                     const [seedColSchema, seedColTable, _] = seedColPath.split('.')
                     const seedColTablePath = [seedColSchema, seedColTable].join('.')
-
                     if (seedColTablePath !== tablePath) {
                         allSeedColsOnTable = false
                         break
@@ -200,6 +223,7 @@ class Config {
                     depTableLinks.push({
                         liveObjectId: obj.id,
                         link,
+                        seedColPaths,
                     })
                 }
             }
@@ -308,9 +332,9 @@ class Config {
 
             for (const link of obj.links || []) {
                 tablePaths.add(link.table)
-                const inputs = toMap(link.inputs || {})
+                const linkOn = toMap(link.linkOn || {})
 
-                for (const colPath of Object.values(inputs)) {
+                for (const colPath of Object.values(linkOn)) {
                     const [schemaName, tableName, _] = colPath.split('.')
                     const colTablePath = [schemaName, tableName].join('.')
                     tablePaths.add(colTablePath)
@@ -347,7 +371,7 @@ class Config {
         const link = this.getLink(liveObjectId, tablePath)
         if (!link) return null
 
-        const uniqueBy = link.uniqueBy || Object.keys(link.inputs) || []
+        const uniqueBy = link.uniqueBy || Object.keys(link.linkOn) || []
         if (!uniqueBy.length) return null
 
         const { uniqueColGroups } = tablesMeta[tablePath]
@@ -356,7 +380,7 @@ class Config {
         // Resolve uniqueBy properties to their respective column names.
         const uniqueByColNames = []
         for (const property of uniqueBy) {
-            const colPath = link.inputs[property]
+            const colPath = link.linkOn[property]
             if (!colPath) return null
             const [colSchema, colTable, colName] = colPath.split('.')
             const colTablePath = [colSchema, colTable].join('.')
@@ -542,12 +566,14 @@ class Config {
 
         for (let configName in objects) {
             const obj = objects[configName]
+
             // Ensure object has id.
             if (!obj.id) {
                 logger.error(`Live object "${configName}" is missing id.`)
                 isValid = false
                 continue
             }
+
             // Ensure object has valid id version structure.
             const { nsp, name, version } = fromNamespacedVersion(obj.id)
             if (!nsp || !name || !version) {
@@ -574,7 +600,6 @@ class Config {
                     isValid = false
                     continue
                 }
-
                 const splitTablePath = tablePath.split('.')
 
                 // Ensure table is valid.
@@ -595,16 +620,16 @@ class Config {
                     isValid = false
                 }
 
-                // Ensure link has inputs.
-                const inputs = link.inputs ? toMap(link.inputs || {}) : {}
-                if (!Object.keys(inputs).length) {
-                    logger.error(`Link for live object "${configName}" has no inputs.`)
+                // Ensure link has linkOn inputs.
+                const linkOn = link.linkOn ? toMap(link.linkOn || {}) : {}
+                if (!Object.keys(linkOn).length) {
+                    logger.error(`Link for live object "${configName}" has no linkOn inputs.`)
                     isValid = false
                 }
 
                 // Ensure input column paths are of valid structure.
-                for (const key in inputs) {
-                    const colPath = inputs[key] || ''
+                for (const key in linkOn) {
+                    const colPath = linkOn[key] || ''
                     const splitColPath = colPath.split('.')
 
                     if (splitColPath.length !== 3) {
@@ -617,22 +642,12 @@ class Config {
                 }
 
                 // Ensure seedWith properties exist.
-                if (!link.seedWith || !link.seedWith.length) {
+                if (!link.seedWith) {
                     logger.error(
                         `Link for live object "${configName}" has no "seedWith" attribute or it is empty.`
                     )
                     isValid = false
                     continue
-                }
-
-                // Ensure each seedWith property is actually an input property.
-                for (const property of link.seedWith || []) {
-                    if (!inputs.hasOwnProperty(property)) {
-                        logger.error(
-                            `Link for live object "${configName}" has invalid "seedWith" entry: ${property}. \nYou can only seed with properties included in the "inputs" map.`
-                        )
-                        isValid = false
-                    }
                 }
             }
         }
@@ -704,10 +719,10 @@ class Config {
 
     _logMissingUniqueConstraint(link: LiveObjectLink, liveObjectId: string) {
         const uniqueByColNames = []
-        const inputs = toMap(link.inputs || {})
-        const uniqueByProperties = link.uniqueBy || Object.keys(inputs)
+        const linkOn = toMap(link.linkOn || {})
+        const uniqueByProperties = link.uniqueBy || Object.keys(linkOn)
         for (const property of uniqueByProperties) {
-            const colPath = inputs[property]
+            const colPath = linkOn[property]
             if (!colPath) return null
             const [colSchema, colTable, colName] = colPath.split('.')
             const colTablePath = [colSchema, colTable].join('.')

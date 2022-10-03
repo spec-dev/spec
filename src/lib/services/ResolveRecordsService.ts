@@ -65,11 +65,11 @@ class ResolveRecordsService {
     }
 
     get linkProperties(): StringMap {
-        return toMap(this.link.inputs)
+        return toMap(this.link.linkOn)
     }
 
     get reverseLinkProperties(): StringMap {
-        return reverseMap(this.link.inputs)
+        return reverseMap(this.link.linkOn)
     }
 
     get tableDataSources(): TableDataSources {

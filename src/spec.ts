@@ -345,9 +345,9 @@ class Spec {
             const seedColNames = uniqueLiveObjectTablePaths[uniqueKey]
             const [liveObjectId, tablePath] = uniqueKey.split(':')
             const link = config.getLink(liveObjectId, tablePath)
-            if (!link || !link.inputs) {
+            if (!link || !link.linkOn) {
                 logger.error(
-                    `Not seeding table -- no link or link inputs found for (liveObjectId: ${liveObjectId} + 
+                    `Not seeding table -- no link or link.linkOn found for (liveObjectId: ${liveObjectId} + 
                     tablePath: ${tablePath})...something's wrong.`
                 )
                 continue
@@ -355,7 +355,7 @@ class Spec {
             seedSpecs.push({
                 liveObjectId,
                 tablePath,
-                linkProperties: link.inputs,
+                linkProperties: link.linkOn,
                 seedWith: link.seedWith,
                 uniqueBy: link.uniqueBy || null,
                 filterBy: link.filterBy || null,

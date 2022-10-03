@@ -58,6 +58,8 @@ class SeedTableService {
 
     defaultColumnValues: { [key: string]: ColumnDefaultsConfig }
 
+    seedWithColPaths: StringMap
+
     seedStrategy: () => void | null
 
     foreignKeyMappings: LRU<string, any> = new LRU({ max: 5000 })
@@ -100,6 +102,7 @@ class SeedTableService {
         this.filters = this._buildFilters()
         this.liveTableColumns = Object.keys(config.getTable(this.seedSchemaName, this.seedTableName) || {})
         this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.seedTablePath)
+        this.seedWithColPaths = config.getSeedColPaths(this.seedSpec.seedWith, this.seedSpec.linkProperties)
         this.seedStrategy = null
     }
 
@@ -117,7 +120,6 @@ class SeedTableService {
         this._findRequiredArgColumns()
         if (!this.requiredArgColPaths.length) throw 'No required arg column paths found.'
 
-        // TODO: Break out.
         const inputTableColumns = {}
         const inputColumnLocations = { onSeedTable: 0, onForeignTable: 0 }
         const uniqueTablePaths = new Set<string>()
@@ -137,7 +139,6 @@ class SeedTableService {
             inputTableColumns[tablePath].push(colName)
         }
 
-        // TODO: Break out.
         const promises = []
         for (const tablePath in inputTableColumns) {
             const colNames = inputTableColumns[tablePath]
@@ -1040,10 +1041,9 @@ class SeedTableService {
             }
 
             const { argsMap, args } = edgeFunction
-            const { seedWith } = this.seedSpec
 
             let allSeedWithPropertiesAcceptedAsFunctionInput = true
-            for (let propertyKey of seedWith) {
+            for (let propertyKey in this.seedWithColPaths) {
                 propertyKey = argsMap[propertyKey] || propertyKey
 
                 if (!args.hasOwnProperty(propertyKey)) {
@@ -1062,7 +1062,7 @@ class SeedTableService {
                 const propertyKey = reverseArgsMap[inputKey] || inputKey
                 const isRequiredInput = args[inputKey]
 
-                if (isRequiredInput && !seedWith.includes(propertyKey)) {
+                if (isRequiredInput && !this.seedWithColPaths.hasOwnProperty(propertyKey)) {
                     allRequiredInputPropertiesSatisfied = false
                     break
                 }
@@ -1080,16 +1080,14 @@ class SeedTableService {
     _findRequiredArgColumns() {
         const { argsMap, args } = this.seedFunction
         const reverseArgsMap = reverseMap(argsMap)
-        const seedWith = new Set(this.seedSpec.seedWith || [])
 
         const requiredArgColPaths = []
         const colPathToFunctionInputArg = {}
         for (let inputKey in args) {
             const propertyKey = reverseArgsMap[inputKey] || inputKey
-            const isRequiredInput = args[inputKey]
 
-            if (isRequiredInput || seedWith.has(propertyKey)) {
-                const colPath = this.seedSpec.linkProperties[propertyKey]
+            if (this.seedWithColPaths.hasOwnProperty(propertyKey)) {
+                const colPath = this.seedWithColPaths[propertyKey]
                 requiredArgColPaths.push(colPath)
                 colPathToFunctionInputArg[colPath] = inputKey
             }

@@ -407,7 +407,7 @@ export class TableSubscriber {
         const seedSpec = {
             liveObjectId,
             tablePath: link.table,
-            linkProperties: link.inputs,
+            linkProperties: link.linkOn,
             seedWith: link.seedWith,
             uniqueBy: link.uniqueBy || null,
             filterBy: link.filterBy || null,
@@ -461,7 +461,7 @@ export class TableSubscriber {
 
         const internalLinksToProcess = []
         for (const tableLink of tableLinks) {
-            const linkColPaths = Object.values(tableLink.link.inputs)
+            const linkColPaths = Object.values(tableLink.link.linkOn)
 
             const eventsAffectingLinkedCols = []
             for (const event of events) {
@@ -527,20 +527,18 @@ export class TableSubscriber {
 
         const externalLinksToProcess = []
         for (const depTableLink of depTableLinks) {
+            const seedColPaths = depTableLink.seedColPaths || {}
+            if (!Object.keys(seedColPaths).length) continue
+
             const insertsCausingDownstreamSeeds = []
             for (const event of events) {
-                // // We only care about inserts and missed events for dependent table reactions.
-                // if (![TriggerEvent.INSERT, TriggerEvent.MISSED].includes(event.operation)) continue
-
                 const colNamesWithValues = this._getColNamesAffectedByEvent(event)
                 const colPathsWithValues = new Set<string>(
                     colNamesWithValues.map((colName) => [tablePath, colName].join('.'))
                 )
 
-                for (const seedWithProperty of depTableLink.link.seedWith) {
-                    const seedWithColPath = depTableLink.link.inputs[seedWithProperty]
-                    if (!seedWithColPath) continue
-                    if (colPathsWithValues.has(seedWithColPath)) {
+                for (const seedWithColPath of Object.values(seedColPaths)) {
+                    if (colPathsWithValues.has(seedWithColPath as string)) {
                         insertsCausingDownstreamSeeds.push(event)
                         break
                     }
