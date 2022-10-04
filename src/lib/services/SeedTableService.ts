@@ -188,7 +188,7 @@ class SeedTableService {
     async seedWithForeignRecords(foreignTablePath: string, records: StringKeyMap[]) {
         // Find seed function to use.
         this._findSeedFunction()
-        if (!this.seedFunction) throw "Live object doesn't have an associated seed function."
+        if (!this.seedFunction) throw 'Live object doesn\'t have an associated seed function.'
 
         // Find the required args for this function and their associated columns.
         this._findRequiredArgColumns()
@@ -388,7 +388,6 @@ class SeedTableService {
 
         // Get seed table -> foreign table relationship.
         const rel = getRel(this.seedTablePath, foreignTablePath)
-        if (!rel) throw `No relationship ${this.seedTablePath} -> ${foreignTablePath} exists.`
         const foreignTablePrimaryKeys = tablesMeta[foreignTablePath].primaryKey.map((pk) => pk.name)
 
         // Get the live object property keys associated with each input column.
@@ -413,14 +412,12 @@ class SeedTableService {
 
             if (tablePath !== this.seedTablePath && tablePath !== foreignTablePath) {
                 const rel = getRel(this.seedTablePath, tablePath)
-                if (!rel) throw `No relationship ${this.seedTablePath} -> ${tablePath} exists.`
-
                 nonSeedLinkedForeignTableData.push({
                     tablePath,
                     property,
                     colName,
-                    foreignKey: rel.foreignKey,
-                    referenceKey: rel.referenceKey,
+                    foreignKey: rel?.foreignKey,
+                    referenceKey: rel?.referenceKey,
                 })
             }
         }
@@ -433,7 +430,6 @@ class SeedTableService {
         const seedInputBatchSize = arrayInputColNames.length || hasColumnFilters
             ? 1 : constants.FOREIGN_SEED_INPUT_BATCH_SIZE
 
-        // Start seeding with batches of input records.
         const sharedErrorContext = { error: null }
         let t0 = null
 
@@ -474,14 +470,16 @@ class SeedTableService {
             // Map the input records to their reference key values so that records being added
             // to the seed table (later) can easily find/assign their foreign keys.
             const referenceKeyValues = {}
-            for (const record of batchInputRecords) {
-                const colValues = inputColNames.map((colName) => record[colName])
-                const colValueOptions = getCombinations(colValues)
+            if (rel) {
+                for (const record of batchInputRecords) {
+                    const colValues = inputColNames.map((colName) => record[colName])
+                    const colValueOptions = getCombinations(colValues)
 
-                for (const valueOptions of colValueOptions) {
-                    const key = valueOptions.join(valueSep)
-                    referenceKeyValues[key] = referenceKeyValues[key] || []
-                    referenceKeyValues[key].push(record[rel.referenceKey])    
+                    for (const valueOptions of colValueOptions) {
+                        const key = valueOptions.join(valueSep)
+                        referenceKeyValues[key] = referenceKeyValues[key] || []
+                        referenceKeyValues[key].push(record[rel.referenceKey])    
+                    }
                 }
             }
 
@@ -609,13 +607,11 @@ class SeedTableService {
             }
             if (ignoreData) continue
 
-            const foreignInputRecordKey = inputPropertyKeys.map(k => liveObjectData[k]).join(valueSep)
-            if (!referenceKeyValues.hasOwnProperty(foreignInputRecordKey)) continue
-
             const otherForeignLookups = {}
             for (let i = 0; i < otherLinkedForeignTables.length; i++) {
                 const otherLinkedForeignTableEntry = otherLinkedForeignTables[i]
                 const { tablePath, colName, property, foreignKey } = otherLinkedForeignTableEntry
+                if (!foreignKey) continue
                 const foreignColValue = liveObjectData[property]
                 const foreignMappingKey = [tablePath, colName, property, foreignColValue].join('.')
 
@@ -630,12 +626,20 @@ class SeedTableService {
                 upsertRecord._otherForeignLookups = otherForeignLookups
             }
 
+            if (!rel) {
+                upsertRecords.push(upsertRecord)
+                continue
+            }
+
+            const foreignInputRecordKey = inputPropertyKeys.map(k => liveObjectData[k]).join(valueSep)
+            if (!referenceKeyValues.hasOwnProperty(foreignInputRecordKey)) continue
+
             const foreignInputRecordReferenceKeyValues = referenceKeyValues[foreignInputRecordKey] || []
             for (const referenceKeyValue of foreignInputRecordReferenceKeyValues) {
                 const record = { ...upsertRecord }
                 record[rel.foreignKey] = referenceKeyValue
                 upsertRecords.push(record)
-            }
+            }    
         }
         if (!upsertRecords.length) return
 
@@ -713,7 +717,7 @@ class SeedTableService {
             referenceKey,
             referenceKeyValuesMap: {},
         }
-        if (!colValues.length) return resp
+        if (!colValues.length || !foreignKey || !referenceKey) return resp
 
         const colValuesSet = new Set(colValues)
 

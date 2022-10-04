@@ -34,6 +34,8 @@ class ApplyDiffsService {
 
     defaultColumnValues: { [key: string]: ColumnDefaultsConfig }
 
+    seedWithColPaths: StringMap
+
     get linkTablePath(): string {
         return this.link.table
     }
@@ -65,11 +67,6 @@ class ApplyDiffsService {
         return meta.primaryKey.map((pk) => pk.name)
     }
 
-    get seedTablePath(): string {
-        const [schema, table, _] = this.linkProperties[this.link.seedWith[0]].split('.')
-        return [schema, table].join('.')
-    }
-
     get linkTableUniqueConstraint(): string[] {
         const uniqueConstaint = config.getUniqueConstraintForLink(
             this.liveObject.id,
@@ -94,6 +91,7 @@ class ApplyDiffsService {
         this.liveObject = liveObject
         this.liveTableColumns = Object.keys(config.getTable(this.linkSchemaName, this.linkTableName) || {})
         this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.linkTablePath)
+        this.seedWithColPaths = config.getSeedColPaths(this.link.seedWith, this.link.linkOn)
     }
 
     async perform() {
@@ -128,6 +126,17 @@ class ApplyDiffsService {
         const tablePath = this.linkTablePath
         const tableDataSources = this.tableDataSources
 
+        // HACK: Assumption that there's only 1 seedWithColPath.
+        const seedWithProperty = Object.keys(this.seedWithColPaths)[0]
+        const seedWithColPath = Object.values(this.seedWithColPaths)[0]
+        const [seedWithSchemaName, seedWithTableName, seedWithColName] = seedWithColPath.split('.')
+        const seedWithTablePath = [seedWithSchemaName, seedWithTableName].join('.')        
+
+        // Use the seedWith table as a filter for events if it's a foreign table BUT there's no relationship.
+        const useSeedWithForeignTableAsFilter = (
+            tablePath !== seedWithTablePath && !getRel(tablePath, seedWithTablePath)
+        )
+    
         // Get query conditions for the linked foreign tables. 
         const foreignTableQueryConditions = {}
         for (const property in properties) {
@@ -209,13 +218,28 @@ class ApplyDiffsService {
                 }
             }
         }
-        
-        const seedTablePath = this.seedTablePath
+
+        let diffs = this.liveObjectDiffs
+        if (useSeedWithForeignTableAsFilter) {
+            const seedWithPropertyValuesFromDiffs = this.liveObjectDiffs.map(diff => diff[seedWithProperty])
+            let matchingSeedWithForeignRecords = []
+            try {
+                matchingSeedWithForeignRecords = await db
+                    .from(seedWithTablePath)
+                    .select([seedWithColName])
+                    .whereIn(seedWithColName, seedWithPropertyValuesFromDiffs)
+            } catch (err) {
+                throw new QueryError('select', seedWithSchemaName, seedWithTableName, err)
+            }
+            const foundSeedWithProperties = new Set(matchingSeedWithForeignRecords.map(r => r[seedWithColName]))
+            diffs = diffs.filter(diff => foundSeedWithProperties.has(diff[seedWithProperty]))
+        }
+
         const missingLinkedForeignTables = {}
         
         // Format record objects to upsert.
         const upsertRecords = []
-        for (const diff of this.liveObjectDiffs) {
+        for (const diff of diffs) {
             const upsertRecord: StringKeyMap = {}
             for (const property in diff) {
                 const colsWithThisPropertyAsDataSource = tableDataSources[property] || []
@@ -223,6 +247,11 @@ class ApplyDiffsService {
                 for (const { columnName } of colsWithThisPropertyAsDataSource) {
                     upsertRecord[columnName] = value
                 }
+            }
+
+            if (!Object.keys(foreignTableQueryConditions).length) {
+                upsertRecords.push(upsertRecord)
+                continue
             }
         
             let ignoreDiff = false
@@ -239,7 +268,7 @@ class ApplyDiffsService {
                 // Linked foreign record is missing...
                 if (foreignRecordIsMissing) {
                     // Don't insert any new foreign records to the relationship with the seed table.
-                    if (foreignTablePath === seedTablePath) {
+                    if (foreignTablePath === seedWithTablePath) {
                         ignoreDiff = true
                         break
                     }

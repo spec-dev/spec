@@ -89,7 +89,7 @@ export class Logger {
         try {
             await this.client.socket?.invoke(functionName, payload)
         } catch (err) {
-            console.error(err)
+            console.error(`Logs ping error: ${err}`)
         }
     }
 

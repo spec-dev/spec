@@ -34,7 +34,7 @@ export class MessageClient {
             signedAuthToken: constants.PROJECT_API_KEY,
             ackTimeout: 30000,
             onConnect: () => {
-                this._createPingJobIfNotExists()
+                // this._createPingJobIfNotExists()
                 this.onConnect()
             },
         })

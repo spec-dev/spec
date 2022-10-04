@@ -191,7 +191,7 @@ class Config {
 
         // Map of property:colPath
         if (typeof seedWith === 'object') {
-            return seedWith
+            return toMap(seedWith || {})
         }
         
         return {}
@@ -335,6 +335,12 @@ class Config {
                 const linkOn = toMap(link.linkOn || {})
 
                 for (const colPath of Object.values(linkOn)) {
+                    const [schemaName, tableName, _] = colPath.split('.')
+                    const colTablePath = [schemaName, tableName].join('.')
+                    tablePaths.add(colTablePath)
+                }
+
+                for (const colPath of Object.values(this.getSeedColPaths(link.seedWith, linkOn) || {})) {
                     const [schemaName, tableName, _] = colPath.split('.')
                     const colTablePath = [schemaName, tableName].join('.')
                     tablePaths.add(colTablePath)

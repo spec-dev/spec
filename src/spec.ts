@@ -185,10 +185,13 @@ class Spec {
             const liveObject = this.liveObjects[liveObjectId]
             if (!liveObject) continue
 
-            const onError = (err: any) =>
+            const onError = (err: any) => {
+                const msg = (err?.message || err).toString()
+                if (msg.includes('deadlock')) return
                 logger.error(
                     `Failed to apply event to live object - (event=${event.name}; liveObject=${liveObjectId}): ${err}`
                 )
+            }
             try {
                 new ApplyEventService(event, liveObject).perform().catch(onError)
             } catch (err) {

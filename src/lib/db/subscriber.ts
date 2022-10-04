@@ -491,9 +491,9 @@ export class TableSubscriber {
                     let resolvedColName = colName
 
                     if (colTablePath !== tablePath) {
-                        const foreignKeyConstraint = getRel(tablePath, colTablePath)
-                        if (!foreignKeyConstraint) continue
-                        resolvedColName = foreignKeyConstraint.foreignKey
+                        const foreignRel = getRel(tablePath, colTablePath)
+                        if (!foreignRel) continue
+                        resolvedColName = foreignRel.foreignKey
                     }
 
                     resolvedLinkColNames.push(resolvedColName)
@@ -530,7 +530,7 @@ export class TableSubscriber {
             const seedColPaths = depTableLink.seedColPaths || {}
             if (!Object.keys(seedColPaths).length) continue
 
-            const insertsCausingDownstreamSeeds = []
+            const eventsCausingDownstreamSeeds = []
             for (const event of events) {
                 const colNamesWithValues = this._getColNamesAffectedByEvent(event)
                 const colPathsWithValues = new Set<string>(
@@ -539,7 +539,7 @@ export class TableSubscriber {
 
                 for (const seedWithColPath of Object.values(seedColPaths)) {
                     if (colPathsWithValues.has(seedWithColPath as string)) {
-                        insertsCausingDownstreamSeeds.push(event)
+                        eventsCausingDownstreamSeeds.push(event)
                         break
                     }
                 }
@@ -547,7 +547,7 @@ export class TableSubscriber {
 
             externalLinksToProcess.push({
                 tableLink: depTableLink,
-                events: insertsCausingDownstreamSeeds,
+                events: eventsCausingDownstreamSeeds,
             })
         }
 

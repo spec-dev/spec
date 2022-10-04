@@ -3,11 +3,14 @@ import fetch, { Response } from 'node-fetch'
 import { JSONParser } from '@streamparser/json'
 import constants from '../constants'
 import logger from '../logger'
+import { db } from '../db'
+import { camelizeKeys } from 'humps'
 
 type onDataCallbackType = (data: StringKeyMap | StringKeyMap[]) => Promise<void>
 
-const isStreamingResp = (resp: Response): boolean =>
-    resp.headers?.get('Transfer-Encoding') === 'chunked'
+// const isStreamingResp = (resp: Response): boolean =>
+//     resp.headers?.get('Transfer-Encoding') === 'chunked'
+const isStreamingResp = (resp: Response) => true
 
 export async function callSpecFunction(
     edgeFunction: EdgeFunction,
@@ -71,20 +74,25 @@ async function handleStreamingResp(
     let chunkTimer = null
     const renewTimer = () => {
         chunkTimer && clearTimeout(chunkTimer)
-        chunkTimer = setTimeout(() => abortController.abort(), 30000)
+        chunkTimer = setTimeout(() => abortController.abort(), 300000000)
     }
     renewTimer()
 
+    let pendingDataPromise = null
+
     // Parse each JSON object and add it to a batch.
     let batch = []
-    let promises = []
+    // let promises = []
     jsonParser.onValue = (obj) => {
         if (!obj) return
         obj = obj as StringKeyMap
         if (obj.error) throw obj.error // Throw any errors explicitly passed back
+        obj = camelizeKeys(obj)
+
         batch.push(obj)
         if (batch.length === constants.STREAMING_SEED_UPSERT_BATCH_SIZE) {
-            promises.push(onData([...batch]))
+            pendingDataPromise = onData([...batch])
+            // promises.push(onData([...batch]))
             batch = []
         }
     }
@@ -93,9 +101,13 @@ async function handleStreamingResp(
     try {
         for await (chunk of resp.body) {
             renewTimer()
-
             if (sharedErrorContext.error) {
                 throw `Error handling streaming response batch: ${sharedErrorContext.error}`
+            }
+
+            if (pendingDataPromise) {
+                await pendingDataPromise
+                pendingDataPromise = null
             }
 
             jsonParser.write(chunk)
@@ -106,10 +118,9 @@ async function handleStreamingResp(
     }
     chunkTimer && clearTimeout(chunkTimer)
 
-    // Trailing results in partial batch (or no results).
-    promises.push(onData(batch))
-
-    await Promise.all(promises)
+    if (batch.length) {
+        await onData([...batch])
+    }
 }
 
 async function makeRequest(
@@ -117,11 +128,11 @@ async function makeRequest(
     payload: StringKeyMap | StringKeyMap[],
     abortController: AbortController
 ): Response {
-    payload = stringifyAnyDates(payload)
+    payload = hackPayload(edgeFunction.url, stringifyAnyDates(payload))
 
     let resp: Response
     try {
-        resp = await fetch(edgeFunction.url, {
+        resp = await fetch('https://tables-api.spec.dev/stream', {
             method: 'POST',
             body: JSON.stringify(payload || {}),
             headers: { 'Content-Type': 'application/json' },
@@ -165,4 +176,15 @@ function stringifyAnyDates(value: StringKeyMap | StringKeyMap[]): StringKeyMap |
 
     // Other.
     return value
+}
+
+function hackPayload(url: string, payload: StringKeyMap): StringKeyMap {
+    if (url.endsWith('eth.latestInteractions@0.0.1')) {
+        const query = db
+            .withSchema('ethereum')
+            .from('latest_interactions')
+            .whereIn('to', payload.to)
+        return query.toSQL().toNative()
+    }
+    return {}
 }
