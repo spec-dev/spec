@@ -48,6 +48,8 @@ class SeedTableService {
 
     seedCount: number = 0
 
+    inputBatchSeedCount: number = 0
+
     tableDataSources: TableDataSources
 
     seedTableUniqueConstraint: string[]
@@ -504,6 +506,7 @@ class SeedTableService {
                 })
 
             // Call spec function and handle response data.
+            this.inputBatchSeedCount = 0
             t0 = t0 || performance.now()
             try {
                 await callSpecFunction(
@@ -574,8 +577,9 @@ class SeedTableService {
         referenceKeyValues: StringKeyMap,
         nonSeedLinkedForeignTableData: StringKeyMap[],
     ) {
+        this.inputBatchSeedCount += batch.length
         this.seedCount += batch.length
-        logger.info(chalk.cyanBright(`  ${this.seedCount.toLocaleString('en-US')}`))
+        logger.info(chalk.cyanBright(`  ${this.inputBatchSeedCount.toLocaleString('en-US')}`))
 
         // Clone this so we can add to it with each batch independently.
         const otherLinkedForeignTables: StringKeyMap[] = [

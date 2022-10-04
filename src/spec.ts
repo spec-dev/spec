@@ -458,24 +458,24 @@ class Spec {
             seedSpecsWithCursors.push([spec, seedCursor])
         }
 
-        seedSpecsWithCursors.forEach(([seedSpec, _]) => {
-            if (
-                !tablePathsUsingLiveObjectId.hasOwnProperty(seedSpec.liveObjectId) ||
-                !tablePathsUsingLiveObjectIdForSeed.hasOwnProperty(seedSpec.liveObjectId)
-            ) {
-                return
-            }
+        // seedSpecsWithCursors.forEach(([seedSpec, _]) => {
+        //     if (
+        //         !tablePathsUsingLiveObjectId.hasOwnProperty(seedSpec.liveObjectId) ||
+        //         !tablePathsUsingLiveObjectIdForSeed.hasOwnProperty(seedSpec.liveObjectId)
+        //     ) {
+        //         return
+        //     }
 
-            const numTablesUsingLiveObject = tablePathsUsingLiveObjectId[seedSpec.liveObjectId].size
-            const numTablesUsingLiveObjectForSeed =
-                tablePathsUsingLiveObjectIdForSeed[seedSpec.liveObjectId].size
+        //     const numTablesUsingLiveObject = tablePathsUsingLiveObjectId[seedSpec.liveObjectId].size
+        //     const numTablesUsingLiveObjectForSeed =
+        //         tablePathsUsingLiveObjectIdForSeed[seedSpec.liveObjectId].size
 
-            // If this live object is only used in the table(s) about to be seeded,
-            // then add it to a list to indicates that events should be ignored.
-            if (numTablesUsingLiveObject === numTablesUsingLiveObjectForSeed) {
-                this.liveObjectsToIgnoreEventsFrom.add(seedSpec.liveObjectId)
-            }
-        })
+        //     // If this live object is only used in the table(s) about to be seeded,
+        //     // then add it to a list to indicates that events should be ignored.
+        //     if (numTablesUsingLiveObject === numTablesUsingLiveObjectForSeed) {
+        //         this.liveObjectsToIgnoreEventsFrom.add(seedSpec.liveObjectId)
+        //     }
+        // })
 
         // Create seed jobs and determine the seed strategies up-front for each.
         const seedJobs = {}
@@ -584,7 +584,7 @@ class Spec {
             resolveRecordsJobs.map(([service, spec]) => this._resolveRecords(service, spec))
         )
 
-        this._processEventsPostSeed(liveObjectIdsOnlyInResolveJobs)
+        // this._processEventsPostSeed(liveObjectIdsOnlyInResolveJobs)
 
         // Run all seed jobs.
         await Promise.all(
@@ -646,7 +646,7 @@ class Spec {
 
         await Promise.all([
             seedSucceeded(seedTableService.seedCursorId),
-            this._processEventsPostSeed([liveObjectId]),
+            // this._processEventsPostSeed([liveObjectId]),
         ])
     }
 

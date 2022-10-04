@@ -88,9 +88,7 @@ export class Logger {
     async invoke(functionName: RPC, payload?: any) {
         try {
             await this.client.socket?.invoke(functionName, payload)
-        } catch (err) {
-            console.error(`Logs ping error: ${err}`)
-        }
+        } catch (err) {}
     }
 
     _createPingJobIfNotExists() {
