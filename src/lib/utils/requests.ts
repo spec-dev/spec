@@ -18,10 +18,10 @@ export async function callSpecFunction(
     sharedErrorContext: StringKeyMap,
     hasRetried?: boolean
 ) {
-    // const abortController = new AbortController()
-    // const initialRequestTimer = setTimeout(() => abortController.abort(), 60000)
-    const resp = await makeRequest(edgeFunction, payload)
-    // clearTimeout(initialRequestTimer)
+    const abortController = new AbortController()
+    const initialRequestTimer = setTimeout(() => abortController.abort(), 60000)
+    const resp = await makeRequest(edgeFunction, payload, abortController)
+    clearTimeout(initialRequestTimer)
 
     if (!isStreamingResp(resp)) {
         await handleJSONResp(resp, edgeFunction, onData)
@@ -123,7 +123,7 @@ async function handleStreamingResp(
 async function makeRequest(
     edgeFunction: EdgeFunction,
     payload: StringKeyMap | StringKeyMap[],
-    // abortController: AbortController
+    abortController: AbortController
 ): Response {
     payload = hackPayload(edgeFunction.url, stringifyAnyDates(payload))
 
@@ -133,7 +133,7 @@ async function makeRequest(
             method: 'POST',
             body: JSON.stringify(payload || {}),
             headers: { 'Content-Type': 'application/json' },
-            // signal: abortController.signal,
+            signal: abortController.signal,
         })
     } catch (err) {
         throw `Unexpected error calling edge function ${edgeFunction.name}: ${err?.message || err}`
