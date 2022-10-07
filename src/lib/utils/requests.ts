@@ -8,9 +8,8 @@ import { camelizeKeys } from 'humps'
 
 type onDataCallbackType = (data: StringKeyMap | StringKeyMap[]) => Promise<void>
 
-// const isStreamingResp = (resp: Response): boolean =>
-//     resp.headers?.get('Transfer-Encoding') === 'chunked'
-const isStreamingResp = (resp: Response) => true
+const isStreamingResp = (resp: Response): boolean =>
+    resp.headers?.get('Transfer-Encoding') === 'chunked'
 
 export async function callSpecFunction(
     edgeFunction: EdgeFunction,
@@ -19,10 +18,10 @@ export async function callSpecFunction(
     sharedErrorContext: StringKeyMap,
     hasRetried?: boolean
 ) {
-    const abortController = new AbortController()
-    const initialRequestTimer = setTimeout(() => abortController.abort(), 30000)
-    const resp = await makeRequest(edgeFunction, payload, abortController)
-    clearTimeout(initialRequestTimer)
+    // const abortController = new AbortController()
+    // const initialRequestTimer = setTimeout(() => abortController.abort(), 60000)
+    const resp = await makeRequest(edgeFunction, payload)
+    // clearTimeout(initialRequestTimer)
 
     if (!isStreamingResp(resp)) {
         await handleJSONResp(resp, edgeFunction, onData)
@@ -30,7 +29,7 @@ export async function callSpecFunction(
     }
 
     try {
-        await handleStreamingResp(resp, abortController, onData, sharedErrorContext)
+        await handleStreamingResp(resp, onData, sharedErrorContext)
     } catch (err) {
         const message = err.message || err || ''
         if (!hasRetried && message.toLowerCase().includes('user aborted')) {
@@ -60,7 +59,7 @@ async function handleJSONResp(
 
 async function handleStreamingResp(
     resp: Response,
-    abortController: AbortController,
+    // abortController: AbortController,
     onData: onDataCallbackType,
     sharedErrorContext: StringKeyMap,
 ) {
@@ -71,18 +70,17 @@ async function handleStreamingResp(
         keepStack: false,
     })
 
-    let chunkTimer = null
-    const renewTimer = () => {
-        chunkTimer && clearTimeout(chunkTimer)
-        chunkTimer = setTimeout(() => abortController.abort(), 300000000)
-    }
-    renewTimer()
+    // let chunkTimer = null
+    // const renewTimer = () => {
+    //     chunkTimer && clearTimeout(chunkTimer)
+    //     chunkTimer = setTimeout(() => abortController.abort(), 60000)
+    // }
+    // renewTimer()
 
     let pendingDataPromise = null
 
     // Parse each JSON object and add it to a batch.
     let batch = []
-    // let promises = []
     jsonParser.onValue = (obj) => {
         if (!obj) return
         obj = obj as StringKeyMap
@@ -92,7 +90,6 @@ async function handleStreamingResp(
         batch.push(obj)
         if (batch.length === constants.STREAMING_SEED_UPSERT_BATCH_SIZE) {
             pendingDataPromise = onData([...batch])
-            // promises.push(onData([...batch]))
             batch = []
         }
     }
@@ -100,7 +97,7 @@ async function handleStreamingResp(
     let chunk
     try {
         for await (chunk of resp.body) {
-            renewTimer()
+            // renewTimer()
             if (sharedErrorContext.error) {
                 throw `Error handling streaming response batch: ${sharedErrorContext.error}`
             }
@@ -113,10 +110,10 @@ async function handleStreamingResp(
             jsonParser.write(chunk)
         }
     } catch (err) {
-        chunkTimer && clearTimeout(chunkTimer)
+        // chunkTimer && clearTimeout(chunkTimer)
         throw `Error iterating response stream: ${err?.message || err}`
     }
-    chunkTimer && clearTimeout(chunkTimer)
+    // chunkTimer && clearTimeout(chunkTimer)
 
     if (batch.length) {
         await onData([...batch])
@@ -126,7 +123,7 @@ async function handleStreamingResp(
 async function makeRequest(
     edgeFunction: EdgeFunction,
     payload: StringKeyMap | StringKeyMap[],
-    abortController: AbortController
+    // abortController: AbortController
 ): Response {
     payload = hackPayload(edgeFunction.url, stringifyAnyDates(payload))
 
@@ -136,7 +133,7 @@ async function makeRequest(
             method: 'POST',
             body: JSON.stringify(payload || {}),
             headers: { 'Content-Type': 'application/json' },
-            signal: abortController.signal,
+            // signal: abortController.signal,
         })
     } catch (err) {
         throw `Unexpected error calling edge function ${edgeFunction.name}: ${err?.message || err}`
