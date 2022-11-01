@@ -18,7 +18,6 @@ export async function getEventCursorsForNames(names: string[]): Promise<EventCur
 
     return (records || []).map((record) => ({
         ...record,
-        nonce: Number(record.nonce),
         timestamp: (record.timestamp as Date).toISOString(),
     })) as EventCursor[]
 }

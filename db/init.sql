@@ -31,7 +31,7 @@ alter default privileges in schema public grant all on sequences to spec;
 create table if not exists spec.event_cursors (
     name character varying not null,
     id character varying not null,
-    nonce bigint not null,
+    nonce character varying not null,
     "timestamp" timestamp with time zone not null,
     constraint event_cursors_pkey primary key (name)
 );

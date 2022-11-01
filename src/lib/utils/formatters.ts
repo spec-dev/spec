@@ -91,6 +91,7 @@ export const mergeByKeys = (iterable: StringKeyMap[], keys: string[]): StringKey
 
 export function groupByKeys(input: StringKeyMap | StringKeyMap[]): StringKeyMap {
     const inputs = Array.isArray(input) ? input : [input]
+
     let groupedInputs = {}
     for (const entry of inputs) {
         for (const key in entry) {
@@ -103,8 +104,14 @@ export function groupByKeys(input: StringKeyMap | StringKeyMap[]): StringKeyMap 
             }
         }
     }
+
     for (const key in groupedInputs) {
-        groupedInputs[key] = Array.from(new Set(groupedInputs[key]))
+        groupedInputs[key] = unique(groupedInputs[key])
+
+        if (groupedInputs[key].length === 1) {
+            groupedInputs[key] = groupedInputs[key][0]
+        }
     }
+
     return groupedInputs
 }

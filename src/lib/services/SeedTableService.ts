@@ -30,6 +30,7 @@ import { applyDefaults } from '../defaults'
 const valueSep = '__:__'
 
 class SeedTableService {
+
     seedSpec: SeedSpec
 
     liveObject: LiveObject
@@ -44,7 +45,7 @@ class SeedTableService {
 
     requiredArgColPaths: string[] = []
 
-    colPathToFunctionInputArg: { [key: string]: string } = {}
+    colPathsToFunctionInputArgs: StringKeyMap[] = []
 
     seedCount: number = 0
 
@@ -60,7 +61,7 @@ class SeedTableService {
 
     defaultColumnValues: { [key: string]: ColumnDefaultsConfig }
 
-    seedWithColPaths: StringMap
+    seedWithColPaths: StringMap[]
 
     seedStrategy: () => void | null
 
@@ -120,13 +121,16 @@ class SeedTableService {
 
         // Find the required args for this function and their associated columns.
         this._findRequiredArgColumns()
-        if (!this.requiredArgColPaths.length) throw 'No required arg column paths found.'
+        if (!this.requiredArgColPaths.length && !this.seedSpec.seedIfEmpty) {
+            throw 'No required arg column paths found.'
+        }
 
         const inputTableColumns = {}
         const inputColumnLocations = { onSeedTable: 0, onForeignTable: 0 }
         const uniqueTablePaths = new Set<string>()
+        const uniqueRequiredArgColPaths = unique(this.requiredArgColPaths.flat())
 
-        for (const colPath of this.requiredArgColPaths) {
+        for (const colPath of uniqueRequiredArgColPaths) {
             const [schemaName, tableName, colName] = colPath.split('.')
             const tablePath = [schemaName, tableName].join('.')
             uniqueTablePaths.add(tablePath)
@@ -172,7 +176,7 @@ class SeedTableService {
         // TODO: This is possible, just gonna take a lot more lookup work.
         else if (inputColumnLocations.onForeignTable > 1 && uniqueTablePaths.size > 1) {
             logger.warn(
-                `${this.seedTablePath} - Can't seed table using exclusively more than one foreign table.`
+                `${this.seedTablePath} - Can't yet seed tables using exclusively more than one foreign table.`
             )
         }
         // Seed using the foreign table as the target of the query.
@@ -198,14 +202,15 @@ class SeedTableService {
 
         // Get input column names and ensure all belong to the given foreign table.
         const inputColNames = []
-        for (const colPath of this.requiredArgColPaths) {
+        const uniqueRequiredArgColPaths = unique(this.requiredArgColPaths.flat())
+        for (const colPath of uniqueRequiredArgColPaths) {
             const [schemaName, tableName, colName] = colPath.split('.')
             const tablePath = [schemaName, tableName].join('.')
 
             if (tablePath !== foreignTablePath) {
                 const err = `seedWithForeignRecords can only be used if all 
                 required arg cols exist on the given foreign table: ${foreignTablePath}; 
-                requiredArgColPaths: ${this.requiredArgColPaths}.`
+                requiredArgColPaths: ${uniqueRequiredArgColPaths}.`
                 throw err
             }
 
@@ -316,7 +321,7 @@ class SeedTableService {
                 for (const colPath of this.requiredArgColPaths) {
                     const [colSchemaName, colTableName, colName] = colPath.split('.')
                     const colTablePath = [colSchemaName, colTableName].join('.')
-                    const inputArg = this.colPathToFunctionInputArg[colPath]
+                    const inputArg = this.colPathsToFunctionInputArgs[colPath]
                     const recordColKey = colTablePath === this.seedTablePath ? colName : colPath
                     const value = record[recordColKey]
                     input[inputArg] = value
@@ -404,6 +409,7 @@ class SeedTableService {
         const linkProperties = this.linkProperties
         const nonSeedLinkedForeignTableData = []
         const seen = new Set()
+
         for (const property in linkProperties) {
             const colPath = linkProperties[property]
             const [schema, table, colName] = colPath.split('.')
@@ -500,7 +506,7 @@ class SeedTableService {
                     rel,
                     inputPropertyKeys,
                     referenceKeyValues,
-                    nonSeedLinkedForeignTableData,
+                    nonSeedLinkedForeignTableData, 
                 ).catch(err => {
                     sharedErrorContext.error = err
                 })
@@ -629,7 +635,6 @@ class SeedTableService {
             if (Object.keys(otherForeignLookups).length > 0) {
                 upsertRecord._otherForeignLookups = otherForeignLookups
             }
-
             if (!rel) {
                 upsertRecords.push(upsertRecord)
                 continue
@@ -868,7 +873,7 @@ class SeedTableService {
         primaryTablePath: string,
         staticFilters: { [key: string]: Filter },
         columnFilters: { [key: string]: Filter },
-    ): StringKeyMap {
+    ): StringKeyMap | StringKeyMap[] {
         // Build record-agnostic filters.
         const recordAgnosticFilters = {}
         for (const key in staticFilters) {
@@ -880,49 +885,64 @@ class SeedTableService {
             }
         }
 
-        const inputs = []
-        for (const record of records) {
-            const entry = {}
+        let inputs = []
+        for (let i = 0; i < this.requiredArgColPaths.length; i++) {
+            const requiredArgColPaths = this.requiredArgColPaths[i]
+            const colPathsToFunctionInputArgs = this.colPathsToFunctionInputArgs[i]
+            const input = []
 
-            // Map each record to a function input payload.
-            for (const colPath of this.requiredArgColPaths) {
-                const [colSchemaName, colTableName, colName] = colPath.split('.')
-                const colTablePath = [colSchemaName, colTableName].join('.')
-                const inputArg = this.colPathToFunctionInputArg[colPath]
-                const recordColKey = colTablePath === primaryTablePath ? colName : colPath
-                entry[inputArg] = record[recordColKey]
-            }
-
-            // Build record-specific filters.
-            const recordSpecificFilters = {}
-            for (const key in columnFilters) {
-                const filter = columnFilters[key]
-                const filterColPath = filter.column
-                const [schema, table, filterColName] = filterColPath.split('.')
-                const filterColTablePath = [schema, table].join('.')
-                const filterRecordColKey = filterColTablePath === primaryTablePath ? filterColName : filterColPath
-                if (!record.hasOwnProperty(filterRecordColKey)) continue
-                const filterValue = record[filterRecordColKey]
-                if (filterValue === null) continue
-
-                if (filter.op === FilterOp.EqualTo) {
-                    recordAgnosticFilters[key] = filterValue
-                } else {
-                    recordAgnosticFilters[key] = {
-                        op: filter.op,
-                        value: filterValue
+            for (const record of records) {
+                const entry = {}
+    
+                // Map each record to a function input payload.
+                for (const colPath of requiredArgColPaths) {
+                    const [colSchemaName, colTableName, colName] = colPath.split('.')
+                    const colTablePath = [colSchemaName, colTableName].join('.')
+                    const inputArgs = colPathsToFunctionInputArgs[colPath] || []
+    
+                    for (const inputArg of inputArgs) {
+                        const recordColKey = colTablePath === primaryTablePath ? colName : colPath
+                        entry[inputArg] = record[recordColKey]
                     }
                 }
+    
+                // Build record-specific filters.
+                // NOTE: If any record-specific/column filters exist, the batch size is forced
+                // down to 1, so `records` is actually only has a length of 1.
+                const recordSpecificFilters = {}
+                for (const key in columnFilters) {
+                    const filter = columnFilters[key]
+                    const filterColPath = filter.column
+                    const [schema, table, filterColName] = filterColPath.split('.')
+                    const filterColTablePath = [schema, table].join('.')
+                    const filterRecordColKey = filterColTablePath === primaryTablePath ? filterColName : filterColPath
+                    if (!record.hasOwnProperty(filterRecordColKey)) continue
+                    const filterValue = record[filterRecordColKey]
+                    if (filterValue === null) continue
+    
+                    if (filter.op === FilterOp.EqualTo) {
+                        recordSpecificFilters[key] = filterValue
+                    } else {
+                        recordSpecificFilters[key] = {
+                            op: filter.op,
+                            value: filterValue
+                        }
+                    }
+                }
+    
+                input.push({
+                    ...recordAgnosticFilters,
+                    ...recordSpecificFilters,
+                    ...entry,
+                })
             }
 
-            inputs.push({
-                ...recordAgnosticFilters,
-                ...recordSpecificFilters,
-                ...entry,
-            })
+            inputs.push(input)
         }
-        
-        return groupByKeys(inputs)
+
+        inputs = inputs.map(groupByKeys)
+
+        return inputs.length > 1 ? inputs : inputs[0]
     }
 
     async _findInputRecordsFromAdjacentCols(
@@ -1043,66 +1063,47 @@ class SeedTableService {
 
     _findSeedFunction() {
         for (const edgeFunction of this.liveObject.edgeFunctions) {
-            // Only use a getMany function for seeding.
-            if (edgeFunction.role !== LiveObjectFunctionRole.GetMany) {
-                continue
+            // HACK: For now just take the first GetMany function.
+            if (edgeFunction.role === LiveObjectFunctionRole.GetMany) {
+                this.seedFunction = edgeFunction
+                break
             }
-
-            const { argsMap, args } = edgeFunction
-
-            let allSeedWithPropertiesAcceptedAsFunctionInput = true
-            for (let propertyKey in this.seedWithColPaths) {
-                propertyKey = argsMap[propertyKey] || propertyKey
-
-                if (!args.hasOwnProperty(propertyKey)) {
-                    allSeedWithPropertiesAcceptedAsFunctionInput = false
-                    break
-                }
-            }
-
-            if (!allSeedWithPropertiesAcceptedAsFunctionInput) {
-                continue
-            }
-
-            const reverseArgsMap = reverseMap(argsMap)
-            let allRequiredInputPropertiesSatisfied = true
-            for (let inputKey in args) {
-                const propertyKey = reverseArgsMap[inputKey] || inputKey
-                const isRequiredInput = args[inputKey]
-
-                if (isRequiredInput && !this.seedWithColPaths.hasOwnProperty(propertyKey)) {
-                    allRequiredInputPropertiesSatisfied = false
-                    break
-                }
-            }
-
-            if (!allRequiredInputPropertiesSatisfied) {
-                continue
-            }
-
-            this.seedFunction = edgeFunction
-            break
         }
     }
 
     _findRequiredArgColumns() {
         const { argsMap, args } = this.seedFunction
         const reverseArgsMap = reverseMap(argsMap)
-
         const requiredArgColPaths = []
-        const colPathToFunctionInputArg = {}
-        for (let inputKey in args) {
-            const propertyKey = reverseArgsMap[inputKey] || inputKey
+        const colPathsToFunctionInputArgs = []
 
-            if (this.seedWithColPaths.hasOwnProperty(propertyKey)) {
-                const colPath = this.seedWithColPaths[propertyKey]
-                requiredArgColPaths.push(colPath)
-                colPathToFunctionInputArg[colPath] = inputKey
-            }
+        for (const seedWithEntry of this.seedWithColPaths) {
+            const requiredArgColPathsEntry = []
+            const colPathsToFunctionInputArgsEntry = {}
+
+            for (const inputKey in args) {
+                const propertyKey = reverseArgsMap[inputKey] || inputKey
+                if (seedWithEntry.hasOwnProperty(propertyKey)) {
+                    const colPath = seedWithEntry[propertyKey]
+
+                    if (!requiredArgColPathsEntry.includes(colPath)) {
+                        requiredArgColPathsEntry.push(colPath)
+                    }
+
+                    if (!colPathsToFunctionInputArgsEntry.hasOwnProperty(colPath)) {
+                        colPathsToFunctionInputArgsEntry[colPath] = []
+                    }
+                    colPathsToFunctionInputArgsEntry[colPath].push(inputKey)
+                }
+            }   
+            if (!requiredArgColPathsEntry.length) continue
+            
+            requiredArgColPaths.push(requiredArgColPathsEntry)
+            colPathsToFunctionInputArgs.push(colPathsToFunctionInputArgsEntry)
         }
 
         this.requiredArgColPaths = requiredArgColPaths
-        this.colPathToFunctionInputArg = colPathToFunctionInputArg
+        this.colPathsToFunctionInputArgs = colPathsToFunctionInputArgs
     }
 
     _buildFilters(): { [key: string]: Filter }[] {

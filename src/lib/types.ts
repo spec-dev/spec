@@ -109,7 +109,7 @@ export type TableDataSources = { [key: string]: TableDataSource[] }
 export interface EventCursor {
     name: string
     id: string
-    nonce: number
+    nonce: string
     timestamp: string | Date
 }
 
@@ -283,10 +283,13 @@ export interface TableLinkDataChanges {
 
 export enum FilterOp {
     EqualTo = '=',
+    NotEqualTo = '!=',
     GreaterThan = '>',
     GreaterThanOrEqualTo = '>=',
-    LessThan = '>=',
+    LessThan = '<',
     LessThanOrEqualTo = '<=',
+    In = 'in',
+    NotIn = 'not in',
 }
 
 export interface Filter {

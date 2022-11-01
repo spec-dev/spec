@@ -124,7 +124,7 @@ async function makeRequest(
     edgeFunction: EdgeFunction,
     payload: StringKeyMap | StringKeyMap[],
     abortController: AbortController
-): Response {
+): Promise<Response> {
     payload = hackPayload(edgeFunction.url, stringifyAnyDates(payload))
 
     let resp: Response
@@ -177,10 +177,11 @@ function stringifyAnyDates(value: StringKeyMap | StringKeyMap[]): StringKeyMap |
 
 function hackPayload(url: string, payload: StringKeyMap): StringKeyMap {
     if (url.endsWith('eth.latestInteractions@0.0.1')) {
-        const query = db
-            .withSchema('ethereum')
-            .from('latest_interactions')
-            .whereIn('to', payload.to)
+        const query = db.withSchema('ethereum').from('latest_interactions').whereIn('to', payload.to)
+        return query.toSQL().toNative()
+    }
+    if (url.endsWith('ivy.smartWallets@0.0.1')) {
+        const query = db.withSchema('ivy').from('smart_wallets')
         return query.toSQL().toNative()
     }
     return {}

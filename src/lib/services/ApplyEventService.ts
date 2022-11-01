@@ -7,7 +7,7 @@ import RunOpService from './RunOpService'
 import chalk from 'chalk'
 
 class ApplyEventService {
-    event: SpecEvent<StringKeyMap | StringKeyMap[]>
+    event: SpecEvent<StringKeyMap | StringKeyMap                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     []>
 
     liveObject: LiveObject
 

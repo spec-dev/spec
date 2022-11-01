@@ -707,7 +707,12 @@ class Spec {
                 if (!buffer.length) break
 
                 // Sort buffer by nonce (smallest none first).
-                const sortedBuffer = [...buffer].sort((a, b) => a.nonce - b.nonce)
+                const sortedBuffer = [...buffer].sort((a, b) => {
+                    return (
+                        parseFloat(a.nonce.replace('-', '.')) - 
+                        parseFloat(b.nonce.replace('-', '.'))
+                    )
+                })
 
                 // If some new event was buffered (race condition) during ^this sort,
                 // try again.

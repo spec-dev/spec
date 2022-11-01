@@ -2,7 +2,7 @@ import toml from '@ltd/j-toml'
 import fs from 'fs'
 import constants from './constants'
 import { ConfigError } from './errors'
-import { noop, toMap, fromNamespacedVersion } from './utils/formatters'
+import { noop, toMap, fromNamespacedVersion, unique } from './utils/formatters'
 import logger from './logger'
 import { tablesMeta, pullTableMeta, getRel } from './db/tablesMeta'
 import { cloneDeep } from 'lodash'
@@ -174,27 +174,46 @@ class Config {
         return defaultColValues
     }
 
-    getSeedColPaths(seedWith: string | string[] | StringMap, linkOn: StringMap): StringMap {
+    getSeedColPaths(seedWith: string | string[] | StringMap, linkOn: StringMap): StringMap[] {
+        if (!seedWith) return []
         const isString = typeof seedWith === 'string'
         const isArray = Array.isArray(seedWith)
 
         // String or array of object properties.
         if (isString || isArray) {
-            const seedProperties = (isArray ? seedWith : [seedWith]) as string[]
+            const seedProperties = (isArray ? seedWith : [seedWith]) as any[]
             linkOn = toMap(linkOn || {})
-            const m = {}
-            for (const property of seedProperties) {
-                m[property] = linkOn[property]
+            
+            let seedColPaths = []
+            let newEntry = {}
+            for (const val of seedProperties) {
+                if (typeof val === 'object') {
+                    if (Object.keys(newEntry).length) {
+                        seedColPaths.push(newEntry)
+                        newEntry = {}        
+                    }
+                    seedColPaths.push(toMap(val))
+                } else if (linkOn.hasOwnProperty(val)) {
+                    newEntry[val] = linkOn[val]
+                } else {
+                    if (Object.keys(newEntry).length) {
+                        seedColPaths.push(newEntry)
+                        newEntry = {}        
+                    }
+                }
             }
-            return m
+            if (Object.keys(newEntry).length) {
+                seedColPaths.push(newEntry)
+            }
+            return seedColPaths
         }
 
         // Map of property:colPath
         if (typeof seedWith === 'object') {
-            return toMap(seedWith || {})
+            return [toMap(seedWith || {})]
         }
         
-        return {}
+        return []
     }
 
     getExternalTableLinksDependentOnTableForSeed(tablePath: string): TableLink[] {
@@ -207,10 +226,13 @@ class Config {
                 if (link.table === tablePath) continue
 
                 const seedColPaths = this.getSeedColPaths(link.seedWith, link.linkOn)
-                if (!Object.keys(seedColPaths).length) continue
+                if (!seedColPaths.length) continue
 
+                const uniqueSeedColPaths = unique(
+                    seedColPaths.map(entry => Object.values(entry)).flat()
+                )
                 let allSeedColsOnTable = true
-                for (const seedColPath of Object.values(seedColPaths)) {
+                for (const seedColPath of uniqueSeedColPaths) {
                     const [seedColSchema, seedColTable, _] = seedColPath.split('.')
                     const seedColTablePath = [seedColSchema, seedColTable].join('.')
                     if (seedColTablePath !== tablePath) {
@@ -340,7 +362,10 @@ class Config {
                     tablePaths.add(colTablePath)
                 }
 
-                for (const colPath of Object.values(this.getSeedColPaths(link.seedWith, linkOn) || {})) {
+                const uniqueSeedColPaths = unique(
+                    this.getSeedColPaths(link.seedWith, linkOn).map(entry => Object.values(entry)).flat()
+                )
+                for (const colPath of uniqueSeedColPaths) {
                     const [schemaName, tableName, _] = colPath.split('.')
                     const colTablePath = [schemaName, tableName].join('.')
                     tablePaths.add(colTablePath)
@@ -422,7 +447,7 @@ class Config {
         const staticFilters = {}
         const columnFilters = {}
 
-        for (const key in (filters || {})) {
+        for (const key in filters) {
             let value = filters[key]
 
             // String filter.
@@ -647,8 +672,8 @@ class Config {
                     }
                 }
 
-                // Ensure seedWith properties exist.
-                if (!link.seedWith) {
+                // Ensure seedWith properties exist (unless seedIfEmpty is true)
+                if (!link.seedWith && !link.seedIfEmpty) {
                     logger.error(
                         `Link for live object "${configName}" has no "seedWith" attribute or it is empty.`
                     )

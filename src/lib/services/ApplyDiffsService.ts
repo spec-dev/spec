@@ -34,7 +34,7 @@ class ApplyDiffsService {
 
     defaultColumnValues: { [key: string]: ColumnDefaultsConfig }
 
-    seedWithColPaths: StringMap
+    seedWithColPaths: StringMap[]
 
     get linkTablePath(): string {
         return this.link.table
@@ -127,8 +127,8 @@ class ApplyDiffsService {
         const tableDataSources = this.tableDataSources
 
         // HACK: Assumption that there's only 1 seedWithColPath.
-        const seedWithProperty = Object.keys(this.seedWithColPaths)[0]
-        const seedWithColPath = Object.values(this.seedWithColPaths)[0]
+        const seedWithProperty = Object.keys(this.seedWithColPaths[0])[0]
+        const seedWithColPath = Object.values(this.seedWithColPaths[0])[0]
         const [seedWithSchemaName, seedWithTableName, seedWithColName] = seedWithColPath.split('.')
         const seedWithTablePath = [seedWithSchemaName, seedWithTableName].join('.')        
 
