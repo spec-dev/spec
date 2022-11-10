@@ -48,6 +48,7 @@ const constants: StringKeyMap = {
 
     LOGS_HOSTNAME: ev('LOGS_HOSTNAME', 'logs.spec.dev'),
     LOGS_PORT: Number(ev('LOGS_PORT', 443)),
+    STREAM_LOGS: !['false', false].includes(ev('STREAM_LOGS')),
 }
 
 constants.PROJECT_CONFIG_PATH = path.join(

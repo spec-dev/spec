@@ -527,8 +527,8 @@ export class TableSubscriber {
 
         const externalLinksToProcess = []
         for (const depTableLink of depTableLinks) {
-            const seedColPaths = depTableLink.seedColPaths || {}
-            if (!Object.keys(seedColPaths).length) continue
+            const seedColPaths = depTableLink.seedColPaths || []
+            if (!seedColPaths.length) continue
 
             const eventsCausingDownstreamSeeds = []
             for (const event of events) {
@@ -537,8 +537,8 @@ export class TableSubscriber {
                     colNamesWithValues.map((colName) => [tablePath, colName].join('.'))
                 )
 
-                for (const seedWithColPath of Object.values(seedColPaths)) {
-                    if (colPathsWithValues.has(seedWithColPath as string)) {
+                for (const colPath of seedColPaths) {
+                    if (colPathsWithValues.has(colPath)) {
                         eventsCausingDownstreamSeeds.push(event)
                         break
                     }

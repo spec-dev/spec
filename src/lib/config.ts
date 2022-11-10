@@ -245,7 +245,7 @@ class Config {
                     depTableLinks.push({
                         liveObjectId: obj.id,
                         link,
-                        seedColPaths,
+                        seedColPaths: uniqueSeedColPaths,
                     })
                 }
             }

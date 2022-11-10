@@ -18,6 +18,8 @@ spec:
       - name: spec-{{PROJECT_ID}}
         image: {{IMAGE}}
         env:
+        - name: STREAM_LOGS
+          value: "false"
         - name: NODE_ENV
           value: production
         - name: ENV

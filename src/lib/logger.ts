@@ -9,14 +9,14 @@ enum RPC {
 
 export class Logger {
     
-    client: SpecEventClient
+    client: SpecEventClient | null
 
     pingJob: any = null
 
     buffer: Log[] = []
 
     constructor() {
-        this.client = createEventClient({
+        this.client = constants.STREAM_LOGS ? createEventClient({
             hostname: constants.LOGS_HOSTNAME,
             port: constants.LOGS_PORT,
             signedAuthToken: constants.PROJECT_ADMIN_KEY,
@@ -25,25 +25,25 @@ export class Logger {
                 this._transmitBufferedLogs()
                 this._createPingJobIfNotExists()
             },
-        })
+        }) : null
     }
 
     info(...args: any[]) {
         const log = this._newLog(args, LogLevel.Info)
         console.log(log.message)
-        this._processLog(log)
+        this.client && this._processLog(log)
     }
 
     warn(...args: any[]) {
         const log = this._newLog(args, LogLevel.Warn) 
         console.warn(log.message)
-        this._processLog(log)
+        this.client && this._processLog(log)
     }
 
     error(...args: any[]) {
         const log = this._newLog(args, LogLevel.Error)
         console.error(log.message)
-        this._processLog(log)
+        this.client && this._processLog(log)
     }
 
     _newLog(args: any[], level: LogLevel): Log {
@@ -56,7 +56,7 @@ export class Logger {
     }
 
     _processLog(log: Log) {
-        if (!this.client.isConnected) {
+        if (!this.client?.isConnected) {
             this.buffer.push(log)
             return
         }
@@ -65,7 +65,7 @@ export class Logger {
     }
 
     _transmitLog(log: Log) {
-        this.client.socket?.transmit(RPC.Log, log)
+        this.client?.socket?.transmit(RPC.Log, log)
     }
 
     _transmitBufferedLogs() {
@@ -87,7 +87,7 @@ export class Logger {
 
     async invoke(functionName: RPC, payload?: any) {
         try {
-            await this.client.socket?.invoke(functionName, payload)
+            await this.client?.socket?.invoke(functionName, payload)
         } catch (err) {}
     }
 
