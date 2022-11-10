@@ -22,6 +22,7 @@ import { applyDefaults } from '../defaults'
 const valueSep = '__:__'
 
 class ApplyDiffsService {
+    
     liveObjectDiffs: StringKeyMap[]
 
     link: LiveObjectLink
@@ -125,19 +126,9 @@ class ApplyDiffsService {
         const properties = this.linkProperties
         const tablePath = this.linkTablePath
         const tableDataSources = this.tableDataSources
+        let diffs = this.liveObjectDiffs
 
-        // HACK: Assumption that there's only 1 seedWithColPath.
-        const seedWithProperty = Object.keys(this.seedWithColPaths[0])[0]
-        const seedWithColPath = Object.values(this.seedWithColPaths[0])[0]
-        const [seedWithSchemaName, seedWithTableName, seedWithColName] = seedWithColPath.split('.')
-        const seedWithTablePath = [seedWithSchemaName, seedWithTableName].join('.')        
-
-        // Use the seedWith table as a filter for events if it's a foreign table BUT there's no relationship.
-        const useSeedWithForeignTableAsFilter = (
-            tablePath !== seedWithTablePath && !getRel(tablePath, seedWithTablePath)
-        )
-    
-        // Get query conditions for the linked foreign tables. 
+        // Get query conditions for the linked foreign tables with relationships.
         const foreignTableQueryConditions = {}
         for (const property in properties) {
             const colPath = properties[property]
@@ -218,21 +209,139 @@ class ApplyDiffsService {
                 }
             }
         }
+        
+        let seedWithTablePath = null
+        if (this.seedWithColPaths.length) {    
+            const seedWithColPath = Object.values(this.seedWithColPaths[0])[0]
+            const [seedWithSchemaName, seedWithTableName, _] = seedWithColPath.split('.')
+            seedWithTablePath = [seedWithSchemaName, seedWithTableName].join('.')
+        }
 
-        let diffs = this.liveObjectDiffs
-        if (useSeedWithForeignTableAsFilter) {
-            const seedWithPropertyValuesFromDiffs = this.liveObjectDiffs.map(diff => diff[seedWithProperty])
+        const hasForeignSeedWithTable = seedWithTablePath && tablePath !== seedWithTablePath
+        const seedWithTableIncludedInLinkProperties = seedWithTablePath && Object.values(this.linkProperties)
+            .filter(colPath => colPath.startsWith(`${seedWithTablePath}.`))
+            .length > 0
+
+        /**
+         * `seedWith[]` is used to filter events if the seed table is a foreign table AND 
+         * that table is NOT referenced in the `linkOn` map.
+         */
+         const useSeedWithAsFilter = hasForeignSeedWithTable && !seedWithTableIncludedInLinkProperties
+        if (useSeedWithAsFilter) {
+            const conditions = []
+            const allSeedWithColNames = new Set<string>()
+
+            const entryColNames = []
+            const entryProperties = []
+            for (const entry of this.seedWithColPaths) {
+                const properties = Object.keys(entry).sort()
+                // Use an inclusive where query if more than one key per condition group.
+                const useInclusiveWhere = properties.length > 1
+                const colNames = []
+                for (const property of properties) {
+                    const colName = entry[property].split('.').pop()
+                    colNames.push(colName)
+                    allSeedWithColNames.add(colName)
+                }
+                entryColNames.push(colNames)
+                entryProperties.push(properties)
+
+                const whereIn = {}
+                if (!useInclusiveWhere) {
+                    whereIn[colNames[0]] = []
+                }
+                const whereConditions = []
+                for (const diff of diffs) {
+                    // Where-in
+                    if (!useInclusiveWhere) {
+                        const diffValue = diff[properties[0]]
+                        if (diffValue === null) continue
+                        whereIn[colNames[0]].push(diffValue)
+                        continue
+                    }
+
+                    // Inclusive where
+                    const where = {}
+                    let ignoreDiff = false
+                    for (let i = 0; i < properties.length; i++) {
+                        const diffValue = diff[properties[i]]
+                        if (diffValue === null) {
+                            ignoreDiff = true
+                            break
+                        }
+                        where[colNames[i]] = diffValue
+                    }
+                    if (ignoreDiff) continue
+                    whereConditions.push(where)
+                }
+
+                conditions.push(useInclusiveWhere ? whereConditions : whereIn)
+            }
+
+            const seedWithFilterQuery = db.from(seedWithTablePath)
+                .select(Array.from(allSeedWithColNames))
+
+            let addedFirstCondition = false
+            for (const condition of conditions) {
+                const useInclusiveWhere = Array.isArray(condition)
+
+                // Inclusive where
+                if (useInclusiveWhere) {
+                    if (!condition.length) continue
+
+                    const subQuery = builder => {
+                        for (let i = 0; i < condition.length; i++) {
+                            i === 0 ? builder.where(condition[i]) : builder.orWhere(condition[i])
+                        }
+                    }
+                    addedFirstCondition 
+                        ? seedWithFilterQuery.orWhere(subQuery) 
+                        : seedWithFilterQuery.where(subQuery)
+
+                    addedFirstCondition = true
+                }
+                // Where-in
+                else {
+                    const colName = Object.keys(condition)[0]
+                    const values = condition[colName] || []
+                    if (!values.length) continue
+
+                    addedFirstCondition 
+                        ? seedWithFilterQuery.orWhereIn(colName, values) 
+                        : seedWithFilterQuery.whereIn(colName, values)
+
+                    addedFirstCondition = true
+                }
+            }
+
             let matchingSeedWithForeignRecords = []
             try {
-                matchingSeedWithForeignRecords = await db
-                    .from(seedWithTablePath)
-                    .select([seedWithColName])
-                    .whereIn(seedWithColName, seedWithPropertyValuesFromDiffs)
+                matchingSeedWithForeignRecords = await seedWithFilterQuery
             } catch (err) {
+                const [seedWithSchemaName, seedWithTableName] = seedWithTablePath.split('.')
                 throw new QueryError('select', seedWithSchemaName, seedWithTableName, err)
             }
-            const foundSeedWithProperties = new Set(matchingSeedWithForeignRecords.map(r => r[seedWithColName]))
-            diffs = diffs.filter(diff => foundSeedWithProperties.has(diff[seedWithProperty]))
+
+            const matchingSeedWithForeignRecordsRegistry = new Set<string>()
+            for (const record of matchingSeedWithForeignRecords) {
+                for (const colNames of entryColNames) {
+                    const matchingRecordKey = colNames.map(colName => record[colName]).join(':')
+                    matchingSeedWithForeignRecordsRegistry.add(matchingRecordKey)
+                }
+            }
+            
+            const filteredDiffs = []
+            for (const diff of diffs) {
+                for (const properties of entryProperties) {
+                    const lookupRecordKey = properties.map(property => diff[property]).join(':')
+
+                    if (matchingSeedWithForeignRecordsRegistry.has(lookupRecordKey)) {
+                        filteredDiffs.push(diff)
+                        break
+                    }
+                }
+            }
+            diffs = filteredDiffs
         }
 
         const missingLinkedForeignTables = {}

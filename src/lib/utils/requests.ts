@@ -3,8 +3,6 @@ import fetch, { Response } from 'node-fetch'
 import { JSONParser } from '@streamparser/json'
 import constants from '../constants'
 import logger from '../logger'
-import { db } from '../db'
-import { camelizeKeys } from 'humps'
 
 type onDataCallbackType = (data: StringKeyMap | StringKeyMap[]) => Promise<void>
 
@@ -29,7 +27,7 @@ export async function callSpecFunction(
     }
 
     try {
-        await handleStreamingResp(resp, onData, sharedErrorContext)
+        await handleStreamingResp(resp, abortController, onData, sharedErrorContext)
     } catch (err) {
         const message = err.message || err || ''
         if (!hasRetried && message.toLowerCase().includes('user aborted')) {
@@ -59,7 +57,7 @@ async function handleJSONResp(
 
 async function handleStreamingResp(
     resp: Response,
-    // abortController: AbortController,
+    abortController: AbortController,
     onData: onDataCallbackType,
     sharedErrorContext: StringKeyMap,
 ) {
@@ -70,12 +68,12 @@ async function handleStreamingResp(
         keepStack: false,
     })
 
-    // let chunkTimer = null
-    // const renewTimer = () => {
-    //     chunkTimer && clearTimeout(chunkTimer)
-    //     chunkTimer = setTimeout(() => abortController.abort(), 60000)
-    // }
-    // renewTimer()
+    let chunkTimer = null
+    const renewTimer = () => {
+        chunkTimer && clearTimeout(chunkTimer)
+        chunkTimer = setTimeout(() => abortController.abort(), 60000)
+    }
+    renewTimer()
 
     let pendingDataPromise = null
 
@@ -85,7 +83,6 @@ async function handleStreamingResp(
         if (!obj) return
         obj = obj as StringKeyMap
         if (obj.error) throw obj.error // Throw any errors explicitly passed back
-        obj = camelizeKeys(obj)
 
         batch.push(obj)
         if (batch.length === constants.STREAMING_SEED_UPSERT_BATCH_SIZE) {
@@ -97,7 +94,8 @@ async function handleStreamingResp(
     let chunk
     try {
         for await (chunk of resp.body) {
-            // renewTimer()
+            renewTimer()
+
             if (sharedErrorContext.error) {
                 throw `Error handling streaming response batch: ${sharedErrorContext.error}`
             }
@@ -110,10 +108,10 @@ async function handleStreamingResp(
             jsonParser.write(chunk)
         }
     } catch (err) {
-        // chunkTimer && clearTimeout(chunkTimer)
+        chunkTimer && clearTimeout(chunkTimer)
         throw `Error iterating response stream: ${err?.message || err}`
     }
-    // chunkTimer && clearTimeout(chunkTimer)
+    chunkTimer && clearTimeout(chunkTimer)
 
     if (batch.length) {
         await onData([...batch])
@@ -125,11 +123,11 @@ async function makeRequest(
     payload: StringKeyMap | StringKeyMap[],
     abortController: AbortController
 ): Promise<Response> {
-    payload = hackPayload(edgeFunction.url, stringifyAnyDates(payload))
+    payload = stringifyAnyDates(payload)
 
     let resp: Response
     try {
-        resp = await fetch('https://tables-api.spec.dev/stream', {
+        resp = await fetch(edgeFunction.url, {
             method: 'POST',
             body: JSON.stringify(payload || {}),
             headers: { 'Content-Type': 'application/json' },
@@ -173,16 +171,4 @@ function stringifyAnyDates(value: StringKeyMap | StringKeyMap[]): StringKeyMap |
 
     // Other.
     return value
-}
-
-function hackPayload(url: string, payload: StringKeyMap): StringKeyMap {
-    if (url.endsWith('eth.latestInteractions@0.0.1')) {
-        const query = db.withSchema('ethereum').from('latest_interactions').whereIn('to', payload.to)
-        return query.toSQL().toNative()
-    }
-    if (url.endsWith('ivy.smartWallets@0.0.1')) {
-        const query = db.withSchema('ivy').from('smart_wallets')
-        return query.toSQL().toNative()
-    }
-    return {}
 }
