@@ -135,7 +135,7 @@ class ResolveRecordsService {
         // Find resolve function to use.
         this._findResolveFunction()
         if (!this.resolveFunction) {
-            logger.warn(`Live object ${this.liveObject.id} has no associated resolve function.`)
+            // logger.warn(`Live object ${this.liveObject.id} has no associated resolve function.`)
             return
         }
 

@@ -1072,8 +1072,6 @@ class SeedTableService {
     }
 
     _findRequiredArgColumns() {
-        const { argsMap, args } = this.seedFunction
-        const reverseArgsMap = reverseMap(argsMap)
         const requiredArgColPaths = []
         const colPathsToFunctionInputArgs = []
 
@@ -1081,20 +1079,17 @@ class SeedTableService {
             const requiredArgColPathsEntry = []
             const colPathsToFunctionInputArgsEntry = {}
 
-            for (const inputKey in args) {
-                const propertyKey = reverseArgsMap[inputKey] || inputKey
-                if (seedWithEntry.hasOwnProperty(propertyKey)) {
-                    const colPath = seedWithEntry[propertyKey]
+            for (const property in seedWithEntry) {
+                const colPath = seedWithEntry[property]
 
-                    if (!requiredArgColPathsEntry.includes(colPath)) {
-                        requiredArgColPathsEntry.push(colPath)
-                    }
-
-                    if (!colPathsToFunctionInputArgsEntry.hasOwnProperty(colPath)) {
-                        colPathsToFunctionInputArgsEntry[colPath] = []
-                    }
-                    colPathsToFunctionInputArgsEntry[colPath].push(inputKey)
+                if (!requiredArgColPathsEntry.includes(colPath)) {
+                    requiredArgColPathsEntry.push(colPath)
                 }
+
+                if (!colPathsToFunctionInputArgsEntry.hasOwnProperty(colPath)) {
+                    colPathsToFunctionInputArgsEntry[colPath] = []
+                }
+                colPathsToFunctionInputArgsEntry[colPath].push(property)
             }   
             if (!requiredArgColPathsEntry.length) continue
             

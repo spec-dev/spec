@@ -405,7 +405,10 @@ class Config {
         const uniqueBy = link.uniqueBy || Object.keys(link.linkOn) || []
         if (!uniqueBy.length) return null
 
-        const { uniqueColGroups } = tablesMeta[tablePath]
+        const meta = tablesMeta[tablePath]
+        const primaryKeyColNames = meta?.primaryKey?.map(col => col.name) || []
+        let uniqueColGroups = meta.uniqueColGroups || []
+        uniqueColGroups = uniqueColGroups.length ? uniqueColGroups : [primaryKeyColNames]
         if (!uniqueColGroups.length) return null
 
         // Resolve uniqueBy properties to their respective column names.

@@ -18,8 +18,6 @@ spec:
       - name: spec-{{PROJECT_ID}}
         image: {{IMAGE}}
         env:
-        - name: STREAM_LOGS
-          value: "false"
         - name: NODE_ENV
           value: production
         - name: ENV
@@ -47,4 +45,4 @@ spec:
         - name: SPEC_CONFIG_DIR
           value: /usr/app/.spec
         - name: FLIP
-          value: heads
+          value: tails

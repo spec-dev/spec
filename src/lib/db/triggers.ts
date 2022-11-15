@@ -3,6 +3,7 @@ import { db } from './index'
 import { Trigger, TriggerEvent, StringKeyMap } from '../types'
 import constants from '../constants'
 import { tablesMeta } from './tablesMeta'
+import { hash } from '../utils/hash'
 
 // Trigger name components.
 export const triggerName: StringKeyMap = {
@@ -37,33 +38,24 @@ export function formatTriggerName(
 ): string {
     const suffix = (primaryKeys || []).sort().join('_')
     const prefix = triggerName.prefixForEvent(event)
-    return prefix ? `${prefix}_${schema}_${table}${triggerName.PK_SEP}${suffix}`.toLowerCase() : ''
+    const main = `${schema}_${table}${triggerName.PK_SEP}${suffix}`.toLowerCase()
+    return prefix ? `${prefix}__${hash(main)}` : ''
 }
 
 export function formatFunctionName(schema: string, table: string, event: TriggerEvent): string {
     const prefix = functionName.prefixForEvent(event)
-    return prefix ? `${prefix}__${schema}_${table}`.toLowerCase() : ''
+    const main = `${schema}_${table}`.toLowerCase()
+    return prefix ? `${prefix}__${hash(main)}` : ''
 }
 
-export function formatRecordAsTrigger(record: StringKeyMap): Trigger | null {
+export function formatRecordAsTrigger(record: StringKeyMap): Trigger {
     const { schema, table, event, trigger_name } = record
-    const trigger = {
+    return {
         schema,
         table: table.replace(/"/gi, ''),
         event: event as TriggerEvent,
         name: trigger_name,
-    } as Trigger
-
-    if (trigger.event === TriggerEvent.INSERT) {
-        const splitName = trigger.name.split(triggerName.PK_SEP)
-        if (splitName.length !== 2) {
-            logger.error(`Malformed spec trigger name found: ${trigger.name}`)
-            return null
-        }
-        trigger.joinedPrimaryKeys = splitName[1]
     }
-
-    return trigger
 }
 
 export async function getSpecTriggers(): Promise<Trigger[]> {
@@ -78,7 +70,7 @@ export async function getSpecTriggers(): Promise<Trigger[]> {
             trigger_name LIKE '${triggerName.INSERT_PREFIX}%' OR 
             trigger_name LIKE '${triggerName.UPDATE_PREFIX}%'`
     )
-    return (rows || []).map(formatRecordAsTrigger).filter((t) => !!t)
+    return (rows || []).map(formatRecordAsTrigger)
 }
 
 export async function createTrigger(

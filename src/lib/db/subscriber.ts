@@ -98,7 +98,7 @@ export class TableSubscriber {
         for (const { schema, table } of subsThatNeedSubscribing) {
             const tablePath = [schema, table].join('.')
             this.tableSubs[tablePath].status = TableSubStatus.Subscribed
-            logger.info(`Listening for changes on ${tablePath}...`)
+            logger.info(`Listening for changes on table ${tablePath}...`)
         }
 
         // Ensure we're not already subscribed to the table subs channel.

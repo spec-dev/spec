@@ -58,7 +58,7 @@ class RunOpService {
             const updatedAtColName = getUpdatedAtColName(data[0])
             updatedAtColName && mergeColNames.push(updatedAtColName)
             mergeColNames = unique(mergeColNames)
-
+            
             if (mergeColNames.length) {
                 insertQuery.insert(uniqueData).onConflict(conflictTargets).merge(mergeColNames)
             } else {
