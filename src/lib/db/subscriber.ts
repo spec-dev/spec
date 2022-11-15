@@ -711,3 +711,4 @@ export class TableSubscriber {
 }
 
 export const tableSubscriber = new TableSubscriber()
+
