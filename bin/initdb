@@ -1,12 +1,24 @@
 #!/bin/bash
 
-DB_INIT_DIR="./db/init"
+# --- Initialize your database for usage with Spec --- #
 
-if [ -z "$DB_NAME" ]; then
-    echo "Please set your \"DB_NAME\" environment variable and try again."
+password="$1"
+db_url="$2"
+
+if [[ ! "$password" ]]; then
+    echo "Password is a required argument."
     exit 1
 fi
 
-for file in "$DB_INIT_DIR"/*; do
-    psql -d "$DB_NAME" -f "${file}"
-done
+if [[ ! "$db_url" ]]; then
+    echo "Database url is a required argument."
+    exit 1
+fi
+
+echo "Creating spec user..."
+psql "$db_url" -c "create user spec with password '$password'"
+echo "Successfully created spec user."
+
+echo "Initializing database for Spec..."
+psql "$db_url" -f db/init.sql
+echo "Successfully initialized database."
