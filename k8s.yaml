@@ -45,4 +45,4 @@ spec:
         - name: SPEC_CONFIG_DIR
           value: /usr/app/.spec
         - name: FLIP
-          value: tails
+          value: heads
