@@ -9,6 +9,7 @@ import { mergeByKeys, unique } from '../utils/formatters'
 import { applyDefaults, getUpdatedAtColName } from '../defaults'
 
 class RunOpService {
+    
     op: Op
 
     tx: Knex.Transaction
