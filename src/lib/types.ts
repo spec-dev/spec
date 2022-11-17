@@ -133,7 +133,6 @@ export interface TableSub {
     schema: string
     table: string
     status: TableSubStatus
-    primaryKeyTypes?: StringMap
     buffer: TableSubEvent[]
     processEvents: any
     blacklist: Set<string>
@@ -144,10 +143,10 @@ export interface TableSubEvent {
     operation: TriggerEvent
     schema: string
     table: string
-    primaryKeys: StringKeyMap
-    record?: StringKeyMap
-    colNamesChanged?: string[]
-    colNamesWithValues?: string[]
+    data?: StringKeyMap
+    primaryKeyData?: StringKeyMap
+    columnNamesChanged?: string[]
+    nonEmptyColumns?: string[]
 }
 
 export interface TableSubCursor {
@@ -245,6 +244,7 @@ export interface ForeignKeyConstraint {
 export enum TriggerEvent {
     INSERT = 'INSERT',
     UPDATE = 'UPDATE',
+    DELETE = 'DELETE',
     MISSED = 'MISSED',
 }
 

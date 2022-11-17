@@ -115,3 +115,21 @@ export function groupByKeys(input: StringKeyMap | StringKeyMap[]): StringKeyMap 
 
     return groupedInputs
 }
+
+export function filterObjectByKeys(obj: AnyMap, keys: any[]): AnyMap {
+    const newMap = {}
+    for (const key in keys) {
+        newMap[key] = obj[key]
+    }
+    return newMap
+}
+
+export function keysWithNonEmptyValues(obj: AnyMap): string[] {
+    const nonEmptyKeys = []
+    for (const key in (obj || {})) {
+        const val = obj[key]
+        if (val === null) continue
+        nonEmptyKeys.push(key)
+    }
+    return nonEmptyKeys
+}
