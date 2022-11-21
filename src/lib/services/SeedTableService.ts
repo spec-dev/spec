@@ -241,7 +241,7 @@ class SeedTableService {
     }
 
     async _seedFromScratch() {
-        logger.info(chalk.cyanBright(`Seeding ${this.seedTablePath} from scratch...`))
+        logger.info(chalk.cyanBright(`\nSeeding ${this.seedTablePath} from scratch...`))
 
         // TODO: Implement filters here too.
         const [staticFilters, _] = this.filters
@@ -276,7 +276,7 @@ class SeedTableService {
     }
 
     async _seedWithAdjacentCols() {
-        logger.info(chalk.cyanBright(`Seeding ${this.seedTablePath} from adjacent columns...`))
+        logger.info(chalk.cyanBright(`\nSeeding ${this.seedTablePath} from adjacent columns...`))
 
         const queryConditions = this._buildQueryForSeedWithAdjacentCols()
 
@@ -389,7 +389,7 @@ class SeedTableService {
         const foreignTableName = foreignTablePath.split('.')[1]
         logger.info(
             chalk.cyanBright(
-                `Seeding "${this.seedTableName}" using "${foreignTableName}"(${inputColNames.join(', ')})...`
+                `\nSeeding ${this.seedTableName} using ${foreignTableName}(${inputColNames.join(', ')})...`
             )
         )
 
@@ -468,7 +468,7 @@ class SeedTableService {
             if (batchInputRecords.length > 1) {
                 logger.info(chalk.cyanBright(`\n[New input batch of ${batchInputRecords.length} records]:\n`))
             } else {
-                const kvs = inputColNames.map(colName => `${colName} = ${batchInputRecords[0][colName]}`).join(', ')
+                const kvs = inputColNames.map(colName => `${colName}: ${batchInputRecords[0][colName]}`).join(', ')
                 logger.info(chalk.cyanBright(`\n[${kvs}]:\n`))
             }
 
@@ -539,7 +539,7 @@ class SeedTableService {
 
     async _handleDataOnSeedFromScratch(batch: StringKeyMap[]) {
         this.seedCount += batch.length
-        logger.info(chalk.cyanBright(`  ${this.seedCount.toLocaleString('en-US')}`))
+        logger.info(chalk.cyanBright(`  ${this.seedCount.toLocaleString('en-US')} records -> ${this.seedTableName}`))
 
         const tableDataSources = this.tableDataSources
         const insertRecords = []
@@ -585,7 +585,7 @@ class SeedTableService {
     ) {
         this.inputBatchSeedCount += batch.length
         this.seedCount += batch.length
-        logger.info(chalk.cyanBright(`  ${this.inputBatchSeedCount.toLocaleString('en-US')}`))
+        logger.info(chalk.cyanBright(`  ${this.inputBatchSeedCount.toLocaleString('en-US')} records -> ${this.seedTableName}`))
 
         // Clone this so we can add to it with each batch independently.
         const otherLinkedForeignTables: StringKeyMap[] = [
@@ -787,7 +787,7 @@ class SeedTableService {
         indexedPkConditions: StringKeyMap
     ) {
         this.seedCount += batch.length
-        logger.info(chalk.cyanBright(`  ${this.seedCount.toLocaleString('en-US')}`))
+        logger.info(chalk.cyanBright(`  ${this.seedCount.toLocaleString('en-US')} records -> ${this.seedTableName}`))
 
         const tableDataSources = this.tableDataSources
         const linkProperties = this.linkProperties
@@ -1124,13 +1124,18 @@ class SeedTableService {
         if (!t0) return
         const tf = performance.now()
         const seconds = Number(((tf - t0) / 1000).toFixed(2))
-        const rate = Math.round(this.seedCount / seconds)
         logger.info(chalk.cyanBright('\nDone.'))
+
+        if (this.seedCount === 0) {
+            logger.info(`No ${this.seedTableName} records changed.`)
+            return
+        }
+
         logger.info(
             chalk.cyanBright(
                 `Upserted ${this.seedCount.toLocaleString(
                     'en-US'
-                )} records in ${seconds} seconds (${this.seedCount === 0 ? 0 : rate.toLocaleString('en-US')} rows/s)`
+                )} ${this.seedTableName} records in ${seconds} seconds.`
             )
         )
     }
