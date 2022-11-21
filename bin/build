@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# --- Build the latest Spec docker image --- #
+
+docker buildx build \
+    --platform linux/amd64 \
+    -t "specdev/spec:latest" \
+    -f Dockerfile .
+
+echo "Success."
