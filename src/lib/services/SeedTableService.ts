@@ -526,6 +526,10 @@ class SeedTableService {
                 throw err
             }
 
+            if (this.inputBatchSeedCount === 0) {
+                logger.info(chalk.cyanBright(`  0 records -> ${this.seedTableName}`))
+            } 
+
             if (sharedErrorContext.error) throw sharedErrorContext.error
 
             await updateCursor(this.seedCursorId, this.cursor)
@@ -1127,7 +1131,7 @@ class SeedTableService {
         logger.info(chalk.cyanBright('\nDone.'))
 
         if (this.seedCount === 0) {
-            logger.info(`No ${this.seedTableName} records changed.`)
+            logger.info(chalk.cyanBright(`No ${this.seedTableName} records changed.`))
             return
         }
 
