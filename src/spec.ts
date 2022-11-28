@@ -363,7 +363,7 @@ class Spec {
                 uniqueBy: link.uniqueBy || null,
                 filterBy: link.filterBy || null,
                 seedColNames,
-                seedIfEmpty: link.seedIfEmpty || false,
+                seedIfEmpty: link.seedIfEmpty || true,
             })
         }
 

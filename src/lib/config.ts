@@ -675,14 +675,14 @@ class Config {
                     }
                 }
 
-                // Ensure seedWith properties exist (unless seedIfEmpty is true)
-                if (!link.seedWith && !link.seedIfEmpty) {
-                    logger.error(
-                        `Link for live object "${configName}" has no "seedWith" attribute or it is empty.`
-                    )
-                    isValid = false
-                    continue
-                }
+                // // Ensure seedWith properties exist (unless seedIfEmpty is true)
+                // if (!link.seedWith && !link.seedIfEmpty) {
+                //     logger.error(
+                //         `Link for live object "${configName}" has no "seedWith" attribute or it is empty.`
+                //     )
+                //     isValid = false
+                //     continue
+                // }
             }
         }
         return isValid
