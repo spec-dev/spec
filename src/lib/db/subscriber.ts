@@ -123,8 +123,9 @@ export class TableSubscriber {
     }
 
     _onTableDataChange(event: TableSubEvent) {
-        // We don't care about deletes here.
-        if (!event || event?.operation === TriggerEvent.DELETE) return
+        if (!event || event.schema === 'spec' || event?.operation === TriggerEvent.DELETE) {
+            return
+        }
 
         // Strip quotes just in case.
         event.table = event.table.replace(/"/g, '')
@@ -445,7 +446,7 @@ export class TableSubscriber {
             uniqueBy: link.uniqueBy || null,
             filterBy: link.filterBy || null,
             seedColNames: [], // not used with foreign seeds
-            seedIfEmpty: link.seedIfEmpty || false,
+            seedIfEmpty: link.seedIfEmpty || true,
         }
 
         // Create and save seed cursor.

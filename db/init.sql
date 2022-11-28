@@ -19,48 +19,6 @@ alter default privileges in schema public grant all on tables to spec;
 alter default privileges in schema public grant all on functions to spec;
 alter default privileges in schema public grant all on sequences to spec;
 
--- Event Cursors Table
-create table if not exists spec.event_cursors (
-    name character varying not null,
-    id character varying not null,
-    nonce character varying not null,
-    "timestamp" timestamp with time zone not null,
-    constraint event_cursors_pkey primary key (name)
-);
-comment on table spec.event_cursors is 'Spec: Stores the last event seen for each subscribed event channel.';
-alter table spec.event_cursors owner to spec;
-
--- Live Columns Table
-create table if not exists spec.live_columns (
-    column_path character varying not null primary key,
-    live_property character varying not null
-);
-comment on table spec.live_columns is 'Spec: Stores the current live columns.';
-alter table spec.live_columns owner to spec;
-
--- Table Sub Cursors Table
-create table if not exists spec.table_sub_cursors (
-    table_path character varying not null,
-    "timestamp" timestamp with time zone not null,
-    constraint table_sub_cursors_pkey primary key (table_path)
-);
-comment on table spec.table_sub_cursors is 'Spec: Stores the last table-sub event (table data-change event) seen for each live table.';
-alter table spec.table_sub_cursors owner to spec;
-
--- Seed Cursors Table
-create table if not exists spec.seed_cursors (
-    id character varying not null primary key,
-    job_type character varying not null,
-    spec json not null,
-    status character varying not null,
-    cursor integer not null,
-    metadata json,
-    created_at timestamp with time zone not null
-);
-comment on table spec.seed_cursors is 'Spec: Tracks progress of seed jobs for resiliency.';
-create index idx_seed_cursors_status ON spec.seed_cursors(status);
-alter table spec.seed_cursors owner to spec;
-
 -- Table Subscriptions Function
 CREATE OR REPLACE FUNCTION spec_table_sub() RETURNS trigger AS $$
 DECLARE
@@ -140,3 +98,48 @@ BEGIN
     END;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Event Cursors Table
+create table if not exists spec.event_cursors (
+    name character varying not null,
+    id character varying not null,
+    nonce character varying not null,
+    "timestamp" timestamp with time zone not null,
+    constraint event_cursors_pkey primary key (name)
+);
+comment on table spec.event_cursors is 'Spec: Stores the last event seen for each subscribed event channel.';
+alter table spec.event_cursors owner to spec;
+
+-- Live Columns Table
+create table if not exists spec.live_columns (
+    column_path character varying not null primary key,
+    live_property character varying not null
+);
+comment on table spec.live_columns is 'Spec: Stores the current live columns.';
+alter table spec.live_columns owner to spec;
+
+-- Table Sub Cursors Table
+create table if not exists spec.table_sub_cursors (
+    table_path character varying not null,
+    "timestamp" timestamp with time zone not null,
+    constraint table_sub_cursors_pkey primary key (table_path)
+);
+comment on table spec.table_sub_cursors is 'Spec: Stores the last table-sub event (table data-change event) seen for each live table.';
+alter table spec.table_sub_cursors owner to spec;
+
+-- Seed Cursors Table
+create table if not exists spec.seed_cursors (
+    id character varying not null primary key,
+    job_type character varying not null,
+    spec json not null,
+    status character varying not null,
+    cursor integer not null,
+    metadata json,
+    created_at timestamp with time zone not null
+);
+comment on table spec.seed_cursors is 'Spec: Tracks progress of seed jobs.';
+create index idx_seed_cursors_status ON spec.seed_cursors(status);
+alter table spec.seed_cursors owner to spec;
+create trigger on_insert_seed_cursors after insert on spec.seed_cursors for each row execute function spec_table_sub('id');
+create trigger on_update_seed_cursors after update on spec.seed_cursors for each row execute function spec_table_sub('id');
+create trigger on_delete_seed_cursors after delete on spec.seed_cursors for each row execute function spec_table_sub('id');
