@@ -1,4 +1,4 @@
-import { pgListener, db } from '.'
+import { pgListener, db, connectionConfig } from '.'
 import { getSpecTriggers, formatTriggerName, dropTrigger, createTrigger } from './triggers'
 import {
     TableSub,
@@ -16,7 +16,7 @@ import {
 } from '../types'
 import { tablesMeta, getRel } from './tablesMeta'
 import config from '../config'
-import { filterObjectByKeys, keysWithNonEmptyValues } from '../utils/formatters'
+import { filterObjectByKeys, keysWithNonEmptyValues, noop } from '../utils/formatters'
 import logger from '../logger'
 import SeedTableService from '../services/SeedTableService'
 import ResolveRecordsService from '../services/ResolveRecordsService'
@@ -30,6 +30,19 @@ import {
 } from './spec/tableSubCursors'
 import { createSeedCursor, seedFailed, seedSucceeded } from './spec/seedCursors'
 import short from 'short-uuid'
+import { getHooks, hooksExist } from '../hooks'
+import { createRealtimeClient } from '@spec.dev/realtime-client'
+
+let realtimeClient = null
+const initRealtimeClient = () => {
+    realtimeClient = createRealtimeClient({
+        ...connectionConfig,
+        channel: constants.TABLE_SUB_CHANNEL,
+        bufferInterval: Math.max(constants.TABLE_SUB_BUFFER_INTERVAL, 10),
+        maxBufferSize: constants.TABLE_SUB_BUFFER_MAX_SIZE,
+        onError: err => logger.error(`Realtime event error: ${err}`)
+    })
+}
 
 export class TableSubscriber {
 
@@ -63,6 +76,11 @@ export class TableSubscriber {
         // If Spec was down during any data changes that would have been caught, try to play catch-up.
         await this._detectAndProcessAnyMissedTableSubEvents()
 
+        // Initialize realtime client if hooks exist.
+        if (hooksExist() && !realtimeClient) {
+            initRealtimeClient()
+        }
+
         // Subscribe to tables (listen for trigger notifications).
         await this._subscribeToTables(subsThatNeedSubscribing)
     }
@@ -86,9 +104,7 @@ export class TableSubscriber {
         }
 
         // Upsert triggers for each table sub.
-        await Promise.all(tableSubs.map((ts) => (
-            this._upsertTrigger(ts, existingTriggersMap))
-        ))
+        await Promise.all(tableSubs.map((ts) => this._upsertTrigger(ts, existingTriggersMap)))
     }
 
     async deleteTableSub(tablePath: string) {
@@ -97,10 +113,13 @@ export class TableSubscriber {
     }
 
     async _subscribeToTables(subsThatNeedSubscribing: TableSub[]) {
+        const hooks = realtimeClient ? getHooks() : {}
+
         // Register tables as subscribed.
         for (const { schema, table } of subsThatNeedSubscribing) {
             const tablePath = [schema, table].join('.')
             this.tableSubs[tablePath].status = TableSubStatus.Subscribed
+            realtimeClient && this._applyHooksToTable(hooks, schema, table)
             logger.info(`Listening for changes on table ${tablePath}...`)
         }
 
@@ -120,6 +139,36 @@ export class TableSubscriber {
         } catch (err) {
             logger.error(`Error connecting to table-subs notification channel: ${err}`)
         }
+        realtimeClient && await realtimeClient.listen()
+    }
+
+    _applyHooksToTable(hooks, schema, table) {
+        for (const key in hooks) {
+            const parsedKey = this._parseHookEventKey(key) 
+            if (parsedKey.schema !== schema || parsedKey.table !== table) {
+                continue
+            }
+            const callback = hooks[key] || noop
+            realtimeClient.table(table, { schema }).on(parsedKey.event, events => {
+                callback && callback(events).catch(err => logger.error(
+                    `Hook error for ${parsedKey.event} event on ${schema}.${table}: ${err}`
+                ))
+            })
+        }
+    }
+
+    _parseHookEventKey(key: string): { schema: string, table: string, event: string } {
+        const colonSplit = (key || '').split(':')
+        if (colonSplit.length !== 2) {
+            return { schema: '', table: '', event: '' }
+        }
+        const [tablePath, event] = colonSplit
+        const dotSplit = (tablePath || '').split('.')
+        if (dotSplit.length !== 2) {
+            return { schema: '', table: '', event: '' }
+        }
+        const [schema, table] = dotSplit
+        return { schema, table, event }        
     }
 
     _onTableDataChange(event: TableSubEvent) {
@@ -140,10 +189,10 @@ export class TableSubscriber {
         }
 
         // Resolve primary key data from event (might need to be inferred).
-        const [
-            primaryKeyData, 
-            validatePrimaryKeysMatchTableSub,
-        ] = this._resolveEventPrimaryKeyData(tablePath, event)
+        const [primaryKeyData, validatePrimaryKeysMatchTableSub] = this._resolveEventPrimaryKeyData(
+            tablePath,
+            event
+        )
         if (!primaryKeyData) {
             logger.error(`Failed to parse primary key data from event for table ${tablePath}.`)
             return
@@ -151,15 +200,18 @@ export class TableSubscriber {
         event.primaryKeyData = primaryKeyData
 
         // Make sure the primary keys for this table haven't changed.
-        if (validatePrimaryKeysMatchTableSub && !this._doPrimaryKeysMatchTableSub(primaryKeyData, tablePath)) {
+        if (
+            validatePrimaryKeysMatchTableSub &&
+            !this._doPrimaryKeysMatchTableSub(primaryKeyData, tablePath)
+        ) {
             return
         }
 
         // Ensure event record isn't blacklisted.
-        if (tableSub.blacklist.has(this._primaryKeysToBlacklistKey(primaryKeyData))){
+        if (tableSub.blacklist.has(this._primaryKeysToBlacklistKey(primaryKeyData))) {
             return
         }
-        
+
         // Always add to buffer first.
         this.tableSubs[tablePath].buffer.push(event)
 
@@ -173,13 +225,16 @@ export class TableSubscriber {
         this.tableSubs[tablePath].processEvents()
     }
 
-    _resolveEventPrimaryKeyData(tablePath: string, event: TableSubEvent): [StringKeyMap | null, boolean] {
+    _resolveEventPrimaryKeyData(
+        tablePath: string,
+        event: TableSubEvent
+    ): [StringKeyMap | null, boolean] {
         switch (event.operation) {
             case TriggerEvent.INSERT:
             case TriggerEvent.UPDATE:
                 const eventHasPrimaryKeyData = event.hasOwnProperty('primaryKeyData')
-                const primaryKeyData = eventHasPrimaryKeyData 
-                    ? event.primaryKeyData 
+                const primaryKeyData = eventHasPrimaryKeyData
+                    ? event.primaryKeyData
                     : this._parsePrimaryKeyDataFromRecord(tablePath, event.data)
                 return [primaryKeyData, eventHasPrimaryKeyData]
 
@@ -193,7 +248,9 @@ export class TableSubscriber {
 
     _parsePrimaryKeyDataFromRecord(tablePath: string, data: StringKeyMap): StringKeyMap | null {
         if (!data) {
-            logger.error(`${tablePath} - Can't parse primary key data from event with no data itself...`)
+            logger.error(
+                `${tablePath} - Can't parse primary key data from event with no data itself...`
+            )
             return null
         }
         const tableMeta = tablesMeta[tablePath]
@@ -201,7 +258,10 @@ export class TableSubscriber {
             logger.error(`No meta registered for table ${tablePath}`)
             return null
         }
-        return filterObjectByKeys(data, tableMeta.primaryKey.map(pk => pk.name))
+        return filterObjectByKeys(
+            data,
+            tableMeta.primaryKey.map((pk) => pk.name)
+        )
     }
 
     _doPrimaryKeysMatchTableSub(eventPrimaryKeys: StringKeyMap, tablePath: string): boolean {
@@ -212,13 +272,16 @@ export class TableSubscriber {
         }
 
         const eventPrimaryKeysId = Object.keys(eventPrimaryKeys).sort().join(',')
-        const primaryKeyId = tableMeta.primaryKey.map((pk) => pk.name).sort().join(',')
+        const primaryKeyId = tableMeta.primaryKey
+            .map((pk) => pk.name)
+            .sort()
+            .join(',')
 
         if (eventPrimaryKeysId !== primaryKeyId) {
             logger.error(
-                'Primary key columns given in data-change event don\'t\n' +
-                `match the current primary keys for the table ${tablePath}:\n` +
-                `${eventPrimaryKeysId} <> ${primaryKeyId}`
+                "Primary key columns given in data-change event don't\n" +
+                    `match the current primary keys for the table ${tablePath}:\n` +
+                    `${eventPrimaryKeysId} <> ${primaryKeyId}`
             )
             return false
         }
@@ -227,7 +290,10 @@ export class TableSubscriber {
     }
 
     _primaryKeysToBlacklistKey(primaryKeyData: StringKeyMap) {
-        return Object.keys(primaryKeyData).sort().map((k) => primaryKeyData[k]).join(':')
+        return Object.keys(primaryKeyData)
+            .sort()
+            .map((k) => primaryKeyData[k])
+            .join(':')
     }
 
     _blacklistRecords(tablePath: string, events: TableSubEvent[]): string[] {
@@ -362,7 +428,7 @@ export class TableSubscriber {
         const resolveRecordsSpec: ResolveRecordsSpec = {
             liveObjectId,
             tablePath,
-            primaryKeyData: events.map(e => e.primaryKeyData),
+            primaryKeyData: events.map((e) => e.primaryKeyData),
         }
 
         // Create and save seed cursor.
@@ -420,8 +486,8 @@ export class TableSubscriber {
         if (resolveRecordsWithPrimaryKeys.length) {
             try {
                 const resolvedRecords = await getRecordsForPrimaryKeys(
-                    tablePath, 
-                    resolveRecordsWithPrimaryKeys,
+                    tablePath,
+                    resolveRecordsWithPrimaryKeys
                 )
                 records.push(...(resolvedRecords || []))
             } catch (err) {
@@ -601,7 +667,7 @@ export class TableSubscriber {
 
             case TriggerEvent.MISSED:
                 return keysWithNonEmptyValues(event.data)
-                
+
             default:
                 return []
         }
@@ -629,17 +695,26 @@ export class TableSubscriber {
         // If any of the triggers already exist, ensure the primary keys haven't changed.
         if (insertTrigger) {
             createInsertTrigger = await this._maybeDropTrigger(
-                insertTrigger, schema, table, currentPrimaryKeys,
+                insertTrigger,
+                schema,
+                table,
+                currentPrimaryKeys
             )
         }
         if (updateTrigger) {
             createUpdateTrigger = await this._maybeDropTrigger(
-                updateTrigger, schema, table, currentPrimaryKeys,
+                updateTrigger,
+                schema,
+                table,
+                currentPrimaryKeys
             )
         }
         if (deleteTrigger) {
             createDeleteTrigger = await this._maybeDropTrigger(
-                deleteTrigger, schema, table, currentPrimaryKeys,
+                deleteTrigger,
+                schema,
+                table,
+                currentPrimaryKeys
             )
         }
 
@@ -668,9 +743,9 @@ export class TableSubscriber {
 
     async _maybeDropTrigger(
         trigger: Trigger,
-        schema: string, 
-        table: string, 
-        primaryKeyColumnNames: string[],
+        schema: string,
+        table: string,
+        primaryKeyColumnNames: string[]
     ): Promise<boolean> {
         let shouldCreateNewTrigger = false
 
@@ -680,7 +755,7 @@ export class TableSubscriber {
             schema,
             table,
             trigger.event,
-            primaryKeyColumnNames,
+            primaryKeyColumnNames
         )
         if (expectedTriggerName && trigger.name !== expectedTriggerName) {
             try {
@@ -717,4 +792,3 @@ export class TableSubscriber {
 }
 
 export const tableSubscriber = new TableSubscriber()
-

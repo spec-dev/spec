@@ -8,7 +8,6 @@ enum RPC {
 }
 
 export class Logger {
-    
     client: SpecEventClient | null
 
     pingJob: any = null
@@ -16,16 +15,18 @@ export class Logger {
     buffer: Log[] = []
 
     constructor() {
-        this.client = constants.STREAM_LOGS ? createEventClient({
-            hostname: constants.LOGS_HOSTNAME,
-            port: constants.LOGS_PORT,
-            signedAuthToken: constants.PROJECT_ADMIN_KEY,
-            ackTimeout: 30000,
-            onConnect: () => {
-                this._transmitBufferedLogs()
-                this._createPingJobIfNotExists()
-            },
-        }) : null
+        this.client = constants.STREAM_LOGS
+            ? createEventClient({
+                  hostname: constants.LOGS_HOSTNAME,
+                  port: constants.LOGS_PORT,
+                  signedAuthToken: constants.PROJECT_ADMIN_KEY,
+                  ackTimeout: 30000,
+                  onConnect: () => {
+                      this._transmitBufferedLogs()
+                      this._createPingJobIfNotExists()
+                  },
+              })
+            : null
     }
 
     info(...args: any[]) {
@@ -35,7 +36,7 @@ export class Logger {
     }
 
     warn(...args: any[]) {
-        const log = this._newLog(args, LogLevel.Warn) 
+        const log = this._newLog(args, LogLevel.Warn)
         console.warn(log.message)
         this.client && this._processLog(log)
     }
@@ -92,10 +93,9 @@ export class Logger {
     }
 
     _createPingJobIfNotExists() {
-        this.pingJob = this.pingJob || setInterval(
-            () => this.invoke(RPC.Ping, { ping: true }),
-            constants.LOGS_PING_INTERVAL,
-        )
+        this.pingJob =
+            this.pingJob ||
+            setInterval(() => this.invoke(RPC.Ping, { ping: true }), constants.LOGS_PING_INTERVAL)
     }
 }
 

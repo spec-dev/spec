@@ -5,8 +5,8 @@ export * from './datetime'
 export * from './identity'
 
 const defaultFunctions = {
-    'uuid': uuid,
-    'now': now,
+    uuid: uuid,
+    now: now,
 }
 
 function getDefault(value: any): any {
@@ -22,11 +22,11 @@ function getDefault(value: any): any {
 }
 
 export function applyDefaults(
-    data: StringKeyMap | StringKeyMap[], 
-    defaultColumnValues: { [key: string]: ColumnDefaultsConfig },
+    data: StringKeyMap | StringKeyMap[],
+    defaultColumnValues: { [key: string]: ColumnDefaultsConfig }
 ): StringKeyMap | StringKeyMap[] {
     if (Array.isArray(data)) {
-        return data.map(d => applyDefaults(d, defaultColumnValues))
+        return data.map((d) => applyDefaults(d, defaultColumnValues))
     }
     for (const colName in defaultColumnValues) {
         if (!data.hasOwnProperty(colName) || updatedAtColNames.includes(colName)) {

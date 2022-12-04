@@ -138,10 +138,7 @@ class Config {
         if (!table) return {}
         table = toMap(table)
 
-        const acceptedSetOnValues = [
-            ColumnDefaultsSetOn.Insert,
-            ColumnDefaultsSetOn.Update,
-        ]
+        const acceptedSetOnValues = [ColumnDefaultsSetOn.Insert, ColumnDefaultsSetOn.Update]
 
         const defaultColValues = {}
         for (const colName in table) {
@@ -158,7 +155,7 @@ class Config {
                 if (!colDefaults.hasOwnProperty('value')) continue
                 const value = colDefaults.value
 
-                let setOn = (colDefaults.setOn || []).filter(v => acceptedSetOnValues.includes(v))
+                let setOn = (colDefaults.setOn || []).filter((v) => acceptedSetOnValues.includes(v))
                 setOn = setOn.length ? setOn : [ColumnDefaultsSetOn.Insert]
 
                 defaultColValues[colName] = { value, setOn }
@@ -167,10 +164,10 @@ class Config {
 
             defaultColValues[colName] = {
                 value: colDefaults,
-                setOn: [ColumnDefaultsSetOn.Insert]
+                setOn: [ColumnDefaultsSetOn.Insert],
             }
         }
-        
+
         return defaultColValues
     }
 
@@ -183,14 +180,14 @@ class Config {
         if (isString || isArray) {
             const seedProperties = (isArray ? seedWith : [seedWith]) as any[]
             linkOn = toMap(linkOn || {})
-            
+
             let seedColPaths = []
             let newEntry = {}
             for (const val of seedProperties) {
                 if (typeof val === 'object') {
                     if (Object.keys(newEntry).length) {
                         seedColPaths.push(newEntry)
-                        newEntry = {}        
+                        newEntry = {}
                     }
                     seedColPaths.push(toMap(val))
                 } else if (linkOn.hasOwnProperty(val)) {
@@ -198,7 +195,7 @@ class Config {
                 } else {
                     if (Object.keys(newEntry).length) {
                         seedColPaths.push(newEntry)
-                        newEntry = {}        
+                        newEntry = {}
                     }
                 }
             }
@@ -212,7 +209,7 @@ class Config {
         if (typeof seedWith === 'object') {
             return [toMap(seedWith || {})]
         }
-        
+
         return []
     }
 
@@ -229,7 +226,7 @@ class Config {
                 if (!seedColPaths.length) continue
 
                 const uniqueSeedColPaths = unique(
-                    seedColPaths.map(entry => Object.values(entry)).flat()
+                    seedColPaths.map((entry) => Object.values(entry)).flat()
                 )
                 let allSeedColsOnTable = true
                 for (const seedColPath of uniqueSeedColPaths) {
@@ -363,7 +360,9 @@ class Config {
                 }
 
                 const uniqueSeedColPaths = unique(
-                    this.getSeedColPaths(link.seedWith, linkOn).map(entry => Object.values(entry)).flat()
+                    this.getSeedColPaths(link.seedWith, linkOn)
+                        .map((entry) => Object.values(entry))
+                        .flat()
                 )
                 for (const colPath of uniqueSeedColPaths) {
                     const [schemaName, tableName, _] = colPath.split('.')
@@ -406,7 +405,7 @@ class Config {
         if (!uniqueBy.length) return null
 
         const meta = tablesMeta[tablePath]
-        const primaryKeyColNames = meta?.primaryKey?.map(col => col.name) || []
+        const primaryKeyColNames = meta?.primaryKey?.map((col) => col.name) || []
         let uniqueColGroups = meta.uniqueColGroups || []
         uniqueColGroups = uniqueColGroups.length ? uniqueColGroups : [primaryKeyColNames]
         if (!uniqueColGroups.length) return null
@@ -438,11 +437,11 @@ class Config {
 
         // If no matching col group exactly, find one that's even more unique.
         if (!uniqueColGroup) {
-            uniqueColGroup = uniqueColGroups.find(
-                (colGroup) => uniqueByColNames.every(val => colGroup.includes(val))
+            uniqueColGroup = uniqueColGroups.find((colGroup) =>
+                uniqueByColNames.every((val) => colGroup.includes(val))
             )
         }
-        
+
         return uniqueColGroup || null
     }
 

@@ -9,7 +9,6 @@ import { mergeByKeys, unique } from '../utils/formatters'
 import { applyDefaults, getUpdatedAtColName } from '../defaults'
 
 class RunOpService {
-    
     op: Op
 
     tx: Knex.Transaction
@@ -55,11 +54,13 @@ class RunOpService {
             const uniqueData = mergeByKeys(data, conflictTargets)
 
             // Only merge live columns that aren't a conflict target (exception for the special updated at column).
-            let mergeColNames = this.op.liveTableColumns.filter(colName => !conflictTargets.includes(colName))
+            let mergeColNames = this.op.liveTableColumns.filter(
+                (colName) => !conflictTargets.includes(colName)
+            )
             const updatedAtColName = getUpdatedAtColName(data[0])
             updatedAtColName && mergeColNames.push(updatedAtColName)
             mergeColNames = unique(mergeColNames)
-            
+
             if (mergeColNames.length) {
                 insertQuery.insert(uniqueData).onConflict(conflictTargets).merge(mergeColNames)
             } else {

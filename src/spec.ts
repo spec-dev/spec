@@ -32,6 +32,7 @@ import short from 'short-uuid'
 import ResolveRecordsService from './lib/services/ResolveRecordsService'
 import { unique } from './lib/utils/formatters'
 import { getRecordsForPrimaryKeys } from './lib/db/ops'
+import { importHooks } from './lib/hooks'
 
 class Spec {
     liveObjects: { [key: string]: LiveObject } = {}
@@ -55,6 +56,8 @@ class Spec {
     })
 
     async start() {
+        await importHooks()
+
         logger.info('Starting Spec...')
 
         // Run any time the message client socket connects.

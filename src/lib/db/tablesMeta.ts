@@ -346,7 +346,6 @@ export function isColTypeArray(colPath: string): boolean {
 
     const colType = tableColTypes[colName]
     if (!colType) return false
-    
-    return colType.includes('[]') 
-        || colType.toLowerCase().includes('array')
+
+    return colType.includes('[]') || colType.toLowerCase().includes('array')
 }

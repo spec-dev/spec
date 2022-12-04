@@ -30,9 +30,11 @@ export function unique(arr: any[]): any[] {
     return Array.from(new Set(arr))
 }
 
-export function fromNamespacedVersion(
-    namespacedVersion: string
-): { nsp: string; name: string; version: string } {
+export function fromNamespacedVersion(namespacedVersion: string): {
+    nsp: string
+    name: string
+    version: string
+} {
     const atSplit = (namespacedVersion || '').split('@')
     if (atSplit.length !== 2) {
         return { nsp: '', name: '', version: '' }
@@ -47,7 +49,7 @@ export function fromNamespacedVersion(
 }
 
 export function getCombinations(values: any[]) {
-    return cartesian(values.map(v => Array.isArray(v) ? v : [v]))
+    return cartesian(values.map((v) => (Array.isArray(v) ? v : [v])))
 }
 
 export function cartesian(args: any[]) {
@@ -73,12 +75,12 @@ export const mergeByKeys = (iterable: StringKeyMap[], keys: string[]): StringKey
     for (let i = 0; i < iterable.length; i++) {
         const obj = iterable[i]
         const uniqueKeyId = keys.map((key) => obj[key] || '').join('__')
-        
+
         if (!m.hasOwnProperty(uniqueKeyId)) {
             m[uniqueKeyId] = obj
             continue
         }
-        
+
         const combinedObj = m[uniqueKeyId] || {}
         for (const key in obj) {
             if (keys.includes(key)) continue
@@ -126,7 +128,7 @@ export function filterObjectByKeys(obj: AnyMap, keys: any[]): AnyMap {
 
 export function keysWithNonEmptyValues(obj: AnyMap): string[] {
     const nonEmptyKeys = []
-    for (const key in (obj || {})) {
+    for (const key in obj || {}) {
         const val = obj[key]
         if (val === null) continue
         nonEmptyKeys.push(key)

@@ -7,7 +7,7 @@ import RunOpService from './RunOpService'
 import chalk from 'chalk'
 
 class ApplyEventService {
-    event: SpecEvent<StringKeyMap | StringKeyMap                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     []>
+    event: SpecEvent<StringKeyMap | StringKeyMap[]>
 
     liveObject: LiveObject
 
@@ -63,7 +63,9 @@ class ApplyEventService {
         for (const op of this.ops) {
             if (op.type === OpType.Insert) {
                 const numUpserts = op.data.length
-                logger.info(chalk.green(`Upserting ${numUpserts} records in ${op.schema}.${op.table}...`))
+                logger.info(
+                    chalk.green(`Upserting ${numUpserts} records in ${op.schema}.${op.table}...`)
+                )
             }
         }
 
@@ -137,7 +139,9 @@ class ApplyEventService {
         const origin = this.event.origin
         const chainId = origin?.chainId
         const blockNumber = origin?.blockNumber
-        logger.info(`[${chainId}:${blockNumber}] Processing ${this.event.name} (${this.event.nonce})...`)
+        logger.info(
+            `[${chainId}:${blockNumber}] Processing ${this.event.name} (${this.event.nonce})...`
+        )
     }
 }
 

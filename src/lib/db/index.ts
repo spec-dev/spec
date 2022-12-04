@@ -4,7 +4,7 @@ import createSubscriber from 'pg-listen'
 import logger from '../logger'
 import { Pool } from 'pg'
 
-const connectionConfig = {
+export const connectionConfig = {
     host: constants.DB_HOST,
     port: constants.DB_PORT,
     user: constants.DB_USER,
@@ -34,7 +34,6 @@ export const pgListener = createSubscriber(connectionConfig)
 
 pgListener.events.on('error', async (err) => {
     logger.error(`Table Subscriber Error: ${err}`)
-    // TODO: Attempt reconnection with debouncing and exponential backoff.
 })
 
 export const schema = (name, tx?) => {

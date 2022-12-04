@@ -59,7 +59,7 @@ async function handleStreamingResp(
     resp: Response,
     abortController: AbortController,
     onData: onDataCallbackType,
-    sharedErrorContext: StringKeyMap,
+    sharedErrorContext: StringKeyMap
 ) {
     // Create JSON parser for streamed response.
     const jsonParser = new JSONParser({
@@ -148,7 +148,7 @@ function stringifyAnyDates(value: StringKeyMap | StringKeyMap[]): StringKeyMap |
 
     // Arrays.
     if (Array.isArray(value)) {
-        return value.map(v => stringifyAnyDates(v))
+        return value.map((v) => stringifyAnyDates(v))
     }
 
     // Objects.

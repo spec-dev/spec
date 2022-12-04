@@ -157,16 +157,17 @@ class ResolveRecordsService {
         )
 
         // Call spec function and handle response data.
-        const sharedErrorContext = { error: null}
+        const sharedErrorContext = { error: null }
         const t0 = performance.now()
         try {
             await callSpecFunction(
                 this.resolveFunction,
                 this.batchFunctionInputs,
-                async (data) => await this._handleFunctionRespData(data as StringKeyMap[]).catch(err => {
-                    sharedErrorContext.error = err
-                }),
-                sharedErrorContext,
+                async (data) =>
+                    await this._handleFunctionRespData(data as StringKeyMap[]).catch((err) => {
+                        sharedErrorContext.error = err
+                    }),
+                sharedErrorContext
             )
         } catch (err) {
             logger.error(err)
@@ -193,7 +194,7 @@ class ResolveRecordsService {
         const tableDataSources = this.tableDataSources
         const updateableColNames = this.updateableColNames
         const updates: StringKeyMap = {}
-        
+
         for (const liveObjectData of batch) {
             const recordUpdates = {}
             for (const property in liveObjectData) {
@@ -208,16 +209,21 @@ class ResolveRecordsService {
             if (!Object.keys(recordUpdates).length) continue
 
             // Find the primary key groups to apply the updates to.
-            const pkConditionsKey = this.inputPropertyKeys.map(k => liveObjectData[k]).join(valueSep)
+            const pkConditionsKey = this.inputPropertyKeys
+                .map((k) => liveObjectData[k])
+                .join(valueSep)
             const primaryKeyConditions = this.indexedPkConditions[pkConditionsKey] || []
             if (!primaryKeyConditions?.length) continue
 
             // Merge updates by the actual primary key values.
             for (const pkConditions of primaryKeyConditions) {
-                const uniquePkKey = Object.keys(pkConditions).sort().map(k => pkConditions[k]).join(valueSep)
+                const uniquePkKey = Object.keys(pkConditions)
+                    .sort()
+                    .map((k) => pkConditions[k])
+                    .join(valueSep)
                 updates[uniquePkKey] = updates[uniquePkKey] || {
                     where: pkConditions,
-                    updates: {}
+                    updates: {},
                 }
                 updates[uniquePkKey].updates = { ...updates[uniquePkKey].updates, ...recordUpdates }
             }
@@ -259,7 +265,9 @@ class ResolveRecordsService {
                 await new RunOpService(op).perform()
             } else {
                 await db.transaction(async (tx) => {
-                    await Promise.all(indivUpdateOps.map((op) => new RunOpService(op, tx).perform()))
+                    await Promise.all(
+                        indivUpdateOps.map((op) => new RunOpService(op, tx).perform())
+                    )
                 })
             }
         } catch (err) {
@@ -295,7 +303,7 @@ class ResolveRecordsService {
             for (const valueOptions of colValueOptions) {
                 const key = valueOptions.join(valueSep)
                 indexedPkConditions[key] = indexedPkConditions[key] || []
-                indexedPkConditions[key].push(recordPrimaryKeys)    
+                indexedPkConditions[key].push(recordPrimaryKeys)
             }
         }
 

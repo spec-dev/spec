@@ -30,7 +30,6 @@ import { applyDefaults } from '../defaults'
 const valueSep = '__:__'
 
 class SeedTableService {
-
     seedSpec: SeedSpec
 
     liveObject: LiveObject
@@ -100,12 +99,20 @@ class SeedTableService {
         this.cursor = cursor || 0
         this.seedFunction = null
         this.seedColNames = new Set<string>(this.seedSpec.seedColNames)
-        this.tableDataSources = config.getLiveObjectTableDataSources(this.liveObject.id, this.seedTablePath)
+        this.tableDataSources = config.getLiveObjectTableDataSources(
+            this.liveObject.id,
+            this.seedTablePath
+        )
         this.seedTableUniqueConstraint = this._getUniqueConstraint()
         this.filters = this._buildFilters()
-        this.liveTableColumns = Object.keys(config.getTable(this.seedSchemaName, this.seedTableName) || {})
+        this.liveTableColumns = Object.keys(
+            config.getTable(this.seedSchemaName, this.seedTableName) || {}
+        )
         this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.seedTablePath)
-        this.seedWithColPaths = config.getSeedColPaths(this.seedSpec.seedWith, this.seedSpec.linkProperties)
+        this.seedWithColPaths = config.getSeedColPaths(
+            this.seedSpec.seedWith,
+            this.seedSpec.linkProperties
+        )
         this.seedStrategy = null
     }
 
@@ -194,7 +201,7 @@ class SeedTableService {
     async seedWithForeignRecords(foreignTablePath: string, records: StringKeyMap[]) {
         // Find seed function to use.
         this._findSeedFunction()
-        if (!this.seedFunction) throw 'Live object doesn\'t have an associated seed function.'
+        if (!this.seedFunction) throw "Live object doesn't have an associated seed function."
 
         // Find the required args for this function and their associated columns.
         this._findRequiredArgColumns()
@@ -252,10 +259,11 @@ class SeedTableService {
             await callSpecFunction(
                 this.seedFunction,
                 {},
-                async (data) => this._handleDataOnSeedFromScratch(data as StringKeyMap[]).catch(err => {
-                    sharedErrorContext.error = err
-                }),
-                sharedErrorContext,
+                async (data) =>
+                    this._handleDataOnSeedFromScratch(data as StringKeyMap[]).catch((err) => {
+                        sharedErrorContext.error = err
+                    }),
+                sharedErrorContext
             )
         } catch (err) {
             logger.error(err)
@@ -290,8 +298,9 @@ class SeedTableService {
         )
 
         // If any of the input columns is of array type, shrink the seed input batch size to 1.
-        const seedInputBatchSize = queryConditions.arrayColumns.length 
-            ? 1 : constants.SEED_INPUT_BATCH_SIZE
+        const seedInputBatchSize = queryConditions.arrayColumns.length
+            ? 1
+            : constants.SEED_INPUT_BATCH_SIZE
 
         // Start seeding with batches of input records.
         const sharedErrorContext = { error: null }
@@ -303,7 +312,7 @@ class SeedTableService {
             const batchInputRecords = await this._findInputRecordsFromAdjacentCols(
                 queryConditions,
                 this.cursor,
-                seedInputBatchSize,
+                seedInputBatchSize
             )
             if (batchInputRecords === null) {
                 throw `Foreign input records batch came up null for ${this.seedTablePath} at offset ${this.cursor}.`
@@ -339,7 +348,7 @@ class SeedTableService {
                 for (const valueOptions of colValueOptions) {
                     const key = valueOptions.join(valueSep)
                     indexedPkConditions[key] = indexedPkConditions[key] || []
-                    indexedPkConditions[key].push(recordPrimaryKeys)    
+                    indexedPkConditions[key].push(recordPrimaryKeys)
                 }
             }
             const batchFunctionInput = groupByKeys(batchFunctionInputs)
@@ -350,7 +359,7 @@ class SeedTableService {
                     data,
                     inputPropertyKeys,
                     indexedPkConditions
-                ).catch(err => {
+                ).catch((err) => {
                     sharedErrorContext.error = err
                 })
 
@@ -361,7 +370,7 @@ class SeedTableService {
                     this.seedFunction,
                     batchFunctionInput,
                     onFunctionRespData,
-                    sharedErrorContext,
+                    sharedErrorContext
                 )
             } catch (err) {
                 logger.error(err)
@@ -389,7 +398,9 @@ class SeedTableService {
         const foreignTableName = foreignTablePath.split('.')[1]
         logger.info(
             chalk.cyanBright(
-                `\nSeeding ${this.seedTableName} using ${foreignTableName}(${inputColNames.join(', ')})...`
+                `\nSeeding ${this.seedTableName} using ${foreignTableName}(${inputColNames.join(
+                    ', '
+                )})...`
             )
         )
 
@@ -402,8 +413,9 @@ class SeedTableService {
         const inputPropertyKeys = inputColNames.map(
             (colName) => reverseLinkProperties[`${foreignTablePath}.${colName}`]
         )
-        const arrayInputColNames = inputColNames
-            .filter(colName => isColTypeArray([foreignTablePath, colName].join('.')))
+        const arrayInputColNames = inputColNames.filter((colName) =>
+            isColTypeArray([foreignTablePath, colName].join('.'))
+        )
 
         // Get link properties / reference keys associated with any *OTHER* linked foreign tables.
         const linkProperties = this.linkProperties
@@ -435,25 +447,30 @@ class SeedTableService {
 
         // If any of the input columns is of array type, OR, column filters are being used,
         // shrink the seed input batch size to 1.
-        const seedInputBatchSize = arrayInputColNames.length || hasColumnFilters
-            ? 1 : constants.FOREIGN_SEED_INPUT_BATCH_SIZE
+        const seedInputBatchSize =
+            arrayInputColNames.length || hasColumnFilters
+                ? 1
+                : constants.FOREIGN_SEED_INPUT_BATCH_SIZE
 
         const sharedErrorContext = { error: null }
         let t0 = null
 
         while (true) {
             if (sharedErrorContext.error) throw sharedErrorContext.error
-            
+
             let batchInputRecords
             if (inputRecords) {
-                batchInputRecords = inputRecords.slice(this.cursor, this.cursor + seedInputBatchSize)
+                batchInputRecords = inputRecords.slice(
+                    this.cursor,
+                    this.cursor + seedInputBatchSize
+                )
             } else {
                 batchInputRecords = await this._getForeignInputRecordsBatch(
                     foreignTablePath,
                     foreignTablePrimaryKeys as string[],
                     inputColNames,
                     this.cursor,
-                    seedInputBatchSize,
+                    seedInputBatchSize
                 )
             }
 
@@ -466,9 +483,15 @@ class SeedTableService {
             }
 
             if (batchInputRecords.length > 1) {
-                logger.info(chalk.cyanBright(`\n[New input batch of ${batchInputRecords.length} records]:\n`))
+                logger.info(
+                    chalk.cyanBright(
+                        `\n[New input batch of ${batchInputRecords.length} records]:\n`
+                    )
+                )
             } else {
-                const kvs = inputColNames.map(colName => `${colName}: ${batchInputRecords[0][colName]}`).join(', ')
+                const kvs = inputColNames
+                    .map((colName) => `${colName}: ${batchInputRecords[0][colName]}`)
+                    .join(', ')
                 logger.info(chalk.cyanBright(`\n[${kvs}]:\n`))
             }
 
@@ -486,7 +509,7 @@ class SeedTableService {
                     for (const valueOptions of colValueOptions) {
                         const key = valueOptions.join(valueSep)
                         referenceKeyValues[key] = referenceKeyValues[key] || []
-                        referenceKeyValues[key].push(record[rel.referenceKey])    
+                        referenceKeyValues[key].push(record[rel.referenceKey])
                     }
                 }
             }
@@ -496,18 +519,18 @@ class SeedTableService {
                 batchInputRecords,
                 foreignTablePath,
                 staticFilters,
-                columnFilters,
+                columnFilters
             )
 
             // Callback to use when a batch of response data is available.
             const onFunctionRespData = async (data) =>
-                 this._handleDataOnForeignTableSeed(
+                this._handleDataOnForeignTableSeed(
                     data,
                     rel,
                     inputPropertyKeys,
                     referenceKeyValues,
-                    nonSeedLinkedForeignTableData, 
-                ).catch(err => {
+                    nonSeedLinkedForeignTableData
+                ).catch((err) => {
                     sharedErrorContext.error = err
                 })
 
@@ -516,10 +539,10 @@ class SeedTableService {
             t0 = t0 || performance.now()
             try {
                 await callSpecFunction(
-                    this.seedFunction, 
-                    batchFunctionInputs, 
-                    onFunctionRespData, 
-                    sharedErrorContext,
+                    this.seedFunction,
+                    batchFunctionInputs,
+                    onFunctionRespData,
+                    sharedErrorContext
                 )
             } catch (err) {
                 logger.error(err)
@@ -528,7 +551,7 @@ class SeedTableService {
 
             if (this.inputBatchSeedCount === 0) {
                 logger.info(chalk.cyanBright(`  0 records -> ${this.seedTableName}`))
-            } 
+            }
 
             if (sharedErrorContext.error) throw sharedErrorContext.error
 
@@ -543,7 +566,11 @@ class SeedTableService {
 
     async _handleDataOnSeedFromScratch(batch: StringKeyMap[]) {
         this.seedCount += batch.length
-        logger.info(chalk.cyanBright(`  ${this.seedCount.toLocaleString('en-US')} records -> ${this.seedTableName}`))
+        logger.info(
+            chalk.cyanBright(
+                `  ${this.seedCount.toLocaleString('en-US')} records -> ${this.seedTableName}`
+            )
+        )
 
         const tableDataSources = this.tableDataSources
         const insertRecords = []
@@ -585,16 +612,22 @@ class SeedTableService {
         rel: ForeignKeyConstraint,
         inputPropertyKeys: string[],
         referenceKeyValues: StringKeyMap,
-        nonSeedLinkedForeignTableData: StringKeyMap[],
+        nonSeedLinkedForeignTableData: StringKeyMap[]
     ) {
         this.inputBatchSeedCount += batch.length
         this.seedCount += batch.length
-        logger.info(chalk.cyanBright(`  ${this.inputBatchSeedCount.toLocaleString('en-US')} records -> ${this.seedTableName}`))
+        logger.info(
+            chalk.cyanBright(
+                `  ${this.inputBatchSeedCount.toLocaleString('en-US')} records -> ${
+                    this.seedTableName
+                }`
+            )
+        )
 
         // Clone this so we can add to it with each batch independently.
-        const otherLinkedForeignTables: StringKeyMap[] = [
-            ...nonSeedLinkedForeignTableData
-        ].map(v => ({ ...v, colValues: [] }))
+        const otherLinkedForeignTables: StringKeyMap[] = [...nonSeedLinkedForeignTableData].map(
+            (v) => ({ ...v, colValues: [] })
+        )
 
         const linkProperties = this.linkProperties
         const tableDataSources = this.tableDataSources
@@ -644,15 +677,18 @@ class SeedTableService {
                 continue
             }
 
-            const foreignInputRecordKey = inputPropertyKeys.map(k => liveObjectData[k]).join(valueSep)
+            const foreignInputRecordKey = inputPropertyKeys
+                .map((k) => liveObjectData[k])
+                .join(valueSep)
             if (!referenceKeyValues.hasOwnProperty(foreignInputRecordKey)) continue
 
-            const foreignInputRecordReferenceKeyValues = referenceKeyValues[foreignInputRecordKey] || []
+            const foreignInputRecordReferenceKeyValues =
+                referenceKeyValues[foreignInputRecordKey] || []
             for (const referenceKeyValue of foreignInputRecordReferenceKeyValues) {
                 const record = { ...upsertRecord }
                 record[rel.foreignKey] = referenceKeyValue
                 upsertRecords.push(record)
-            }    
+            }
         }
         if (!upsertRecords.length) return
 
@@ -660,12 +696,13 @@ class SeedTableService {
             await db.transaction(async (tx) => {
                 const resolvedDependentForeignTables = await Promise.all(
                     otherLinkedForeignTables
-                        .filter(v => v.colValues.length > 0)
-                        .map(v => this._findOrCreateDependentForeignTable(v, tx))
+                        .filter((v) => v.colValues.length > 0)
+                        .map((v) => this._findOrCreateDependentForeignTable(v, tx))
                 )
                 const resolvedDependentForeignTablesMap = {}
                 for (const resolvedDependentForeignTable of resolvedDependentForeignTables) {
-                    resolvedDependentForeignTablesMap[resolvedDependentForeignTable.tablePath] = resolvedDependentForeignTable
+                    resolvedDependentForeignTablesMap[resolvedDependentForeignTable.tablePath] =
+                        resolvedDependentForeignTable
                 }
 
                 const finalUpsertRecords = []
@@ -677,9 +714,12 @@ class SeedTableService {
 
                     let ignoreRecord = false
                     for (const foreignTablePath in upsertRecord._otherForeignLookups) {
-                        const colValueUsedAtLookup = upsertRecord._otherForeignLookups[foreignTablePath]
-                        const resolvedDependentForeignTable = resolvedDependentForeignTablesMap[foreignTablePath] || {}
-                        const referenceKeyValuesMap = resolvedDependentForeignTable.referenceKeyValuesMap || {}
+                        const colValueUsedAtLookup =
+                            upsertRecord._otherForeignLookups[foreignTablePath]
+                        const resolvedDependentForeignTable =
+                            resolvedDependentForeignTablesMap[foreignTablePath] || {}
+                        const referenceKeyValuesMap =
+                            resolvedDependentForeignTable.referenceKeyValuesMap || {}
                         const foreignKey = resolvedDependentForeignTable.foreignKey
 
                         if (!referenceKeyValuesMap.hasOwnProperty(colValueUsedAtLookup)) {
@@ -705,7 +745,7 @@ class SeedTableService {
                     liveTableColumns: this.liveTableColumns,
                     defaultColumnValues: this.defaultColumnValues,
                 }
-        
+
                 await new RunOpService(upsertBatchOp, tx).perform()
             })
         } catch (err) {
@@ -714,13 +754,8 @@ class SeedTableService {
     }
 
     async _findOrCreateDependentForeignTable(otherLinkedForeignTableEntry, tx) {
-        const {
-            tablePath,
-            property,
-            colName,
-            foreignKey,
-            referenceKey,
-        } = otherLinkedForeignTableEntry
+        const { tablePath, property, colName, foreignKey, referenceKey } =
+            otherLinkedForeignTableEntry
         const colValues = unique(otherLinkedForeignTableEntry.colValues)
         const resp = {
             tablePath,
@@ -734,7 +769,7 @@ class SeedTableService {
 
         const colValuesSet = new Set(colValues)
 
-        let data = colValues.map(colValue => ({ [colName]: colValue }))
+        let data = colValues.map((colValue) => ({ [colName]: colValue }))
 
         // Apply any default column values configured by the user.
         const defaultColValues = config.getDefaultColumnValuesForTable(tablePath)
@@ -742,7 +777,7 @@ class SeedTableService {
             data = applyDefaults(data, defaultColValues) as StringKeyMap[]
         }
 
-        // TODO: If colName doesn't have a unique constraint, this method will fail 
+        // TODO: If colName doesn't have a unique constraint, this method will fail
         // and you'll need to do a classic find...create.
         let results = []
         try {
@@ -772,7 +807,7 @@ class SeedTableService {
         }
 
         const referenceKeyValuesMap = {}
-        for (const result of (results || [])) {
+        for (const result of results || []) {
             const colValue = result[colName]
             const referenceKeyValue = result[referenceKey]
             referenceKeyValuesMap[colValue] = referenceKeyValue
@@ -791,7 +826,11 @@ class SeedTableService {
         indexedPkConditions: StringKeyMap
     ) {
         this.seedCount += batch.length
-        logger.info(chalk.cyanBright(`  ${this.seedCount.toLocaleString('en-US')} records -> ${this.seedTableName}`))
+        logger.info(
+            chalk.cyanBright(
+                `  ${this.seedCount.toLocaleString('en-US')} records -> ${this.seedTableName}`
+            )
+        )
 
         const tableDataSources = this.tableDataSources
         const linkProperties = this.linkProperties
@@ -813,16 +852,19 @@ class SeedTableService {
             if (!Object.keys(recordUpdates).length) continue
 
             // Find the primary key groups to apply the updates to.
-            const pkConditionsKey = inputPropertyKeys.map(k => liveObjectData[k]).join(valueSep)
+            const pkConditionsKey = inputPropertyKeys.map((k) => liveObjectData[k]).join(valueSep)
             const primaryKeyConditions = indexedPkConditions[pkConditionsKey] || []
             if (!primaryKeyConditions?.length) continue
 
             // Merge updates by the actual primary key values.
             for (const pkConditions of primaryKeyConditions) {
-                const uniquePkKey = Object.keys(pkConditions).sort().map(k => pkConditions[k]).join(valueSep)
+                const uniquePkKey = Object.keys(pkConditions)
+                    .sort()
+                    .map((k) => pkConditions[k])
+                    .join(valueSep)
                 updates[uniquePkKey] = updates[uniquePkKey] || {
                     where: pkConditions,
-                    updates: {}
+                    updates: {},
                 }
                 updates[uniquePkKey].updates = { ...updates[uniquePkKey].updates, ...recordUpdates }
             }
@@ -836,7 +878,7 @@ class SeedTableService {
         for (const entry of Object.values(updates)) {
             if (useBulkUpdate) {
                 bulkWhere.push(entry.where)
-                bulkUpdates.push(entry.updates)    
+                bulkUpdates.push(entry.updates)
             } else {
                 indivUpdateOps.push({
                     type: OpType.Update,
@@ -864,7 +906,9 @@ class SeedTableService {
                 await new RunOpService(op).perform()
             } else {
                 await db.transaction(async (tx) => {
-                    await Promise.all(indivUpdateOps.map((op) => new RunOpService(op, tx).perform()))
+                    await Promise.all(
+                        indivUpdateOps.map((op) => new RunOpService(op, tx).perform())
+                    )
                 })
             }
         } catch (err) {
@@ -876,7 +920,7 @@ class SeedTableService {
         records: StringKeyMap[],
         primaryTablePath: string,
         staticFilters: { [key: string]: Filter },
-        columnFilters: { [key: string]: Filter },
+        columnFilters: { [key: string]: Filter }
     ): StringKeyMap | StringKeyMap[] {
         // Build record-agnostic filters.
         const recordAgnosticFilters = {}
@@ -897,19 +941,19 @@ class SeedTableService {
 
             for (const record of records) {
                 const entry = {}
-    
+
                 // Map each record to a function input payload.
                 for (const colPath of requiredArgColPaths) {
                     const [colSchemaName, colTableName, colName] = colPath.split('.')
                     const colTablePath = [colSchemaName, colTableName].join('.')
                     const inputArgs = colPathsToFunctionInputArgs[colPath] || []
-    
+
                     for (const inputArg of inputArgs) {
                         const recordColKey = colTablePath === primaryTablePath ? colName : colPath
                         entry[inputArg] = record[recordColKey]
                     }
                 }
-    
+
                 // Build record-specific filters.
                 // NOTE: If any record-specific/column filters exist, the batch size is forced
                 // down to 1, so `records` is actually only has a length of 1.
@@ -919,21 +963,22 @@ class SeedTableService {
                     const filterColPath = filter.column
                     const [schema, table, filterColName] = filterColPath.split('.')
                     const filterColTablePath = [schema, table].join('.')
-                    const filterRecordColKey = filterColTablePath === primaryTablePath ? filterColName : filterColPath
+                    const filterRecordColKey =
+                        filterColTablePath === primaryTablePath ? filterColName : filterColPath
                     if (!record.hasOwnProperty(filterRecordColKey)) continue
                     const filterValue = record[filterRecordColKey]
                     if (filterValue === null) continue
-    
+
                     if (filter.op === FilterOp.EqualTo) {
                         recordSpecificFilters[key] = filterValue
                     } else {
                         recordSpecificFilters[key] = {
                             op: filter.op,
-                            value: filterValue
+                            value: filterValue,
                         }
                     }
                 }
-    
+
                 input.push({
                     ...recordAgnosticFilters,
                     ...recordSpecificFilters,
@@ -952,7 +997,7 @@ class SeedTableService {
     async _findInputRecordsFromAdjacentCols(
         queryConditions: StringKeyMap,
         offset: number,
-        limit: number,
+        limit: number
     ): Promise<StringKeyMap[]> {
         // Start a new query on the table this live object is linked to.
         let query = db.from(this.seedTablePath)
@@ -1032,7 +1077,7 @@ class SeedTableService {
         primaryKeys: string[],
         tableInputColNames: string[],
         offset: number,
-        limit: number,
+        limit: number
     ): Promise<StringKeyMap[] | null> {
         // Map col names to null (and separate out array column names).
         const whereNotNull = {}
@@ -1094,9 +1139,9 @@ class SeedTableService {
                     colPathsToFunctionInputArgsEntry[colPath] = []
                 }
                 colPathsToFunctionInputArgsEntry[colPath].push(property)
-            }   
+            }
             if (!requiredArgColPathsEntry.length) continue
-            
+
             requiredArgColPaths.push(requiredArgColPathsEntry)
             colPathsToFunctionInputArgs.push(colPathsToFunctionInputArgsEntry)
         }
@@ -1137,9 +1182,9 @@ class SeedTableService {
 
         logger.info(
             chalk.cyanBright(
-                `Upserted ${this.seedCount.toLocaleString(
-                    'en-US'
-                )} ${this.seedTableName} records in ${seconds} seconds.`
+                `Upserted ${this.seedCount.toLocaleString('en-US')} ${
+                    this.seedTableName
+                } records in ${seconds} seconds.`
             )
         )
     }
