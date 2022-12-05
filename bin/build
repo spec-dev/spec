@@ -7,4 +7,4 @@ docker buildx build \
     -t "specdev/spec:latest" \
     -f docker/Dockerfile .
 
-echo "Success."
+echo "Successfully built Spec image."
