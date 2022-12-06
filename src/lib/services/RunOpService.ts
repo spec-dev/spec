@@ -5,8 +5,8 @@ import { Knex } from 'knex'
 import short from 'short-uuid'
 import { tablesMeta } from '../db/tablesMeta'
 import { pool, db } from '../db'
-import { mergeByKeys, unique } from '../utils/formatters'
-import { applyDefaults, getUpdatedAtColName } from '../defaults'
+import { mergeByKeys } from '../utils/formatters'
+import { applyDefaults } from '../defaults'
 
 class RunOpService {
     op: Op
@@ -52,19 +52,39 @@ class RunOpService {
         const conflictTargets = this.op.conflictTargets
         if (conflictTargets) {
             const uniqueData = mergeByKeys(data, conflictTargets)
+            const operationColumns = Object.keys(data[0])
 
-            // Only merge live columns that aren't a conflict target (exception for the special updated at column).
-            let mergeColNames = this.op.liveTableColumns.filter(
-                (colName) => !conflictTargets.includes(colName)
-            )
-            const updatedAtColName = getUpdatedAtColName(data[0])
-            updatedAtColName && mergeColNames.push(updatedAtColName)
-            mergeColNames = unique(mergeColNames)
+            // Only merge live columns that are NOT included in the conflict target.
+            const mergeColNames = this.op.liveTableColumns.filter((colName) => (
+                !conflictTargets.includes(colName) && operationColumns.includes(colName)
+            ))
 
+            // Insert or update.
             if (mergeColNames.length) {
-                insertQuery.insert(uniqueData).onConflict(conflictTargets).merge(mergeColNames)
-            } else {
-                insertQuery.insert(uniqueData).onConflict(conflictTargets).ignore()
+                insertQuery
+                    .insert(uniqueData)
+                    .onConflict(conflictTargets)
+                    .merge(mergeColNames)
+
+                // Only update forwards in time if the live object's primaryTimestampProperty 
+                // is the source for one of the live columns.
+                const timestampCol = this.op.primaryTimestampColumn
+                const onlyMergeForwardInTime = timestampCol && mergeColNames.includes(timestampCol)
+                if (onlyMergeForwardInTime) {
+                    insertQuery.whereRaw('??.??.?? < excluded.??', [
+                        this.op.schema, 
+                        this.op.table, 
+                        timestampCol, 
+                        timestampCol,
+                    ])
+                }
+            }
+            // Insert or ignore.
+            else {
+                insertQuery
+                    .insert(uniqueData)
+                    .onConflict(conflictTargets)
+                    .ignore()
             }
         } else {
             insertQuery.insert(data)

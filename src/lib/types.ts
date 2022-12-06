@@ -92,12 +92,14 @@ export interface LiveObject {
     links: LiveObjectLink[]
     events: Event[]
     edgeFunctions: EdgeFunction[]
+    config: StringKeyMap
 }
 
 export interface ResolvedLiveObject {
     id: string // i.e. "compound.CompoundMarketAPY@0.0.1"
     events: Event[]
     edgeFunctions: EdgeFunction[]
+    config: StringKeyMap
 }
 
 export interface TableDataSource {
@@ -168,6 +170,7 @@ export interface Op {
     data?: StringKeyMap | StringKeyMap[]
     conflictTargets?: string[]
     liveTableColumns: string[]
+    primaryTimestampColumn: string | null
     defaultColumnValues: { [key: string]: ColumnDefaultsConfig }
 }
 

@@ -18,6 +18,7 @@ import logger from '../logger'
 import constants from '../constants'
 import chalk from 'chalk'
 import { applyDefaults } from '../defaults'
+import { withDeadlockProtection } from '../utils/db'
 
 const valueSep = '__:__'
 
@@ -35,6 +36,10 @@ class ApplyDiffsService {
     defaultColumnValues: { [key: string]: ColumnDefaultsConfig }
 
     seedWithColPaths: StringMap[]
+
+    tableDataSources: TableDataSources
+
+    primaryTimestampColumn: string | null
 
     get linkTablePath(): string {
         return this.link.table
@@ -55,10 +60,6 @@ class ApplyDiffsService {
     get canInsertRecords(): boolean {
         const link = toMap(this.link)
         return link.hasOwnProperty('eventsCanInsert') ? !!link.eventsCanInsert : true
-    }
-
-    get tableDataSources(): TableDataSources {
-        return config.getLiveObjectTableDataSources(this.liveObject.id, this.linkTablePath)
     }
 
     get tablePrimaryKeys(): string[] {
@@ -85,6 +86,10 @@ class ApplyDiffsService {
         return this.link.uniqueBy || Object.keys(this.linkProperties)
     }
 
+    get primaryTimestampProperty(): string | null {
+        return this.liveObject.config?.primaryTimestampProperty || null
+    }
+
     constructor(diffs: StringKeyMap[], link: LiveObjectLink, liveObject: LiveObject) {
         this.liveObjectDiffs = diffs
         this.link = link
@@ -94,6 +99,10 @@ class ApplyDiffsService {
         )
         this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.linkTablePath)
         this.seedWithColPaths = config.getSeedColPaths(this.link.seedWith, this.link.linkOn)
+        this.tableDataSources = config.getLiveObjectTableDataSources(this.liveObject.id, this.linkTablePath)
+        this.primaryTimestampColumn = this.primaryTimestampProperty
+            ? ((this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null)
+            : null
     }
 
     async perform() {
@@ -112,15 +121,19 @@ class ApplyDiffsService {
 
         // Upsert or Update records using diffs.
         await (this.canInsertRecords ? this._createUpsertOps() : this._createUpdateOps())
-
         return this.ops
     }
 
     async runOps() {
         if (!this.ops.length) return
-        await db.transaction(async (tx) => {
-            await Promise.all(this.ops.map((op) => new RunOpService(op, tx).perform()))
-        })
+
+        const op = async () => {
+            await db.transaction(async (tx) => {
+                await Promise.all(this.ops.map((op) => new RunOpService(op, tx).perform()))
+            })    
+        }
+
+        await withDeadlockProtection(op)
     }
 
     async _createUpsertOps() {
@@ -436,70 +449,75 @@ class ApplyDiffsService {
         }
         if (!upsertRecords.length) return
 
-        try {
-            await db.transaction(async (tx) => {
-                const resolvedDependentForeignTables = await Promise.all(
-                    Object.values(missingLinkedForeignTables)
-                        .filter((v) => (v as any).colValues.length > 0)
-                        .map((v) => this._findOrCreateDependentForeignTable(v, tx))
-                )
-                const resolvedDependentForeignTablesMap = {}
-                for (const resolvedDependentForeignTable of resolvedDependentForeignTables) {
-                    resolvedDependentForeignTablesMap[resolvedDependentForeignTable.tablePath] =
-                        resolvedDependentForeignTable
-                }
-
-                const finalUpsertRecords = []
-                for (const upsertRecord of upsertRecords) {
-                    if (!upsertRecord.hasOwnProperty('_missingForeignLookups')) {
-                        finalUpsertRecords.push(upsertRecord)
-                        continue
-                    }
-
-                    let ignoreRecord = false
-                    for (const foreignTablePath in upsertRecord._missingForeignLookups) {
-                        const colValueUsedAtLookup =
-                            upsertRecord._missingForeignLookups[foreignTablePath]
-                        const resolvedDependentForeignTable =
-                            resolvedDependentForeignTablesMap[foreignTablePath] || {}
-                        const { referenceKeyValuesMap = {}, foreignKey } =
-                            resolvedDependentForeignTable
-
-                        if (!referenceKeyValuesMap.hasOwnProperty(colValueUsedAtLookup)) {
-                            ignoreRecord = true
-                            break
-                        }
-
-                        upsertRecord[foreignKey] = referenceKeyValuesMap[colValueUsedAtLookup]
-                    }
-                    if (ignoreRecord) continue
-
-                    delete upsertRecord._missingForeignLookups
-                    finalUpsertRecords.push(upsertRecord)
-                }
-                if (!finalUpsertRecords.length) return
-
-                const upsertBatchOp = {
-                    type: OpType.Insert,
-                    schema: this.linkSchemaName,
-                    table: this.linkTableName,
-                    data: finalUpsertRecords,
-                    conflictTargets: this.linkTableUniqueConstraint,
-                    liveTableColumns: this.liveTableColumns,
-                    defaultColumnValues: this.defaultColumnValues,
-                }
-
-                logger.info(
-                    chalk.green(
-                        `Upserting ${finalUpsertRecords.length} records in ${this.linkSchemaName}.${this.linkTableName}...`
+        const op = async () => {
+            try {
+                await db.transaction(async (tx) => {
+                    const resolvedDependentForeignTables = await Promise.all(
+                        Object.values(missingLinkedForeignTables)
+                            .filter((v) => (v as any).colValues.length > 0)
+                            .map((v) => this._findOrCreateDependentForeignTable(v, tx))
                     )
-                )
-
-                await new RunOpService(upsertBatchOp, tx).perform()
-            })
-        } catch (err) {
-            throw new QueryError('upsert', this.linkSchemaName, this.linkTableName, err)
+                    const resolvedDependentForeignTablesMap = {}
+                    for (const resolvedDependentForeignTable of resolvedDependentForeignTables) {
+                        resolvedDependentForeignTablesMap[resolvedDependentForeignTable.tablePath] =
+                            resolvedDependentForeignTable
+                    }
+    
+                    const finalUpsertRecords = []
+                    for (const upsertRecord of upsertRecords) {
+                        if (!upsertRecord.hasOwnProperty('_missingForeignLookups')) {
+                            finalUpsertRecords.push(upsertRecord)
+                            continue
+                        }
+    
+                        let ignoreRecord = false
+                        for (const foreignTablePath in upsertRecord._missingForeignLookups) {
+                            const colValueUsedAtLookup =
+                                upsertRecord._missingForeignLookups[foreignTablePath]
+                            const resolvedDependentForeignTable =
+                                resolvedDependentForeignTablesMap[foreignTablePath] || {}
+                            const { referenceKeyValuesMap = {}, foreignKey } =
+                                resolvedDependentForeignTable
+    
+                            if (!referenceKeyValuesMap.hasOwnProperty(colValueUsedAtLookup)) {
+                                ignoreRecord = true
+                                break
+                            }
+    
+                            upsertRecord[foreignKey] = referenceKeyValuesMap[colValueUsedAtLookup]
+                        }
+                        if (ignoreRecord) continue
+    
+                        delete upsertRecord._missingForeignLookups
+                        finalUpsertRecords.push(upsertRecord)
+                    }
+                    if (!finalUpsertRecords.length) return
+    
+                    const upsertBatchOp = {
+                        type: OpType.Insert,
+                        schema: this.linkSchemaName,
+                        table: this.linkTableName,
+                        data: finalUpsertRecords,
+                        conflictTargets: this.linkTableUniqueConstraint,
+                        liveTableColumns: this.liveTableColumns,
+                        primaryTimestampColumn: this.primaryTimestampColumn,
+                        defaultColumnValues: this.defaultColumnValues,
+                    }
+    
+                    logger.info(
+                        chalk.green(
+                            `Upserting ${finalUpsertRecords.length} records in ${this.linkSchemaName}.${this.linkTableName}...`
+                        )
+                    )
+    
+                    await new RunOpService(upsertBatchOp, tx).perform()
+                })
+            } catch (err) {
+                throw new QueryError('upsert', this.linkSchemaName, this.linkTableName, err)
+            }    
         }
+
+        await withDeadlockProtection(op)
     }
 
     async _findOrCreateDependentForeignTable(missingLinkedForeignTableEntry, tx) {
@@ -684,6 +702,7 @@ class ApplyDiffsService {
                 where,
                 data: updates,
                 liveTableColumns: this.liveTableColumns,
+                primaryTimestampColumn: this.primaryTimestampColumn,
                 defaultColumnValues: this.defaultColumnValues,
             })
         }
@@ -787,6 +806,7 @@ class ApplyDiffsService {
             where,
             data: updates,
             liveTableColumns: this.liveTableColumns,
+            primaryTimestampColumn: this.primaryTimestampColumn,
             defaultColumnValues: this.defaultColumnValues,
         })
     }

@@ -26,6 +26,7 @@ import chalk from 'chalk'
 import { updateCursor } from '../db/spec'
 import LRU from 'lru-cache'
 import { applyDefaults } from '../defaults'
+import { withDeadlockProtection } from '../utils/db'
 
 const valueSep = '__:__'
 
@@ -62,6 +63,8 @@ class SeedTableService {
 
     seedWithColPaths: StringMap[]
 
+    primaryTimestampColumn: string | null
+
     seedStrategy: () => void | null
 
     foreignKeyMappings: LRU<string, any> = new LRU({ max: 5000 })
@@ -92,6 +95,10 @@ class SeedTableService {
         return meta.primaryKey.map((pk) => pk.name)
     }
 
+    get primaryTimestampProperty(): string | null {
+        return this.liveObject.config?.primaryTimestampProperty || null
+    }
+
     constructor(seedSpec: SeedSpec, liveObject: LiveObject, seedCursorId: string, cursor: number) {
         this.seedSpec = seedSpec
         this.liveObject = liveObject
@@ -105,14 +112,17 @@ class SeedTableService {
         )
         this.seedTableUniqueConstraint = this._getUniqueConstraint()
         this.filters = this._buildFilters()
-        this.liveTableColumns = Object.keys(
-            config.getTable(this.seedSchemaName, this.seedTableName) || {}
-        )
         this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.seedTablePath)
         this.seedWithColPaths = config.getSeedColPaths(
             this.seedSpec.seedWith,
             this.seedSpec.linkProperties
         )
+        this.liveTableColumns = Object.keys(
+            config.getTable(this.seedSchemaName, this.seedTableName) || {}
+        )
+        this.primaryTimestampColumn = this.primaryTimestampProperty
+            ? ((this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null)
+            : null
         this.seedStrategy = null
     }
 
@@ -595,16 +605,21 @@ class SeedTableService {
             data: insertRecords,
             conflictTargets: this.seedTableUniqueConstraint,
             liveTableColumns: this.liveTableColumns,
+            primaryTimestampColumn: this.primaryTimestampColumn,
             defaultColumnValues: this.defaultColumnValues,
         }
 
-        try {
-            await db.transaction(async (tx) => {
-                await new RunOpService(insertBatchOp, tx).perform()
-            })
-        } catch (err) {
-            throw new QueryError('insert', this.seedSchemaName, this.seedTableName, err)
+        const op = async () => {
+            try {
+                await db.transaction(async (tx) => {
+                    await new RunOpService(insertBatchOp, tx).perform()
+                })
+            } catch (err) {
+                throw new QueryError('insert', this.seedSchemaName, this.seedTableName, err)
+            }    
         }
+
+        await withDeadlockProtection(op)
     }
 
     async _handleDataOnForeignTableSeed(
@@ -692,65 +707,70 @@ class SeedTableService {
         }
         if (!upsertRecords.length) return
 
-        try {
-            await db.transaction(async (tx) => {
-                const resolvedDependentForeignTables = await Promise.all(
-                    otherLinkedForeignTables
-                        .filter((v) => v.colValues.length > 0)
-                        .map((v) => this._findOrCreateDependentForeignTable(v, tx))
-                )
-                const resolvedDependentForeignTablesMap = {}
-                for (const resolvedDependentForeignTable of resolvedDependentForeignTables) {
-                    resolvedDependentForeignTablesMap[resolvedDependentForeignTable.tablePath] =
-                        resolvedDependentForeignTable
-                }
-
-                const finalUpsertRecords = []
-                for (const upsertRecord of upsertRecords) {
-                    if (!upsertRecord.hasOwnProperty('_otherForeignLookups')) {
-                        finalUpsertRecords.push(upsertRecord)
-                        continue
+        const op = async () => {
+            try {
+                await db.transaction(async (tx) => {
+                    const resolvedDependentForeignTables = await Promise.all(
+                        otherLinkedForeignTables
+                            .filter((v) => v.colValues.length > 0)
+                            .map((v) => this._findOrCreateDependentForeignTable(v, tx))
+                    )
+                    const resolvedDependentForeignTablesMap = {}
+                    for (const resolvedDependentForeignTable of resolvedDependentForeignTables) {
+                        resolvedDependentForeignTablesMap[resolvedDependentForeignTable.tablePath] =
+                            resolvedDependentForeignTable
                     }
-
-                    let ignoreRecord = false
-                    for (const foreignTablePath in upsertRecord._otherForeignLookups) {
-                        const colValueUsedAtLookup =
-                            upsertRecord._otherForeignLookups[foreignTablePath]
-                        const resolvedDependentForeignTable =
-                            resolvedDependentForeignTablesMap[foreignTablePath] || {}
-                        const referenceKeyValuesMap =
-                            resolvedDependentForeignTable.referenceKeyValuesMap || {}
-                        const foreignKey = resolvedDependentForeignTable.foreignKey
-
-                        if (!referenceKeyValuesMap.hasOwnProperty(colValueUsedAtLookup)) {
-                            ignoreRecord = true
-                            break
+    
+                    const finalUpsertRecords = []
+                    for (const upsertRecord of upsertRecords) {
+                        if (!upsertRecord.hasOwnProperty('_otherForeignLookups')) {
+                            finalUpsertRecords.push(upsertRecord)
+                            continue
                         }
-
-                        upsertRecord[foreignKey] = referenceKeyValuesMap[colValueUsedAtLookup]
+    
+                        let ignoreRecord = false
+                        for (const foreignTablePath in upsertRecord._otherForeignLookups) {
+                            const colValueUsedAtLookup =
+                                upsertRecord._otherForeignLookups[foreignTablePath]
+                            const resolvedDependentForeignTable =
+                                resolvedDependentForeignTablesMap[foreignTablePath] || {}
+                            const referenceKeyValuesMap =
+                                resolvedDependentForeignTable.referenceKeyValuesMap || {}
+                            const foreignKey = resolvedDependentForeignTable.foreignKey
+    
+                            if (!referenceKeyValuesMap.hasOwnProperty(colValueUsedAtLookup)) {
+                                ignoreRecord = true
+                                break
+                            }
+    
+                            upsertRecord[foreignKey] = referenceKeyValuesMap[colValueUsedAtLookup]
+                        }
+                        if (ignoreRecord) continue
+    
+                        delete upsertRecord._otherForeignLookups
+                        finalUpsertRecords.push(upsertRecord)
                     }
-                    if (ignoreRecord) continue
-
-                    delete upsertRecord._otherForeignLookups
-                    finalUpsertRecords.push(upsertRecord)
-                }
-                if (!finalUpsertRecords.length) return
-
-                const upsertBatchOp = {
-                    type: OpType.Insert,
-                    schema: this.seedSchemaName,
-                    table: this.seedTableName,
-                    data: finalUpsertRecords,
-                    conflictTargets: this.seedTableUniqueConstraint,
-                    liveTableColumns: this.liveTableColumns,
-                    defaultColumnValues: this.defaultColumnValues,
-                }
-
-                await new RunOpService(upsertBatchOp, tx).perform()
-            })
-        } catch (err) {
-            throw new QueryError('upsert', this.seedSchemaName, this.seedTableName, err)
+                    if (!finalUpsertRecords.length) return
+    
+                    const upsertBatchOp = {
+                        type: OpType.Insert,
+                        schema: this.seedSchemaName,
+                        table: this.seedTableName,
+                        data: finalUpsertRecords,
+                        conflictTargets: this.seedTableUniqueConstraint,
+                        liveTableColumns: this.liveTableColumns,
+                        primaryTimestampColumn: this.primaryTimestampColumn,
+                        defaultColumnValues: this.defaultColumnValues,
+                    }
+    
+                    await new RunOpService(upsertBatchOp, tx).perform()
+                })
+            } catch (err) {
+                throw new QueryError('upsert', this.seedSchemaName, this.seedTableName, err)
+            }    
         }
+
+        await withDeadlockProtection(op)
     }
 
     async _findOrCreateDependentForeignTable(otherLinkedForeignTableEntry, tx) {
@@ -887,33 +907,39 @@ class SeedTableService {
                     where: entry.where,
                     data: entry.updates,
                     liveTableColumns: this.liveTableColumns,
+                    primaryTimestampColumn: this.primaryTimestampColumn,
                     defaultColumnValues: this.defaultColumnValues,
                 })
             }
         }
 
-        try {
-            if (useBulkUpdate) {
-                const op = {
-                    type: OpType.Update,
-                    schema: this.seedSchemaName,
-                    table: this.seedTableName,
-                    where: bulkWhere,
-                    data: bulkUpdates,
-                    liveTableColumns: this.liveTableColumns,
-                    defaultColumnValues: this.defaultColumnValues,
+        const op = async () => {
+            try {
+                if (useBulkUpdate) {
+                    const op = {
+                        type: OpType.Update,
+                        schema: this.seedSchemaName,
+                        table: this.seedTableName,
+                        where: bulkWhere,
+                        data: bulkUpdates,
+                        liveTableColumns: this.liveTableColumns,
+                        primaryTimestampColumn: this.primaryTimestampColumn,
+                        defaultColumnValues: this.defaultColumnValues,
+                    }
+                    await new RunOpService(op).perform()
+                } else {
+                    await db.transaction(async (tx) => {
+                        await Promise.all(
+                            indivUpdateOps.map((op) => new RunOpService(op, tx).perform())
+                        )
+                    })
                 }
-                await new RunOpService(op).perform()
-            } else {
-                await db.transaction(async (tx) => {
-                    await Promise.all(
-                        indivUpdateOps.map((op) => new RunOpService(op, tx).perform())
-                    )
-                })
+            } catch (err) {
+                throw new QueryError('update', this.seedSchemaName, this.seedTableName, err)
             }
-        } catch (err) {
-            throw new QueryError('update', this.seedSchemaName, this.seedTableName, err)
         }
+
+        await withDeadlockProtection(op)
     }
 
     _transformRecordsIntoFunctionInputs(

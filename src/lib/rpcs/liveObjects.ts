@@ -10,11 +10,20 @@ export async function resolveLiveObjects(liveObjectIds: string[]): Promise<LiveO
     const liveObjectsMap = config.liveObjectsMap
     const liveObjects = []
     for (let entry of data) {
-        const liveObject = liveObjectsMap[entry.id]
+        const {
+            id,
+            events,
+            edgeFunctions,
+            config,
+        } = entry
+
+        const liveObject = liveObjectsMap[id]
+
         liveObjects.push({
             ...liveObject,
-            events: entry.events,
-            edgeFunctions: entry.edgeFunctions,
+            events,
+            edgeFunctions,
+            config,
         })
     }
     return liveObjects

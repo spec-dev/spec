@@ -20,6 +20,7 @@ import constants from '../constants'
 import logger from '../logger'
 import { tablesMeta, getRel } from '../db/tablesMeta'
 import chalk from 'chalk'
+import { withDeadlockProtection } from '../utils/db'
 
 const valueSep = '__:__'
 
@@ -54,7 +55,11 @@ class ResolveRecordsService {
 
     liveTableColumns: string[]
 
+    tableDataSources: TableDataSources
+
     defaultColumnValues: { [key: string]: ColumnDefaultsConfig }
+
+    primaryTimestampColumn: string | null
 
     get schemaName(): string {
         return this.tablePath.split('.')[0]
@@ -70,10 +75,6 @@ class ResolveRecordsService {
 
     get reverseLinkProperties(): StringMap {
         return reverseMap(this.link.linkOn)
-    }
-
-    get tableDataSources(): TableDataSources {
-        return config.getLiveObjectTableDataSources(this.liveObject.id, this.tablePath)
     }
 
     get tablePrimaryKeys(): string[] {
@@ -113,6 +114,10 @@ class ResolveRecordsService {
         return this.link.uniqueBy || Object.keys(this.linkProperties)
     }
 
+    get primaryTimestampProperty(): string | null {
+        return this.liveObject.config?.primaryTimestampProperty || null
+    }
+
     constructor(
         resolveRecordsSpec: ResolveRecordsSpec,
         liveObject: LiveObject,
@@ -128,6 +133,10 @@ class ResolveRecordsService {
         this.cursor = cursor
         this.resolveFunction = null
         this.liveTableColumns = Object.keys(config.getTable(this.schemaName, this.tableName) || {})
+        this.tableDataSources = config.getLiveObjectTableDataSources(this.liveObject.id, this.tablePath)
+        this.primaryTimestampColumn = this.primaryTimestampProperty
+            ? ((this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null)
+            : null
         this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.tablePath)
     }
 
@@ -246,33 +255,39 @@ class ResolveRecordsService {
                     where: entry.where,
                     data: entry.updates,
                     liveTableColumns: this.liveTableColumns,
+                    primaryTimestampColumn: this.primaryTimestampColumn,
                     defaultColumnValues: this.defaultColumnValues,
                 })
             }
         }
 
-        try {
-            if (useBulkUpdate) {
-                const op = {
-                    type: OpType.Update,
-                    schema: this.schemaName,
-                    table: this.tableName,
-                    where: bulkWhere,
-                    data: bulkUpdates,
-                    liveTableColumns: this.liveTableColumns,
-                    defaultColumnValues: this.defaultColumnValues,
+        const op = async () => {
+            try {
+                if (useBulkUpdate) {
+                    const updateOp = {
+                        type: OpType.Update,
+                        schema: this.schemaName,
+                        table: this.tableName,
+                        where: bulkWhere,
+                        data: bulkUpdates,
+                        liveTableColumns: this.liveTableColumns,
+                        primaryTimestampColumn: this.primaryTimestampColumn,
+                        defaultColumnValues: this.defaultColumnValues,
+                    }
+                    await new RunOpService(updateOp).perform()
+                } else {
+                    await db.transaction(async (tx) => {
+                        await Promise.all(
+                            indivUpdateOps.map((updateOp) => new RunOpService(updateOp, tx).perform())
+                        )
+                    })
                 }
-                await new RunOpService(op).perform()
-            } else {
-                await db.transaction(async (tx) => {
-                    await Promise.all(
-                        indivUpdateOps.map((op) => new RunOpService(op, tx).perform())
-                    )
-                })
+            } catch (err) {
+                throw new QueryError('update', this.schemaName, this.tableName, err)
             }
-        } catch (err) {
-            throw new QueryError('update', this.schemaName, this.tableName, err)
         }
+
+        await withDeadlockProtection(op)
     }
 
     _createAndMapFunctionInputs() {

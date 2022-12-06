@@ -272,7 +272,7 @@ class Config {
         const dataSources = {}
         for (const columnName in table) {
             const dataSource = table[columnName]
-            const { object, property } = this._parseDataSourceForColumn(dataSource)
+            const { object, property } = this.parseDataSourceForColumn(dataSource)
 
             if (!object || !property) {
                 logger.error(`Invalid data source for ${tableName}.${columnName}:`, dataSource)
@@ -304,7 +304,7 @@ class Config {
     }
 
     // TODO: Clean this up with recursion.
-    _parseDataSourceForColumn(colDataSource: ColumnConfig | string): StringKeyMap {
+    parseDataSourceForColumn(colDataSource: ColumnConfig | string): StringKeyMap {
         if (typeof colDataSource === 'string') {
             const propertyPath = colDataSource.split('.')
             return propertyPath.length === 2
