@@ -3,6 +3,7 @@ import fs from 'fs'
 import constants from './constants'
 import { ConfigError } from './errors'
 import { noop, toMap, fromNamespacedVersion, unique } from './utils/formatters'
+import { isNonEmptyString, couldBeColPath, couldBeNumber } from './utils/validators'
 import logger from './logger'
 import { tablesMeta, pullTableMeta, getRel } from './db/tablesMeta'
 import { cloneDeep } from 'lodash'
@@ -21,20 +22,32 @@ import {
     TableLink,
     ColumnConfig,
     Filter,
-    FilterOp,
     ColumnDefaultsConfig,
     ColumnDefaultsSetOn,
+    EnrichedLink,
+    FilterGroup,
+    FilterOp,
 } from './types'
+import {
+    filterOps,
+    multiValueFilterOps,
+    numericFilterOps,
+    columnFilterOps,
+    isColOperatorOp,
+} from './utils/filters'
 import { tableSubscriber } from './db/subscriber'
 
 class Config {
+
     config: ProjectConfig
 
     prevConfig: ProjectConfig
 
     isValid: boolean
 
-    linkUniqueConstraints: { [key: string]: string[] } = {}
+    // linkUniqueConstraints: { [key: string]: string[] } = {}
+
+    enrichedLinks: { [key: string]: EnrichedLink } = {}
 
     checkTablesTimer: any = null
 
@@ -67,7 +80,6 @@ class Config {
         [key: string]: {
             id: string
             configName: string
-            filterBy: StringKeyMap
             links: StringMap[]
         }
     } {
@@ -78,7 +90,6 @@ class Config {
             m[obj.id] = {
                 configName,
                 id: obj.id,
-                filterBy: toMap(obj.filterBy || {}),
                 links: obj.links,
             }
         }
@@ -94,22 +105,8 @@ class Config {
         return this.liveObjects[configName] || null
     }
 
-    getLink(liveObjectId: string, tablePath: string): LiveObjectLink {
-        const objects = this.liveObjects
-        for (const configName in objects) {
-            const obj = objects[configName]
-            if (obj.id !== liveObjectId) continue
-
-            for (const link of obj.links || []) {
-                if (link.table === tablePath) {
-                    return {
-                        ...link,
-                        linkOn: toMap(link.linkOn || {}),
-                    }
-                }
-            }
-        }
-        return null
+    getEnrichedLink(liveObjectId: string, tablePath: string): EnrichedLink | null {
+        return this.enrichedLinks[[liveObjectId, tablePath].join(':')] || null
     }
 
     getLinksForTable(tablePath: string): TableLink[] {
@@ -122,6 +119,7 @@ class Config {
                     tableLinks.push({
                         liveObjectId: obj.id,
                         link,
+                        enrichedLink: this.getEnrichedLink(obj.id, tablePath),
                     })
                 }
             }
@@ -171,47 +169,47 @@ class Config {
         return defaultColValues
     }
 
-    getSeedColPaths(seedWith: string | string[] | StringMap, linkOn: StringMap): StringMap[] {
-        if (!seedWith) return []
-        const isString = typeof seedWith === 'string'
-        const isArray = Array.isArray(seedWith)
+    // getSeedColPaths(seedWith: string | string[] | StringMap, linkOn: StringMap): StringMap[] {
+    //     if (!seedWith) return []
+    //     const isString = typeof seedWith === 'string'
+    //     const isArray = Array.isArray(seedWith)
 
-        // String or array of object properties.
-        if (isString || isArray) {
-            const seedProperties = (isArray ? seedWith : [seedWith]) as any[]
-            linkOn = toMap(linkOn || {})
+    //     // String or array of object properties.
+    //     if (isString || isArray) {
+    //         const seedProperties = (isArray ? seedWith : [seedWith]) as any[]
+    //         linkOn = toMap(linkOn || {})
 
-            let seedColPaths = []
-            let newEntry = {}
-            for (const val of seedProperties) {
-                if (typeof val === 'object') {
-                    if (Object.keys(newEntry).length) {
-                        seedColPaths.push(newEntry)
-                        newEntry = {}
-                    }
-                    seedColPaths.push(toMap(val))
-                } else if (linkOn.hasOwnProperty(val)) {
-                    newEntry[val] = linkOn[val]
-                } else {
-                    if (Object.keys(newEntry).length) {
-                        seedColPaths.push(newEntry)
-                        newEntry = {}
-                    }
-                }
-            }
-            if (Object.keys(newEntry).length) {
-                seedColPaths.push(newEntry)
-            }
-            return seedColPaths
-        }
+    //         let seedColPaths = []
+    //         let newEntry = {}
+    //         for (const val of seedProperties) {
+    //             if (typeof val === 'object') {
+    //                 if (Object.keys(newEntry).length) {
+    //                     seedColPaths.push(newEntry)
+    //                     newEntry = {}
+    //                 }
+    //                 seedColPaths.push(toMap(val))
+    //             } else if (linkOn.hasOwnProperty(val)) {
+    //                 newEntry[val] = linkOn[val]
+    //             } else {
+    //                 if (Object.keys(newEntry).length) {
+    //                     seedColPaths.push(newEntry)
+    //                     newEntry = {}
+    //                 }
+    //             }
+    //         }
+    //         if (Object.keys(newEntry).length) {
+    //             seedColPaths.push(newEntry)
+    //         }
+    //         return seedColPaths
+    //     }
 
-        // Map of property:colPath
-        if (typeof seedWith === 'object') {
-            return [toMap(seedWith || {})]
-        }
+    //     // Map of property:colPath
+    //     if (typeof seedWith === 'object') {
+    //         return [toMap(seedWith || {})]
+    //     }
 
-        return []
-    }
+    //     return []
+    // }
 
     getExternalTableLinksDependentOnTableForSeed(tablePath: string): TableLink[] {
         const depTableLinks = []
@@ -222,29 +220,33 @@ class Config {
             for (const link of obj.links || []) {
                 if (link.table === tablePath) continue
 
-                const seedColPaths = this.getSeedColPaths(link.seedWith, link.linkOn)
-                if (!seedColPaths.length) continue
+                const uniqueFilterColPaths = new Set<string>()
 
-                const uniqueSeedColPaths = unique(
-                    seedColPaths.map((entry) => Object.values(entry)).flat()
-                )
-                let allSeedColsOnTable = true
-                for (const seedColPath of uniqueSeedColPaths) {
-                    const [seedColSchema, seedColTable, _] = seedColPath.split('.')
-                    const seedColTablePath = [seedColSchema, seedColTable].join('.')
-                    if (seedColTablePath !== tablePath) {
-                        allSeedColsOnTable = false
-                        break
+                for (let filterGroup of link.filterBy || []) {
+                    filterGroup = toMap(filterGroup)
+
+                    for (const filter of Object.values(filterGroup)) {
+                        const colPath = filter.column
+                        if (!colPath) continue
+                        const [schemaName, tableName, _] = colPath.split('.')
+                        const colTablePath = [schemaName, tableName].join('.')
+
+                        // Found a link using this tablePath as a column filter.
+                        if (colTablePath === tablePath) {
+                            uniqueFilterColPaths.add(colPath)
+                        }
                     }
                 }
 
-                if (allSeedColsOnTable) {
-                    depTableLinks.push({
-                        liveObjectId: obj.id,
-                        link,
-                        seedColPaths: uniqueSeedColPaths,
-                    })
-                }
+                const filterColPaths = Array.from(uniqueFilterColPaths)
+                if (!filterColPaths.length) continue
+
+                depTableLinks.push({
+                    liveObjectId: obj.id,
+                    link,
+                    enrichedLink: this.getEnrichedLink(obj.id, link.table),
+                    filterColPaths,
+                })
             }
         }
         return depTableLinks
@@ -351,23 +353,17 @@ class Config {
 
             for (const link of obj.links || []) {
                 tablePaths.add(link.table)
-                const linkOn = toMap(link.linkOn || {})
+                
+                for (let filterGroup of link.filterBy || []) {
+                    filterGroup = toMap(filterGroup)
 
-                for (const colPath of Object.values(linkOn)) {
-                    const [schemaName, tableName, _] = colPath.split('.')
-                    const colTablePath = [schemaName, tableName].join('.')
-                    tablePaths.add(colTablePath)
-                }
-
-                const uniqueSeedColPaths = unique(
-                    this.getSeedColPaths(link.seedWith, linkOn)
-                        .map((entry) => Object.values(entry))
-                        .flat()
-                )
-                for (const colPath of uniqueSeedColPaths) {
-                    const [schemaName, tableName, _] = colPath.split('.')
-                    const colTablePath = [schemaName, tableName].join('.')
-                    tablePaths.add(colTablePath)
+                    for (const filter of Object.values(filterGroup)) {
+                        const colPath = filter.column
+                        if (!colPath) continue
+                        const [schemaName, tableName, _] = colPath.split('.')
+                        const colTablePath = [schemaName, tableName].join('.')
+                        tablePaths.add(colTablePath)
+                    }
                 }
             }
         }
@@ -387,110 +383,111 @@ class Config {
         })
     }
 
-    getUniqueConstraintForLink(
-        liveObjectId: string,
-        tablePath: string,
-        useCache: boolean = true
-    ): string[] | null {
-        const cacheKey = [liveObjectId, tablePath].join(':')
-        if (useCache) {
-            const result = this.linkUniqueConstraints[cacheKey]
-            if (result) return result
-        }
+    // getUniqueConstraintForLink(
+    //     liveObjectId: string,
+    //     tablePath: string,
+    //     useCache: boolean = true
+    // ): string[] | null {
+    //     const cacheKey = [liveObjectId, tablePath].join(':')
+    //     if (useCache) {
+    //         const result = this.linkUniqueConstraints[cacheKey]
+    //         if (result) return result
+    //     }
 
-        const link = this.getLink(liveObjectId, tablePath)
-        if (!link) return null
+    //     const link = this.getLink(liveObjectId, tablePath)
+    //     if (!link) return null
 
-        const uniqueBy = link.uniqueBy || Object.keys(link.linkOn) || []
-        if (!uniqueBy.length) return null
+    //     const uniqueBy = link.uniqueBy || []
+    //     if (!uniqueBy.length) return null
 
-        const meta = tablesMeta[tablePath]
-        const primaryKeyColNames = meta?.primaryKey?.map((col) => col.name) || []
-        let uniqueColGroups = meta.uniqueColGroups || []
-        uniqueColGroups = uniqueColGroups.length ? uniqueColGroups : [primaryKeyColNames]
-        if (!uniqueColGroups.length) return null
+    //     const meta = tablesMeta[tablePath]
+    //     const primaryKeyColNames = meta?.primaryKey?.map((col) => col.name) || []
 
-        // Resolve uniqueBy properties to their respective column names.
-        const uniqueByColNames = []
-        for (const property of uniqueBy) {
-            const colPath = link.linkOn[property]
-            if (!colPath) return null
-            const [colSchema, colTable, colName] = colPath.split('.')
-            const colTablePath = [colSchema, colTable].join('.')
+    //     let uniqueColGroups = meta.uniqueColGroups || []
+    //     uniqueColGroups = uniqueColGroups.length ? uniqueColGroups : [primaryKeyColNames]
+    //     if (!uniqueColGroups.length) return null
 
-            if (colTablePath === link.table) {
-                uniqueByColNames.push(colName)
-            } else {
-                const foreignKeyConstraint = getRel(link.table, colTablePath)
-                if (!foreignKeyConstraint) return null
-                uniqueByColNames.push(foreignKeyConstraint.foreignKey)
-            }
-        }
+    //     // Resolve uniqueBy properties to their respective column names.
+    //     const uniqueByColNames = []
+    //     for (const property of uniqueBy) {
+    //         const colPath = link.linkOn[property]
+    //         if (!colPath) return null
+    //         const [colSchema, colTable, colName] = colPath.split('.')
+    //         const colTablePath = [colSchema, colTable].join('.')
 
-        // Sort and convert to string to match against.
-        const uniqueByColNamesId = uniqueByColNames.sort().join(':')
+    //         if (colTablePath === link.table) {
+    //             uniqueByColNames.push(colName)
+    //         } else {
+    //             const foreignKeyConstraint = getRel(link.table, colTablePath)
+    //             if (!foreignKeyConstraint) return null
+    //             uniqueByColNames.push(foreignKeyConstraint.foreignKey)
+    //         }
+    //     }
 
-        // Find the matching unique col group (if any).
-        let uniqueColGroup = uniqueColGroups.find(
-            (colGroup) => [...colGroup].sort().join(':') === uniqueByColNamesId
-        )
+    //     // Sort and convert to string to match against.
+    //     const uniqueByColNamesId = uniqueByColNames.sort().join(':')
 
-        // If no matching col group exactly, find one that's even more unique.
-        if (!uniqueColGroup) {
-            uniqueColGroup = uniqueColGroups.find((colGroup) =>
-                uniqueByColNames.every((val) => colGroup.includes(val))
-            )
-        }
+    //     // Find the matching unique col group (if any).
+    //     let uniqueColGroup = uniqueColGroups.find(
+    //         (colGroup) => [...colGroup].sort().join(':') === uniqueByColNamesId
+    //     )
 
-        return uniqueColGroup || null
-    }
+    //     // If no matching col group exactly, find one that's even more unique.
+    //     if (!uniqueColGroup) {
+    //         uniqueColGroup = uniqueColGroups.find((colGroup) =>
+    //             uniqueByColNames.every((val) => colGroup.includes(val))
+    //         )
+    //     }
 
-    categorizeFilters(filters: StringKeyMap): { [key: string]: Filter }[] {
-        const staticFilters = {}
-        const columnFilters = {}
+    //     return uniqueColGroup || null
+    // }
 
-        for (const key in filters) {
-            let value = filters[key]
+    // categorizeFilters(filters: StringKeyMap): { [key: string]: Filter }[] {
+    //     const staticFilters = {}
+    //     const columnFilters = {}
 
-            // String filter.
-            if (typeof value !== 'object') {
-                staticFilters[key] = {
-                    op: FilterOp.EqualTo,
-                    value: value,
-                }
-                continue
-            }
+    //     for (const key in filters) {
+    //         let value = filters[key]
 
-            try {
-                value = toMap(value)
-            } catch (err) {
-                logger.warn(`Tried to convert filter into map but failed`, value)
-                continue
-            }
+    //         // String filter.
+    //         if (typeof value !== 'object') {
+    //             staticFilters[key] = {
+    //                 op: FilterOp.EqualTo,
+    //                 value: value,
+    //             }
+    //             continue
+    //         }
 
-            // Non-column, object filter.
-            if (value.hasOwnProperty('value')) {
-                staticFilters[key] = {
-                    op: value.op || FilterOp.EqualTo,
-                    value: value.value,
-                }
-                continue
-            }
+    //         try {
+    //             value = toMap(value)
+    //         } catch (err) {
+    //             logger.warn(`Tried to convert filter into map but failed`, value)
+    //             continue
+    //         }
 
-            // Column filter.
-            if (value.hasOwnProperty('column')) {
-                if (typeof value.column !== 'string') continue
-                const splitColPath = (value.column || '').split('.')
-                if (splitColPath.length !== 3) continue
+    //         // Non-column, object filter.
+    //         if (value.hasOwnProperty('value')) {
+    //             staticFilters[key] = {
+    //                 op: value.op || FilterOp.EqualTo,
+    //                 value: value.value,
+    //             }
+    //             continue
+    //         }
 
-                columnFilters[key] = {
-                    op: value.op || FilterOp.EqualTo,
-                    column: value.column,
-                }
-            }
-        }
-        return [staticFilters, columnFilters]
-    }
+    //         // Column filter.
+    //         if (value.hasOwnProperty('column')) {
+    //             if (typeof value.column !== 'string') continue
+    //             const splitColPath = (value.column || '').split('.')
+    //             if (splitColPath.length !== 3) continue
+
+    //             columnFilters[key] = {
+    //                 op: value.op || FilterOp.EqualTo,
+    //                 column: value.column,
+    //             }
+    //         }
+    //     }
+    //     return [staticFilters, columnFilters]
+    // }
 
     load(): boolean {
         try {
@@ -545,7 +542,7 @@ class Config {
         if (this.checkTablesTimer !== null) return
 
         this.checkTablesTimer = setInterval(async () => {
-            // Clone tablesMeta deep.
+            // Clone tablesMeta.
             const prevTablesMeta = cloneDeep(tablesMeta)
 
             // Update tables meta and uniqueBy constraints cache.
@@ -585,11 +582,210 @@ class Config {
             return false
         }
 
-        // Ensure each link's uniqueBy array has a matching unique constraint.
-        if (!this._checkUniqueConstraintsForAllLinks()) {
+        // Use table metadata/constraints to build and cache links.
+        if (!this._buildEnrichedLinks()) {
             return false
         }
 
+        return true
+    }
+
+    _buildEnrichedLinks(): boolean {
+        const enrichedLinks = {}
+        const objects = this.liveObjects
+        let isValid = true
+
+        for (const configName in objects) {
+            const obj = objects[configName]
+
+            for (const link of obj.links || []) {
+                const key = [obj.id, link.table].join(':')
+
+                const enrichedLink = this._enrichLink(link, obj.id)
+                if (!enrichedLink) {
+                    isValid = false
+                    continue
+                }
+
+                enrichedLinks[key] = enrichedLink
+            }
+        }
+        if (!isValid) return false
+        
+        this.enrichedLinks = enrichedLinks
+        return true
+    }
+
+    _enrichLink(link: LiveObjectLink, liveObjectId: string): EnrichedLink | null {
+        const tablePath = link.table
+        const meta = tablesMeta[tablePath]
+        const primaryKeyColNames = meta?.primaryKey?.map((col) => col.name) || []
+
+        let uniqueColGroups = meta.uniqueColGroups || []
+        uniqueColGroups = uniqueColGroups.length ? uniqueColGroups : [primaryKeyColNames]
+        if (!uniqueColGroups.length) {
+            logger.error(`No unique constraints found on table ${tablePath}`)
+            return null
+        }
+
+        const liveObjectTableDataSources = this.getLiveObjectTableDataSources(liveObjectId, tablePath)
+        const uniqueByProperties = link.uniqueBy || []
+        const filterBy = link.filterBy || []
+        let uniqueByColNames = []
+        let propertyColPathMappings = {}
+
+        // REQ: For each property in uniqueByProperties...
+        // EITHER, the property is being used as a live column in this table...
+        // OR, the property exists in one of the filterBy groups as a column filter...
+        // AND if the table it's linked to is EITHER the target table OR a foreign table with an actual relationship.
+
+        const nonLiveColumnUniqueByProperties = []
+        for (const property of uniqueByProperties) {
+            const liveColNamesUsingProperty = (liveObjectTableDataSources[property] || []).map(ds => ds.columnName)
+
+            if (liveColNamesUsingProperty.length > 1) {
+                logger.error(
+                    `A "uniqueBy" property (${property}) shouldn't be mapped to multiple columns in the same table (${tablePath}).`
+                )
+                return null
+            }
+
+            const liveColName = liveColNamesUsingProperty[0]
+            if (liveColName) {
+                uniqueByColNames.push(liveColName)
+                propertyColPathMappings[property] = [tablePath, liveColName].join('.')
+            } else {
+                nonLiveColumnUniqueByProperties.push(property)
+            }
+        }
+
+        if (nonLiveColumnUniqueByProperties.length) {
+            let foundMatchingFilterGroup = false
+            for (const filterGroup of filterBy) {
+                const additionalUniqueByColNames = []
+                const additionalPropertyColPathMappings = {}
+
+                let skipGroup = false
+                for (const property of nonLiveColumnUniqueByProperties) {
+                    const colPath = (filterGroup[property] || {}).column
+                    if (!colPath) {
+                        skipGroup = true
+                        break
+                    }
+
+                    const [colSchema, colTable, colName] = colPath.split('.')
+                    const colTablePath = [colSchema, colTable].join('.')
+    
+                    if (colTablePath === tablePath) {
+                        additionalUniqueByColNames.push(colName)
+                        propertyColPathMappings[property] = colPath
+                        continue
+                    }
+
+                    const foreignKeyConstraint = getRel(tablePath, colTablePath)
+                    if (!foreignKeyConstraint) {
+                        skipGroup = true
+                        break
+                    }
+
+                    additionalUniqueByColNames.push(foreignKeyConstraint.foreignKey)
+                    propertyColPathMappings[property] = colPath
+                }
+                if (skipGroup) continue
+
+                foundMatchingFilterGroup = true
+                uniqueByColNames.push(...additionalUniqueByColNames)
+                propertyColPathMappings = { 
+                    ...propertyColPathMappings, 
+                    ...additionalPropertyColPathMappings,
+                }
+                break
+            }
+
+            if (!foundMatchingFilterGroup) {
+                logger.error(
+                    `[${liveObjectId} <> ${tablePath}] Failed to find valid column mappings for\n` +
+                    `the following "uniqueBy" properties: ${nonLiveColumnUniqueByProperties.join(', ')}`
+                )
+                return null
+            }
+        }
+
+        // Sort and convert to string to match against.
+        uniqueByColNames = unique(uniqueByColNames)
+        const uniqueByColNamesId = uniqueByColNames.sort().join(':')
+
+        // Find the matching unique col group (if any).
+        let uniqueConstraint = uniqueColGroups.find(
+            (colGroup) => [...colGroup].sort().join(':') === uniqueByColNamesId
+        )
+
+        // If no matching col group exactly, find one that's even more unique.
+        if (!uniqueConstraint) {
+            uniqueConstraint = uniqueColGroups.find((colGroup) =>
+                uniqueByColNames.every((val) => colGroup.includes(val))
+            )
+        }
+        if (!uniqueConstraint) {
+            logger.error(
+                `Failed to find a matching unique constraint for the following \n` +
+                `column group on table ${tablePath}: ${uniqueByColNames.join(', ')}`
+            )
+            return null
+        }
+
+        if (filterBy.length && !this._validateFilterByColPaths(filterBy, tablePath)) {
+            logger.error(`[${liveObjectId} <> ${tablePath}] Invalid filters.`)
+            return null
+        }
+        
+        return {
+            liveObjectId,
+            tablePath,
+            uniqueByProperties,
+            uniqueConstraint,
+            linkOn: propertyColPathMappings,
+            filterBy,
+        }
+    }
+
+    _validateFilterByColPaths(filterBy: FilterGroup[], targetTablePath: string): boolean {
+        // Aggregate all table paths referenced across all column filters.
+        const colTablePathsSet = new Set<string>()
+        for (let filterGroup of filterBy) {
+            filterGroup = toMap(filterGroup)
+            for (const filter of Object.values(filterGroup)) {
+                const colPath = filter.column
+                if (!colPath) continue
+                const [colSchema, colTable, _] = colPath.split('.')
+                const colTablePath = [colSchema, colTable].join('.')
+                colTablePathsSet.add(colTablePath)
+            }
+        }
+
+        const colTablePaths = Array.from(colTablePathsSet)
+        const foreignTablePaths = colTablePaths.filter(tablePath => tablePath !== targetTablePath)
+
+        // Only allow 1 foreign table to be referenced for now.
+        if (foreignTablePaths.length > 1) {
+            logger.error(`Only 1 foreign table can be used within "filterBy".`)
+            return false
+        }
+
+        // If the target table path is referenced in column filters...
+        if (colTablePathsSet.has(targetTablePath)) {
+            // Ensure a relationship exists between the target table and any referenced foreign table paths.
+            for (const foreignTablePath of foreignTablePaths) {
+                if (!getRel(targetTablePath, foreignTablePath)) {
+                    logger.error(
+                        `An explicit relationship must exist between ${targetTablePath} and ${foreignTablePath}\n` +
+                        'in order to use both as column filters in the same link.'
+                    )
+                    return false
+                }
+            }
+        }
+        
         return true
     }
 
@@ -601,90 +797,150 @@ class Config {
             const obj = objects[configName]
 
             // Ensure object has id.
-            if (!obj.id) {
-                logger.error(`Live object "${configName}" is missing id.`)
-                isValid = false
-                continue
-            }
+            if (obj.id) {
+                const { nsp, name, version } = fromNamespacedVersion(obj.id)
 
-            // Ensure object has valid id version structure.
-            const { nsp, name, version } = fromNamespacedVersion(obj.id)
-            if (!nsp || !name || !version) {
-                logger.error(
-                    `Live object "${configName}" has malformed id: ${obj.id}.\nMake sure the id is in "<namespace>.<name>@<version>" format.`
-                )
+                // Ensure object has valid id version structure.
+                if (!nsp || !name || !version) {
+                    logger.error(
+                        `Live object "${configName}" has malformed id: ${obj.id}.\nMake sure the id is in "<namespace>.<name>@<version>" format.`
+                    )
+                    isValid = false
+                }
+            } else {
+                logger.error(`Live object "${configName}" is missing id.`)
                 isValid = false
             }
 
             // Ensure object has links.
-            if (!obj.links || !obj.links.length) {
+            if (!obj.links?.length) {
                 logger.error(`Live object "${configName}" has no links.`)
                 isValid = false
-                continue
             }
 
             // Validate each link.
             for (const link of obj.links || []) {
                 const tablePath = link.table || ''
-                if (!tablePath) {
+
+                // Ensure table path exists.
+                if (tablePath) {
+                    const splitTablePath = tablePath.split('.')
+
+                    // Ensure table path is valid.
+                    if (splitTablePath.length === 2) {
+                        const [schema, table] = splitTablePath
+    
+                        // Ensure table is included in config.
+                        if (!this.getTable(schema, table)) {
+                            logger.error(
+                                `Link for live object "${configName}" has invalid "table" attribute: ${tablePath}. \nValue references table not included in config file.`
+                            )
+                            isValid = false
+                        }
+                    } else {
+                        logger.error(
+                            `Link for live object "${configName}" has invalid "table" attribute: ${tablePath}. \nMust be in "<schema>.<table>" format.`
+                        )
+                        isValid = false
+                    }
+                } else {
                     logger.error(
                         `Link for live object "${configName}" is missing the "table" attribute.`
                     )
                     isValid = false
-                    continue
                 }
-                const splitTablePath = tablePath.split('.')
 
-                // Ensure table is valid.
-                if (splitTablePath.length !== 2) {
+                // Validate uniqueBy properties.
+                const uniqueBy = link.uniqueBy || []
+                if (!uniqueBy.length) {
                     logger.error(
-                        `Link for live object "${configName}" has invalid "table" attribute: ${tablePath}. \nMust be in "<schema>.<table>" format.`
-                    )
-                    isValid = false
-                    continue
-                }
-                const [schema, table] = splitTablePath
-
-                // Ensure table is included in config.
-                if (!this.getTable(schema, table)) {
-                    logger.error(
-                        `Link for live object "${configName}" has invalid "table" attribute: ${tablePath}. \nValue references table not included in config file.`
+                        `Link for live object "${configName}" is missing or has an empty value for "uniqueBy".`
                     )
                     isValid = false
                 }
-
-                // Ensure link has linkOn inputs.
-                const linkOn = link.linkOn ? toMap(link.linkOn || {}) : {}
-                if (!Object.keys(linkOn).length) {
-                    logger.error(`Link for live object "${configName}" has no linkOn inputs.`)
-                    isValid = false
-                }
-
-                // Ensure input column paths are of valid structure.
-                for (const key in linkOn) {
-                    const colPath = linkOn[key] || ''
-                    const splitColPath = colPath.split('.')
-
-                    if (splitColPath.length !== 3) {
+                for (const property of uniqueBy) {
+                    if (!isNonEmptyString(property)) {
                         logger.error(
-                            `Link for live object "${configName}" has invalid input property for key "${key}": ${colPath}. \nMust be in "<schema>.<table>.<column>" format.`
+                            `Link for live object "${configName}" has invalid "uniqueBy" property: ${property}.`
                         )
                         isValid = false
-                        continue
                     }
                 }
 
-                // // Ensure seedWith properties exist (unless seedIfEmpty is true)
-                // if (!link.seedWith && !link.seedIfEmpty) {
-                //     logger.error(
-                //         `Link for live object "${configName}" has no "seedWith" attribute or it is empty.`
-                //     )
-                //     isValid = false
-                //     continue
-                // }
+                // Validate filters.
+                const filterBy = link.filterBy || []
+                for (const group of filterBy) {
+                    let groupHasColOperatorFilter = false
+                    let groupHasEqualColumnFilter = false
+
+                    for (const property in (group || {})) {
+                        const filter = group[property]
+                        const isColumnFilter = !!filter.column
+                        const isColOperatorFilter = isColumnFilter && isColOperatorOp(filter.op)
+                        const isEqualColumnFilter = isColumnFilter && filter.op === FilterOp.EqualTo
+                        groupHasColOperatorFilter = groupHasColOperatorFilter || isColOperatorFilter
+                        groupHasEqualColumnFilter = groupHasEqualColumnFilter || isEqualColumnFilter
+
+                        if (!this._validateFilter(configName, property, filter)) {
+                            isValid = false
+                        }
+                    }
+                    
+                    if (groupHasColOperatorFilter && !groupHasEqualColumnFilter) {
+                        logger.error(
+                            `Filter groups with column operator filters (>, <, etc.) must also contain an =column filter.`
+                        )
+                        isValid = false
+                    }
+                }
             }
         }
         return isValid
+    }
+
+    _validateFilter(liveObjectConfigName: string, property: string, filter: Filter): boolean {
+        const baseErrMessage = `Link for live object "${liveObjectConfigName}" has invalid filter for property ${property}`
+        filter = toMap(filter) as Filter
+
+        if (!filter) {
+            logger.error(`${baseErrMessage} - filter was empty`)
+            return false
+        }
+
+        if (!filter.op) {
+            logger.error(`${baseErrMessage} - no "op" given`)
+            return false
+        }
+
+        if (!filterOps.has(filter.op)) {
+            logger.error(`${baseErrMessage} - invalid filter "op": ${filter.op}`)
+            return false
+        }
+
+        const hasValue = filter.hasOwnProperty('value')
+        const hasColumn = filter.hasOwnProperty('column')
+
+        if (hasColumn && !couldBeColPath(filter.column)) {
+            logger.error(`${baseErrMessage} - invalid column path: ${filter.column}`)
+            return false
+        }
+
+        if (hasColumn && !columnFilterOps.has(filter.op)) {
+            logger.error(`${baseErrMessage} - invalid op for column filter: ${filter.op}`)
+            return false
+        }
+        
+        if (hasValue && multiValueFilterOps.has(filter.op) && !Array.isArray(filter.value)) {
+            logger.error(`${baseErrMessage} - Invalid value for array-type filter operation (${filter.op}): ${filter.value}`)
+            return false
+        }
+
+        if (hasValue && numericFilterOps.has(filter.op) && !couldBeNumber(filter.value)) {
+            logger.error(`${baseErrMessage} - Invalid value for numeric-type filter operation (${filter.op}): ${filter.value}`)
+            return false
+        }
+
+        return true
     }
 
     _validateTablesSection(): boolean {
@@ -726,52 +982,52 @@ class Config {
         return true
     }
 
-    _checkUniqueConstraintsForAllLinks(): boolean {
-        const linkUniqueConstraints = {}
-        const objects = this.liveObjects
-        let isValid = true
+    // _checkUniqueConstraintsForAllLinks(): boolean {
+    //     const linkUniqueConstraints = {}
+    //     const objects = this.liveObjects
+    //     let isValid = true
 
-        for (const configName in objects) {
-            const obj = objects[configName]
-            for (const link of obj.links || []) {
-                const uniqueConstraint = this.getUniqueConstraintForLink(obj.id, link.table, false)
-                if (!uniqueConstraint) {
-                    this._logMissingUniqueConstraint(link, obj.id)
-                    isValid = false
-                    continue
-                }
-                const key = [obj.id, link.table].join(':')
-                linkUniqueConstraints[key] = uniqueConstraint
-            }
-        }
-        if (!isValid) return false
+    //     for (const configName in objects) {
+    //         const obj = objects[configName]
+    //         for (const link of obj.links || []) {
+    //             const uniqueConstraint = this.getUniqueConstraintForLink(obj.id, link.table, false)
+    //             if (!uniqueConstraint) {
+    //                 this._logMissingUniqueConstraint(link, obj.id)
+    //                 isValid = false
+    //                 continue
+    //             }
+    //             const key = [obj.id, link.table].join(':')
+    //             linkUniqueConstraints[key] = uniqueConstraint
+    //         }
+    //     }
+    //     if (!isValid) return false
 
-        this.linkUniqueConstraints = linkUniqueConstraints
-        return true
-    }
+    //     this.linkUniqueConstraints = linkUniqueConstraints
+    //     return true
+    // }
 
-    _logMissingUniqueConstraint(link: LiveObjectLink, liveObjectId: string) {
-        const uniqueByColNames = []
-        const linkOn = toMap(link.linkOn || {})
-        const uniqueByProperties = link.uniqueBy || Object.keys(linkOn)
-        for (const property of uniqueByProperties) {
-            const colPath = linkOn[property]
-            if (!colPath) return null
-            const [colSchema, colTable, colName] = colPath.split('.')
-            const colTablePath = [colSchema, colTable].join('.')
+    // _logMissingUniqueConstraint(link: LiveObjectLink, liveObjectId: string) {
+    //     const uniqueByColNames = []
+    //     const linkOn = toMap(link.linkOn || {})
+    //     const uniqueByProperties = link.uniqueBy || Object.keys(linkOn)
+    //     for (const property of uniqueByProperties) {
+    //         const colPath = linkOn[property]
+    //         if (!colPath) return null
+    //         const [colSchema, colTable, colName] = colPath.split('.')
+    //         const colTablePath = [colSchema, colTable].join('.')
 
-            if (colTablePath === link.table) {
-                uniqueByColNames.push(colName)
-            } else {
-                const foreignKeyConstraint = getRel(link.table, colTablePath)
-                if (!foreignKeyConstraint) return null
-                uniqueByColNames.push(foreignKeyConstraint.foreignKey)
-            }
-        }
-        logger.error(
-            `No unique constraint exists on "${link.table}" for column(s): ${uniqueByColNames}\nPlease add a unique contraint on this group of columns in order to make the link between ${link.table} and ${liveObjectId} work.`
-        )
-    }
+    //         if (colTablePath === link.table) {
+    //             uniqueByColNames.push(colName)
+    //         } else {
+    //             const foreignKeyConstraint = getRel(link.table, colTablePath)
+    //             if (!foreignKeyConstraint) return null
+    //             uniqueByColNames.push(foreignKeyConstraint.foreignKey)
+    //         }
+    //     }
+    //     logger.error(
+    //         `No unique constraint exists on "${link.table}" for column(s): ${uniqueByColNames}\nPlease add a unique contraint on this group of columns in order to make the link between ${link.table} and ${liveObjectId} work.`
+    //     )
+    // }
 
     _ensureFileExists() {
         if (!fs.existsSync(constants.PROJECT_CONFIG_PATH)) {

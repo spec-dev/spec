@@ -397,7 +397,8 @@ export class TableSubscriber {
 
     async _resolveInternalRecords(tableSub: TableSub, tablePath: string, events: TableSubEvent[]) {
         for (const changes of this._getInternalTableLinkDataChanges(tablePath, events)) {
-            await this._processInternalTableLinkDataChanges(tableSub, changes)
+            // TODO: Not using ResolveRecordsService until you make decision about how to handle seeds that add new records with nullable values in nullable columns.
+            // await this._processInternalTableLinkDataChanges(tableSub, changes)
         }
     }
 
@@ -446,7 +447,6 @@ export class TableSubscriber {
             const resolveRecordsService = new ResolveRecordsService(
                 resolveRecordsSpec,
                 liveObject,
-                link,
                 seedCursor.id,
                 seedCursor.cursor
             )
@@ -507,12 +507,7 @@ export class TableSubscriber {
         const seedSpec = {
             liveObjectId,
             tablePath: link.table,
-            linkProperties: link.linkOn,
-            seedWith: link.seedWith,
-            uniqueBy: link.uniqueBy || null,
-            filterBy: link.filterBy || null,
             seedColNames: [], // not used with foreign seeds
-            seedIfEmpty: link.seedIfEmpty || true,
         }
 
         // Create and save seed cursor.
@@ -562,7 +557,7 @@ export class TableSubscriber {
 
         const internalLinksToProcess = []
         for (const tableLink of tableLinks) {
-            const linkColPaths = Object.values(tableLink.link.linkOn)
+            const linkColPaths = Object.values(tableLink.enrichedLink.linkOn)
 
             const eventsAffectingLinkedCols = []
             for (const event of events) {
@@ -628,8 +623,8 @@ export class TableSubscriber {
 
         const externalLinksToProcess = []
         for (const depTableLink of depTableLinks) {
-            const seedColPaths = depTableLink.seedColPaths || []
-            if (!seedColPaths.length) continue
+            const filterColPaths = depTableLink.filterColPaths || []
+            if (!filterColPaths.length) continue
 
             const eventsCausingDownstreamSeeds = []
             for (const event of events) {
@@ -638,7 +633,7 @@ export class TableSubscriber {
                     affectedColNames.map((colName) => [tablePath, colName].join('.'))
                 )
 
-                for (const colPath of seedColPaths) {
+                for (const colPath of filterColPaths) {
                     if (affectedColPaths.has(colPath)) {
                         eventsCausingDownstreamSeeds.push(event)
                         break

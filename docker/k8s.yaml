@@ -44,5 +44,7 @@ spec:
           value: "1"
         - name: SPEC_CONFIG_DIR
           value: /usr/app/.spec
+        - name: RETRY_SEED_CURSORS_INTERVAL
+          value: "5000"
         - name: FLIP
           value: heads

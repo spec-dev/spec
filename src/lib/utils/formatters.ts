@@ -120,7 +120,7 @@ export function groupByKeys(input: StringKeyMap | StringKeyMap[]): StringKeyMap 
 
 export function filterObjectByKeys(obj: AnyMap, keys: any[]): AnyMap {
     const newMap = {}
-    for (const key in keys) {
+    for (const key of keys) {
         newMap[key] = obj[key]
     }
     return newMap

@@ -6,6 +6,25 @@ export type StringMap = { [key: string]: string }
 
 export type AnyMap = { [key: string | number]: any }
 
+export enum FilterOp {
+    EqualTo = '=', 
+    NotEqualTo = '!=',
+    GreaterThan = '>',
+    GreaterThanOrEqualTo = '>=',
+    LessThan = '<',
+    LessThanOrEqualTo = '<=',
+    In = 'in',
+    NotIn = 'not in',
+}
+
+export interface Filter {
+    op: FilterOp
+    column?: string
+    value?: any
+}
+
+export type FilterGroup = { [key: string]: Filter }
+
 export interface ColumnSourceConfig {
     object: string
     property: string
@@ -39,7 +58,6 @@ export type DefaultsConfig = { [key: string]: SchemaDefaultsConfig }
 
 export interface LiveObjectConfig {
     id: string
-    filterBy?: StringKeyMap
     links: LiveObjectLink[]
 }
 
@@ -77,18 +95,13 @@ export interface EdgeFunction {
 
 export interface LiveObjectLink {
     table: string
-    linkOn: StringMap
-    seedWith: string | string[] | StringMap
     uniqueBy?: string[]
-    seedIfEmpty?: boolean
-    eventsCanInsert?: boolean
-    filterBy?: StringKeyMap
+    filterBy?: FilterGroup[]
 }
 
 export interface LiveObject {
     id: string // i.e. "compound.CompoundMarketAPY@0.0.1"
     configName: string // i.e. "CompoundMarketAPY"
-    filterBy?: StringKeyMap
     links: LiveObjectLink[]
     events: Event[]
     edgeFunctions: EdgeFunction[]
@@ -208,12 +221,7 @@ export interface LiveColumnQuerySpec {
 export interface SeedSpec {
     liveObjectId: string
     tablePath: string
-    linkProperties: StringMap
-    seedWith: string | string[] | StringMap
-    uniqueBy: string[] | null
-    filterBy: StringKeyMap | null
     seedColNames: string[]
-    seedIfEmpty?: boolean
 }
 
 export interface ResolveRecordsSpec {
@@ -276,30 +284,14 @@ export interface TablesMeta {
 export interface TableLink {
     liveObjectId: string
     link: LiveObjectLink
-    seedColPaths?: string[]
+    enrichedLink: EnrichedLink
+    filterColPaths?: string[]
 }
 
 export interface TableLinkDataChanges {
     tableLink: TableLink
     events: TableSubEvent[]
-}
-
-export enum FilterOp {
-    EqualTo = '=',
-    NotEqualTo = '!=',
-    GreaterThan = '>',
-    GreaterThanOrEqualTo = '>=',
-    LessThan = '<',
-    LessThanOrEqualTo = '<=',
-    In = 'in',
-    NotIn = 'not in',
-}
-
-export interface Filter {
-    op: FilterOp
-    column?: string
-    value?: any
-}
+}   
 
 export interface Log {
     message: string
@@ -312,4 +304,13 @@ export enum LogLevel {
     Info = 'info',
     Warn = 'warn',
     Error = 'error',
+}
+
+export interface EnrichedLink {
+    liveObjectId: string
+    tablePath: string
+    uniqueByProperties: string[]
+    uniqueConstraint: string[]
+    linkOn: StringKeyMap,
+    filterBy: FilterGroup[]
 }

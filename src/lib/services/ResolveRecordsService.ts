@@ -9,6 +9,7 @@ import {
     LiveObjectFunctionRole,
     ResolveRecordsSpec,
     ColumnDefaultsConfig,
+    EnrichedLink,
 } from '../types'
 import { reverseMap, toMap, unique, getCombinations, groupByKeys } from '../utils/formatters'
 import RunOpService from './RunOpService'
@@ -25,11 +26,12 @@ import { withDeadlockProtection } from '../utils/db'
 const valueSep = '__:__'
 
 class ResolveRecordsService {
+
     tablePath: string
 
     liveObject: LiveObject
 
-    link: LiveObjectLink
+    enrichedLink: EnrichedLink
 
     primaryKeyData: StringKeyMap[]
 
@@ -70,11 +72,11 @@ class ResolveRecordsService {
     }
 
     get linkProperties(): StringMap {
-        return toMap(this.link.linkOn)
+        return toMap(this.enrichedLink.linkOn)
     }
 
     get reverseLinkProperties(): StringMap {
-        return reverseMap(this.link.linkOn)
+        return reverseMap(this.enrichedLink.linkOn)
     }
 
     get tablePrimaryKeys(): string[] {
@@ -84,13 +86,7 @@ class ResolveRecordsService {
     }
 
     get tableUniqueConstraint(): string[] {
-        const uniqueConstaint = config.getUniqueConstraintForLink(
-            this.liveObject.id,
-            this.tablePath
-        )
-        if (!uniqueConstaint)
-            throw `No unique constraint for link ${this.liveObject.id} <-> ${this.tablePath}`
-        return uniqueConstaint
+        return this.enrichedLink.uniqueConstraint
     }
 
     get updateableColNames(): Set<string> {
@@ -106,12 +102,8 @@ class ResolveRecordsService {
         return new Set(updateableColNames)
     }
 
-    get defaultFilters(): StringKeyMap {
-        return this.liveObject.filterBy || {}
-    }
-
     get linkUniqueByProperties(): string[] {
-        return this.link.uniqueBy || Object.keys(this.linkProperties)
+        return this.enrichedLink.uniqueByProperties
     }
 
     get primaryTimestampProperty(): string | null {
@@ -121,22 +113,25 @@ class ResolveRecordsService {
     constructor(
         resolveRecordsSpec: ResolveRecordsSpec,
         liveObject: LiveObject,
-        link: LiveObjectLink,
         seedCursorId: string,
         cursor: number
     ) {
         this.tablePath = resolveRecordsSpec.tablePath
         this.liveObject = liveObject
-        this.link = link
         this.primaryKeyData = resolveRecordsSpec.primaryKeyData
         this.seedCursorId = seedCursorId
         this.cursor = cursor
         this.resolveFunction = null
         this.liveTableColumns = Object.keys(config.getTable(this.schemaName, this.tableName) || {})
         this.tableDataSources = config.getLiveObjectTableDataSources(this.liveObject.id, this.tablePath)
+
+        this.enrichedLink = config.getEnrichedLink(this.liveObject.id, this.tablePath)
+        if (!this.enrichedLink) throw `No enriched link found for link ${this.liveObject.id} <> ${this.tablePath}`
+
         this.primaryTimestampColumn = this.primaryTimestampProperty
             ? ((this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null)
             : null
+
         this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.tablePath)
     }
 
@@ -307,7 +302,9 @@ class ResolveRecordsService {
                 input[inputArg] = value
                 colValues.push(value)
             }
-            batchFunctionInputs.push({ ...this.defaultFilters, ...input })
+
+            // NOTE: commented out until you upgrade to new version of "filterBy"
+            // batchFunctionInputs.push({ ...this.defaultFilters, ...input })
 
             const recordPrimaryKeys = {}
             for (const pk of this.tablePrimaryKeys) {
@@ -406,48 +403,9 @@ class ResolveRecordsService {
     }
 
     _findResolveFunction() {
-        for (const edgeFunction of this.liveObject.edgeFunctions) {
-            // Only use a getOne function for resolving.
-            if (edgeFunction.role !== LiveObjectFunctionRole.GetOne) {
-                continue
-            }
-
-            const { argsMap, args } = edgeFunction
-
-            const uniqueByProperties = this.linkUniqueByProperties
-            let allUniqueByPropertiesAcceptedAsFunctionInput = true
-            for (let propertyKey of uniqueByProperties) {
-                propertyKey = argsMap[propertyKey] || propertyKey
-
-                if (!args.hasOwnProperty(propertyKey)) {
-                    allUniqueByPropertiesAcceptedAsFunctionInput = false
-                    break
-                }
-            }
-
-            if (!allUniqueByPropertiesAcceptedAsFunctionInput) {
-                continue
-            }
-
-            const reverseArgsMap = reverseMap(argsMap)
-            let allRequiredInputPropertiesSatisfied = true
-            for (let inputKey in args) {
-                const propertyKey = reverseArgsMap[inputKey] || inputKey
-                const isRequiredInput = args[inputKey]
-
-                if (isRequiredInput && !uniqueByProperties.includes(propertyKey)) {
-                    allRequiredInputPropertiesSatisfied = false
-                    break
-                }
-            }
-
-            if (!allRequiredInputPropertiesSatisfied) {
-                continue
-            }
-
-            this.resolveFunction = edgeFunction
-            break
-        }
+        this.liveObject.edgeFunctions.find(ef => (
+            ef.role === LiveObjectFunctionRole.GetOne
+        )) || this.liveObject.edgeFunctions[0]
     }
 
     /**

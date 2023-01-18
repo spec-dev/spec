@@ -12,8 +12,9 @@ import {
     Filter,
     FilterOp,
     ColumnDefaultsConfig,
+    EnrichedLink,
 } from '../types'
-import { reverseMap, toMap, getCombinations, unique, groupByKeys } from '../utils/formatters'
+import { reverseMap, getCombinations, unique, groupByKeys } from '../utils/formatters'
 import { areColumnsEmpty } from '../db/ops'
 import RunOpService from './RunOpService'
 import { callSpecFunction } from '../utils/requests'
@@ -31,6 +32,7 @@ import { withDeadlockProtection } from '../utils/db'
 const valueSep = '__:__'
 
 class SeedTableService {
+
     seedSpec: SeedSpec
 
     liveObject: LiveObject
@@ -53,10 +55,6 @@ class SeedTableService {
 
     tableDataSources: TableDataSources
 
-    seedTableUniqueConstraint: string[]
-
-    filters: { [key: string]: Filter }[]
-
     liveTableColumns: string[]
 
     defaultColumnValues: { [key: string]: ColumnDefaultsConfig }
@@ -65,7 +63,13 @@ class SeedTableService {
 
     primaryTimestampColumn: string | null
 
+    enrichedLink: EnrichedLink
+
+    valueFilters: { [key: string]: Filter }[]
+
     seedStrategy: () => void | null
+
+    forceSeedInputBatchSizeToOne: boolean = false
 
     foreignKeyMappings: LRU<string, any> = new LRU({ max: 5000 })
 
@@ -82,11 +86,11 @@ class SeedTableService {
     }
 
     get linkProperties(): StringMap {
-        return toMap(this.seedSpec.linkProperties)
+        return this.enrichedLink.linkOn || {}
     }
 
     get reverseLinkProperties(): StringMap {
-        return reverseMap(this.seedSpec.linkProperties)
+        return reverseMap(this.enrichedLink.linkOn)
     }
 
     get seedTablePrimaryKeys(): string[] {
@@ -108,21 +112,22 @@ class SeedTableService {
         this.seedColNames = new Set<string>(this.seedSpec.seedColNames)
         this.tableDataSources = config.getLiveObjectTableDataSources(
             this.liveObject.id,
-            this.seedTablePath
+            this.seedTablePath,
         )
-        this.seedTableUniqueConstraint = this._getUniqueConstraint()
-        this.filters = this._buildFilters()
+
         this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.seedTablePath)
-        this.seedWithColPaths = config.getSeedColPaths(
-            this.seedSpec.seedWith,
-            this.seedSpec.linkProperties
-        )
+
+        this.enrichedLink = config.getEnrichedLink(this.liveObject.id, this.seedTablePath)
+        if (!this.enrichedLink) throw `No enriched link found for link ${this.liveObject.id} <> ${this.seedTablePath}`
+
         this.liveTableColumns = Object.keys(
             config.getTable(this.seedSchemaName, this.seedTableName) || {}
         )
+
         this.primaryTimestampColumn = this.primaryTimestampProperty
             ? ((this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null)
             : null
+
         this.seedStrategy = null
     }
 
@@ -134,13 +139,10 @@ class SeedTableService {
     async determineSeedStrategy() {
         // Find seed function to use.
         this._findSeedFunction()
-        if (!this.seedFunction) throw "Live object doesn't have an associated seed function."
+        if (!this.seedFunction) throw 'Live object doesn\'t have an associated seed function.'
 
         // Find the required args for this function and their associated columns.
         this._findRequiredArgColumns()
-        if (!this.requiredArgColPaths.length && !this.seedSpec.seedIfEmpty) {
-            throw 'No required arg column paths found.'
-        }
 
         const inputTableColumns = {}
         const inputColumnLocations = { onSeedTable: 0, onForeignTable: 0 }
@@ -175,12 +177,6 @@ class SeedTableService {
             if (inputColumnLocations.onForeignTable > 0) {
                 logger.warn(
                     `${this.seedTablePath} - Can't seed a cross-table relationship from scratch.`
-                )
-                return
-            }
-            if (!this.seedSpec.seedIfEmpty) {
-                logger.warn(
-                    `${this.seedTablePath} - Table not configured to seed -- seedIfEmpty isn't truthy.`
                 )
                 return
             }
@@ -260,15 +256,14 @@ class SeedTableService {
     async _seedFromScratch() {
         logger.info(chalk.cyanBright(`\nSeeding ${this.seedTablePath} from scratch...`))
 
-        // TODO: Implement filters here too.
-        const [staticFilters, _] = this.filters
+        const inputArgs = this.valueFilters.map(vf => this._formatValueFilterGroupAsInputArgs(vf))
 
         const sharedErrorContext = { error: null }
         const t0 = performance.now()
         try {
             await callSpecFunction(
                 this.seedFunction,
-                {},
+                inputArgs,
                 async (data) =>
                     this._handleDataOnSeedFromScratch(data as StringKeyMap[]).catch((err) => {
                         sharedErrorContext.error = err
@@ -296,10 +291,9 @@ class SeedTableService {
     async _seedWithAdjacentCols() {
         logger.info(chalk.cyanBright(`\nSeeding ${this.seedTablePath} from adjacent columns...`))
 
-        const queryConditions = this._buildQueryForSeedWithAdjacentCols()
+        throw 'Update this'
 
-        // TODO: Actually implement potential column filters here.
-        const [staticFilters, _] = this.filters
+        const queryConditions = this._buildQueryForSeedWithAdjacentCols()
 
         // Get the live object property keys associated with each input column.
         const reverseLinkProperties = this.reverseLinkProperties
@@ -308,7 +302,7 @@ class SeedTableService {
         )
 
         // If any of the input columns is of array type, shrink the seed input batch size to 1.
-        const seedInputBatchSize = queryConditions.arrayColumns.length
+        const seedInputBatchSize = queryConditions.arrayColumns.length || this.forceSeedInputBatchSizeToOne
             ? 1
             : constants.SEED_INPUT_BATCH_SIZE
 
@@ -427,40 +421,36 @@ class SeedTableService {
             isColTypeArray([foreignTablePath, colName].join('.'))
         )
 
-        // Get link properties / reference keys associated with any *OTHER* linked foreign tables.
-        const linkProperties = this.linkProperties
         const nonSeedLinkedForeignTableData = []
         const seen = new Set()
+        for (const filterGroup of this.enrichedLink.filterBy) {
+            for (const property in filterGroup) {
+                const filter = filterGroup[property]
+                const colPath = filter.column
+                if (!colPath || filter.op !== FilterOp.EqualTo) continue
 
-        for (const property in linkProperties) {
-            const colPath = linkProperties[property]
-            const [schema, table, colName] = colPath.split('.')
-            const tablePath = [schema, table].join('.')
+                const [schema, table, colName] = colPath.split('.')
+                const tablePath = [schema, table].join('.')
+    
+                if (seen.has(tablePath)) continue
+                seen.add(tablePath)
 
-            if (seen.has(tablePath)) continue
-            seen.add(tablePath)
-
-            if (tablePath !== this.seedTablePath && tablePath !== foreignTablePath) {
-                const rel = getRel(this.seedTablePath, tablePath)
-                nonSeedLinkedForeignTableData.push({
-                    tablePath,
-                    property,
-                    colName,
-                    foreignKey: rel?.foreignKey,
-                    referenceKey: rel?.referenceKey,
-                })
+                if (tablePath !== this.seedTablePath && tablePath !== foreignTablePath) {
+                    const rel = getRel(this.seedTablePath, tablePath)
+                    nonSeedLinkedForeignTableData.push({
+                        tablePath,
+                        property,
+                        colName,
+                        foreignKey: rel?.foreignKey,
+                        referenceKey: rel?.referenceKey,
+                    })
+                }
             }
         }
 
-        const [staticFilters, columnFilters] = this.filters
-        const hasColumnFilters = Object.keys(columnFilters).length > 0
-
-        // If any of the input columns is of array type, OR, column filters are being used,
-        // shrink the seed input batch size to 1.
-        const seedInputBatchSize =
-            arrayInputColNames.length || hasColumnFilters
-                ? 1
-                : constants.FOREIGN_SEED_INPUT_BATCH_SIZE
+        const seedInputBatchSize = (
+            arrayInputColNames.length || this.forceSeedInputBatchSizeToOne
+        ) ? 1 : constants.FOREIGN_SEED_INPUT_BATCH_SIZE
 
         const sharedErrorContext = { error: null }
         let t0 = null
@@ -528,8 +518,6 @@ class SeedTableService {
             const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(
                 batchInputRecords,
                 foreignTablePath,
-                staticFilters,
-                columnFilters
             )
 
             // Callback to use when a batch of response data is available.
@@ -603,7 +591,7 @@ class SeedTableService {
             schema: this.seedSchemaName,
             table: this.seedTableName,
             data: insertRecords,
-            conflictTargets: this.seedTableUniqueConstraint,
+            conflictTargets: this.enrichedLink.uniqueConstraint,
             liveTableColumns: this.liveTableColumns,
             primaryTimestampColumn: this.primaryTimestampColumn,
             defaultColumnValues: this.defaultColumnValues,
@@ -757,7 +745,7 @@ class SeedTableService {
                         schema: this.seedSchemaName,
                         table: this.seedTableName,
                         data: finalUpsertRecords,
-                        conflictTargets: this.seedTableUniqueConstraint,
+                        conflictTargets: this.enrichedLink.uniqueConstraint,
                         liveTableColumns: this.liveTableColumns,
                         primaryTimestampColumn: this.primaryTimestampColumn,
                         defaultColumnValues: this.defaultColumnValues,
@@ -942,82 +930,58 @@ class SeedTableService {
         await withDeadlockProtection(op)
     }
 
-    _transformRecordsIntoFunctionInputs(
-        records: StringKeyMap[],
-        primaryTablePath: string,
-        staticFilters: { [key: string]: Filter },
-        columnFilters: { [key: string]: Filter }
-    ): StringKeyMap | StringKeyMap[] {
-        // Build record-agnostic filters.
-        const recordAgnosticFilters = {}
-        for (const key in staticFilters) {
-            const filter = staticFilters[key]
-            if (filter.op === FilterOp.EqualTo) {
-                recordAgnosticFilters[key] = filter.value
-            } else {
-                recordAgnosticFilters[key] = filter
-            }
-        }
-
-        let inputs = []
+    _transformRecordsIntoFunctionInputs(records: StringKeyMap[], primaryTablePath: string): StringKeyMap | StringKeyMap[] {
+        let inputGroups = []
         for (let i = 0; i < this.requiredArgColPaths.length; i++) {
             const requiredArgColPaths = this.requiredArgColPaths[i]
-            const colPathsToFunctionInputArgs = this.colPathsToFunctionInputArgs[i]
-            const input = []
-
+            const colPathsToFunctionInputArgs = this.colPathsToFunctionInputArgs[i] || {}
+            const valueFilters = this.valueFilters[i]
+            const recordAgnosticFilters = this._formatValueFilterGroupAsInputArgs(valueFilters)
+            const inputGroup = []
             for (const record of records) {
-                const entry = {}
+                const input = {}
 
                 // Map each record to a function input payload.
                 for (const colPath of requiredArgColPaths) {
                     const [colSchemaName, colTableName, colName] = colPath.split('.')
                     const colTablePath = [colSchemaName, colTableName].join('.')
-                    const inputArgs = colPathsToFunctionInputArgs[colPath] || []
+                    const inputArgsWithOps = colPathsToFunctionInputArgs[colPath] || []
 
-                    for (const inputArg of inputArgs) {
+                    for (const { property, op } of inputArgsWithOps) {
                         const recordColKey = colTablePath === primaryTablePath ? colName : colPath
-                        entry[inputArg] = record[recordColKey]
+                        if (!record.hasOwnProperty(recordColKey)) continue 
+                        const value = record[recordColKey]
+                        input[property] = op === FilterOp.EqualTo ? value : { op, value } 
                     }
                 }
 
-                // Build record-specific filters.
-                // NOTE: If any record-specific/column filters exist, the batch size is forced
-                // down to 1, so `records` is actually only has a length of 1.
-                const recordSpecificFilters = {}
-                for (const key in columnFilters) {
-                    const filter = columnFilters[key]
-                    const filterColPath = filter.column
-                    const [schema, table, filterColName] = filterColPath.split('.')
-                    const filterColTablePath = [schema, table].join('.')
-                    const filterRecordColKey =
-                        filterColTablePath === primaryTablePath ? filterColName : filterColPath
-                    if (!record.hasOwnProperty(filterRecordColKey)) continue
-                    const filterValue = record[filterRecordColKey]
-                    if (filterValue === null) continue
-
-                    if (filter.op === FilterOp.EqualTo) {
-                        recordSpecificFilters[key] = filterValue
-                    } else {
-                        recordSpecificFilters[key] = {
-                            op: filter.op,
-                            value: filterValue,
-                        }
-                    }
-                }
-
-                input.push({
+                inputGroup.push({
                     ...recordAgnosticFilters,
-                    ...recordSpecificFilters,
-                    ...entry,
+                    ...input,
                 })
             }
 
-            inputs.push(input)
+            inputGroups.push(inputGroup)
         }
 
-        inputs = inputs.map(groupByKeys)
+        inputGroups = inputGroups.map(group => {
+            const onlyHasOneProperty = Object.keys(group[0] || {}).length === 1
+            if (onlyHasOneProperty) {
+                return groupByKeys(group)
+            }
+            return group
+        })
 
-        return inputs.length > 1 ? inputs : inputs[0]
+        return inputGroups.length > 1 ? inputGroups : inputGroups[0]
+    }
+
+    _formatValueFilterGroupAsInputArgs(valueFilters: { [key: string]: Filter }): StringKeyMap {
+        const inputArgs = {}
+        for (const key in valueFilters) {
+            const filter = valueFilters[key]
+            inputArgs[key] = filter.op === FilterOp.EqualTo ? filter.value : filter
+        }
+        return inputArgs
     }
 
     async _findInputRecordsFromAdjacentCols(
@@ -1137,62 +1101,52 @@ class SeedTableService {
     }
 
     _findSeedFunction() {
-        for (const edgeFunction of this.liveObject.edgeFunctions) {
-            // HACK: For now just take the first GetMany function.
-            if (edgeFunction.role === LiveObjectFunctionRole.GetMany) {
-                this.seedFunction = edgeFunction
-                break
-            }
-        }
+        this.seedFunction = this.liveObject.edgeFunctions.find(ef => (
+            ef.role === LiveObjectFunctionRole.GetMany
+        ))
     }
 
     _findRequiredArgColumns() {
         const requiredArgColPaths = []
         const colPathsToFunctionInputArgs = []
+        const valueFilters = []
 
-        for (const seedWithEntry of this.seedWithColPaths) {
-            const requiredArgColPathsEntry = []
+        for (const filterGroup of this.enrichedLink.filterBy) {
+            const requiredArgColPathsEntry = new Set()
             const colPathsToFunctionInputArgsEntry = {}
+            const valueFiltersEntry = {}
 
-            for (const property in seedWithEntry) {
-                const colPath = seedWithEntry[property]
+            for (const property in filterGroup) {
+                const filter = filterGroup[property]
 
-                if (!requiredArgColPathsEntry.includes(colPath)) {
-                    requiredArgColPathsEntry.push(colPath)
+                if (filter.column) {
+                    requiredArgColPathsEntry.add(filter.column)
+
+                    if (!colPathsToFunctionInputArgsEntry.hasOwnProperty(filter.column)) {
+                        colPathsToFunctionInputArgsEntry[filter.column] = []
+                    }
+
+                    if (filter.op !== FilterOp.EqualTo) {
+
+                    }
+
+                    colPathsToFunctionInputArgsEntry[filter.column].push({
+                        property,
+                        op: filter.op,
+                    })
+                } else {
+                    valueFiltersEntry[property] = filter
                 }
-
-                if (!colPathsToFunctionInputArgsEntry.hasOwnProperty(colPath)) {
-                    colPathsToFunctionInputArgsEntry[colPath] = []
-                }
-                colPathsToFunctionInputArgsEntry[colPath].push(property)
             }
-            if (!requiredArgColPathsEntry.length) continue
 
-            requiredArgColPaths.push(requiredArgColPathsEntry)
+            requiredArgColPaths.push(Array.from(requiredArgColPathsEntry))
             colPathsToFunctionInputArgs.push(colPathsToFunctionInputArgsEntry)
+            valueFilters.push(valueFiltersEntry)
         }
-
+        
         this.requiredArgColPaths = requiredArgColPaths
         this.colPathsToFunctionInputArgs = colPathsToFunctionInputArgs
-    }
-
-    _buildFilters(): { [key: string]: Filter }[] {
-        const objectFilters = this.liveObject.filterBy || {}
-        const linkFilters = this.seedSpec.filterBy || {}
-        const filters = { ...objectFilters, ...linkFilters }
-        if (!Object.keys(filters).length) return [{}, {}]
-        return config.categorizeFilters(filters)
-    }
-
-    _getUniqueConstraint(): string[] {
-        const uniqueConstraint = config.getUniqueConstraintForLink(
-            this.liveObject.id,
-            this.seedTablePath
-        )
-        if (!uniqueConstraint) {
-            throw `No unique constraint for link ${this.liveObject.id} <-> ${this.seedTablePath}`
-        }
-        return uniqueConstraint
+        this.valueFilters = valueFilters
     }
 
     _logResults(t0) {

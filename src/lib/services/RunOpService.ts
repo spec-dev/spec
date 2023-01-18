@@ -71,7 +71,7 @@ class RunOpService {
                 const timestampCol = this.op.primaryTimestampColumn
                 const onlyMergeForwardInTime = timestampCol && mergeColNames.includes(timestampCol)
                 if (onlyMergeForwardInTime) {
-                    insertQuery.whereRaw('??.??.?? < excluded.??', [
+                    insertQuery.whereRaw('??.??.?? <= excluded.??', [
                         this.op.schema, 
                         this.op.table, 
                         timestampCol, 

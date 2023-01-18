@@ -350,7 +350,7 @@ class Spec {
         for (const uniqueKey in uniqueLiveObjectTablePaths) {
             const seedColNames = uniqueLiveObjectTablePaths[uniqueKey]
             const [liveObjectId, tablePath] = uniqueKey.split(':')
-            const link = config.getLink(liveObjectId, tablePath)
+            const link = config.getEnrichedLink(liveObjectId, tablePath)
             if (!link || !link.linkOn) {
                 logger.error(
                     `Not seeding table -- no link or link.linkOn found for (liveObjectId: ${liveObjectId} + 
@@ -361,12 +361,7 @@ class Spec {
             seedSpecs.push({
                 liveObjectId,
                 tablePath,
-                linkProperties: link.linkOn,
-                seedWith: link.seedWith,
-                uniqueBy: link.uniqueBy || null,
-                filterBy: link.filterBy || null,
                 seedColNames,
-                seedIfEmpty: link.seedIfEmpty || true,
             })
         }
 
@@ -395,7 +390,7 @@ class Spec {
             const { liveObjectId, tablePath } = seedCursor.spec
 
             // Ensure this link still exists...
-            if (!config.getLink(liveObjectId, tablePath)) {
+            if (!config.getEnrichedLink(liveObjectId, tablePath)) {
                 deleteSeedCursorIds.push(seedCursor.id)
                 continue
             }
@@ -526,7 +521,7 @@ class Spec {
                 continue
             }
 
-            const link = config.getLink(liveObjectId, tablePath)
+            const link = config.getEnrichedLink(liveObjectId, tablePath)
             if (!link) {
                 deleteSeedCursorIds.push(seedCursor.id)
                 continue
@@ -536,7 +531,6 @@ class Spec {
                 const resolveRecordsService = new ResolveRecordsService(
                     resolveRecordsSpec,
                     liveObject,
-                    link,
                     seedCursor.id,
                     seedCursor.cursor
                 )
@@ -629,7 +623,7 @@ class Spec {
             try {
                 const foreignRecords = await getRecordsForPrimaryKeys(
                     foreignTablePath,
-                    foreignPrimaryKeyData
+                    foreignPrimaryKeyData,
                 )
                 await seedTableService.seedWithForeignRecords(foreignTablePath, foreignRecords)
             } catch (err) {

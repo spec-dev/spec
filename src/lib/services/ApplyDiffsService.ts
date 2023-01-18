@@ -1,5 +1,4 @@
 import {
-    LiveObjectLink,
     LiveObject,
     StringKeyMap,
     StringMap,
@@ -7,27 +6,34 @@ import {
     OpType,
     TableDataSources,
     ColumnDefaultsConfig,
+    EnrichedLink,
+    FilterGroup,
+    FilterOp,
 } from '../types'
 import config from '../config'
 import { db } from '../db'
-import { toMap, unique, getCombinations } from '../utils/formatters'
+import { unique, getCombinations, toMap } from '../utils/formatters'
 import { QueryError } from '../errors'
 import RunOpService from './RunOpService'
 import { getRel, isColTypeArray, tablesMeta } from '../db/tablesMeta'
 import logger from '../logger'
-import constants from '../constants'
 import chalk from 'chalk'
-import { applyDefaults } from '../defaults'
 import { withDeadlockProtection } from '../utils/db'
+import { isDateColType, isTimestampColType } from '../utils/colTypes'
+import { executeFilter } from '../utils/filters'
+import { isSpecTimestampFilterFormat } from '../utils/date'
 
 const valueSep = '__:__'
 
 class ApplyDiffsService {
+
     liveObjectDiffs: StringKeyMap[]
 
-    link: LiveObjectLink
+    enrichedLink: EnrichedLink
 
     liveObject: LiveObject
+
+    filteredDiffs: StringKeyMap[]
 
     ops: Op[] = []
 
@@ -35,31 +41,28 @@ class ApplyDiffsService {
 
     defaultColumnValues: { [key: string]: ColumnDefaultsConfig }
 
-    seedWithColPaths: StringMap[]
-
     tableDataSources: TableDataSources
 
     primaryTimestampColumn: string | null
 
     get linkTablePath(): string {
-        return this.link.table
+        return this.enrichedLink.tablePath
     }
 
     get linkSchemaName(): string {
-        return this.link.table.split('.')[0]
+        return this.linkTablePath.split('.')[0]
     }
 
     get linkTableName(): string {
-        return this.link.table.split('.')[1]
+        return this.linkTablePath.split('.')[1]
     }
 
     get linkProperties(): StringMap {
-        return toMap(this.link.linkOn || {})
+        return this.enrichedLink.linkOn || {}
     }
 
-    get canInsertRecords(): boolean {
-        const link = toMap(this.link)
-        return link.hasOwnProperty('eventsCanInsert') ? !!link.eventsCanInsert : true
+    get linkFilters(): FilterGroup[] {
+        return this.enrichedLink.filterBy
     }
 
     get tablePrimaryKeys(): string[] {
@@ -69,36 +72,24 @@ class ApplyDiffsService {
     }
 
     get linkTableUniqueConstraint(): string[] {
-        const uniqueConstaint = config.getUniqueConstraintForLink(
-            this.liveObject.id,
-            this.linkTablePath
-        )
-        if (!uniqueConstaint)
-            throw `No unique constraint for link ${this.liveObject.id} <-> ${this.linkTablePath}`
-        return uniqueConstaint
-    }
-
-    get defaultFilters(): StringKeyMap {
-        return this.liveObject.filterBy || {}
+        return this.enrichedLink.uniqueConstraint || []
     }
 
     get linkUniqueByProperties(): string[] {
-        return this.link.uniqueBy || Object.keys(this.linkProperties)
+        return this.enrichedLink.uniqueByProperties || []
     }
 
     get primaryTimestampProperty(): string | null {
         return this.liveObject.config?.primaryTimestampProperty || null
     }
 
-    constructor(diffs: StringKeyMap[], link: LiveObjectLink, liveObject: LiveObject) {
+    constructor(diffs: StringKeyMap[], enrichedLink: EnrichedLink, liveObject: LiveObject) {
         this.liveObjectDiffs = diffs
-        this.link = link
+        this.filteredDiffs = diffs
+        this.enrichedLink = enrichedLink
         this.liveObject = liveObject
-        this.liveTableColumns = Object.keys(
-            config.getTable(this.linkSchemaName, this.linkTableName) || {}
-        )
+        this.liveTableColumns = Object.keys(config.getTable(this.linkSchemaName, this.linkTableName) || {})
         this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.linkTablePath)
-        this.seedWithColPaths = config.getSeedColPaths(this.link.seedWith, this.link.linkOn)
         this.tableDataSources = config.getLiveObjectTableDataSources(this.liveObject.id, this.linkTablePath)
         this.primaryTimestampColumn = this.primaryTimestampProperty
             ? ((this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null)
@@ -119,8 +110,14 @@ class ApplyDiffsService {
             return this.ops
         }
 
-        // Upsert or Update records using diffs.
-        await (this.canInsertRecords ? this._createUpsertOps() : this._createUpdateOps())
+        // Apply filters to diffs when present.
+        if (this.linkFilters.length) {
+            await this._filterDiffs()
+        }
+
+        // Convert diffs into upsert operations.
+        this._createUpsertOps()
+        
         return this.ops
     }
 
@@ -136,10 +133,288 @@ class ApplyDiffsService {
         await withDeadlockProtection(op)
     }
 
+    async _filterDiffs() {
+        // Indexes of diffs that meet all filter criteria.
+        const passingDiffIndexes = new Set<number>()
+
+        // Diffs need to pass ONLY ONE of the filter groups.
+        for (let filterGroup of this.linkFilters) {
+            filterGroup = toMap(filterGroup)
+            const {
+                matchingRecordsRegistry,
+                colOperatorFilters,
+                valueFilters,
+                lookupColFilterProperties,
+            } = await this._resolveFilterGroup(filterGroup)
+
+            const equalsColumnFiltersExist = lookupColFilterProperties.length > 0
+            const otherColumnFiltersExist = Object.keys(colOperatorFilters).length > 0
+
+            // Run each diff through each filter in the group.
+            for (let i = 0; i < this.liveObjectDiffs.length; i++) {
+                const diff = this.liveObjectDiffs[i]
+                if (passingDiffIndexes.has(i)) continue
+
+                // Apply value filters first to avoid lookups.
+                const passesValueFilters = this._executeValueFilters(filterGroup, valueFilters, diff)
+                if (!passesValueFilters) continue
+
+                // If no =column filters exist, the diff passes.
+                if (!equalsColumnFiltersExist) {
+                    passingDiffIndexes.add(i)
+                    continue
+                }
+
+                // Apply the =column filters by finding the diff's matching records.
+                const matchingRecords = matchingRecordsRegistry[
+                    lookupColFilterProperties.map(p => diff[p]).join(':')
+                ] || []
+                if (!matchingRecords.length) continue
+
+                // If no other column filters exist (>, >=, <, <=), the diff passes.
+                if (!otherColumnFiltersExist) {
+                    passingDiffIndexes.add(i)
+                    continue
+                }
+
+                // Apply column operator filters.
+                const passesColumnOperatorFilters = this._executeColumnOperatorFilters(
+                    filterGroup,
+                    colOperatorFilters,
+                    diff,
+                    matchingRecords,
+                )
+                if (!passesColumnOperatorFilters) continue
+                
+                // Diff passed all filters.
+                passingDiffIndexes.add(i)
+            }
+        }
+
+        this.filteredDiffs = Array.from(passingDiffIndexes).map(
+            i => this.liveObjectDiffs[i]
+        )
+    }
+
+    _executeValueFilters(
+        filterGroup: FilterGroup, 
+        valueFilters: FilterGroup, 
+        diff: StringKeyMap,
+    ): boolean {
+        for (const property in valueFilters) {
+            const filter = filterGroup[property]
+            const propertyValue = diff[property]
+
+            // Use filter value format to check if date-time type.
+            const isDateTimeColType = isSpecTimestampFilterFormat(filter.value)
+
+            const passesFilter = executeFilter(propertyValue, filter.op, filter.value, isDateTimeColType)
+            if (!passesFilter) {
+                return false
+            }
+        }
+
+        return true
+    }
+
+    _executeColumnOperatorFilters(
+        filterGroup: FilterGroup, 
+        colOperatorFilters: FilterGroup, 
+        diff: StringKeyMap,
+        matchingRecords: StringKeyMap[],
+    ): boolean {
+        for (const record of matchingRecords) {
+            let recordPassesFilters = true
+
+            // Apply operator column filters (>, >=, <, <=).
+            for (const property in colOperatorFilters) {
+                const filter = filterGroup[property]
+                const propertyValue = diff[property]
+                const colValue = record[filter.column]
+
+                // Use column type to check if date-time type.
+                const [colSchema, colTable, colName] = filter.column
+                const colTablePath = [colSchema, colTable].join('.')
+                const colType = tablesMeta[colTablePath].colTypes[colName]
+                const isDateTimeColType = isTimestampColType(colType) || isDateColType(colType)
+
+                const passesFilter = executeFilter(propertyValue, filter.op, colValue, isDateTimeColType)
+                if (!passesFilter) {
+                    recordPassesFilters = false
+                    break
+                }
+            }
+            if (!recordPassesFilters) continue
+
+            return true
+        }
+        return false
+    }
+
+    async _resolveFilterGroup(filterGroup: FilterGroup): Promise<{
+        matchingRecordsRegistry: { [key: string]: StringKeyMap[] }
+        colOperatorFilters: FilterGroup
+        valueFilters: FilterGroup
+        lookupColFilterProperties: string[]
+    }> {            
+        const properyColMappings = {}
+        const lookupColFilterPaths = []
+        const lookupColFilterProperties = []
+        const colOperatorFilters = {}
+        const valueFilters = {}
+        const colFilterTables = new Set()
+        const selectColumns = []
+        const matchingRecordsRegistry = {}
+
+        for (const property in filterGroup) {
+            const filter = filterGroup[property]
+            
+            if (filter.column) {
+                selectColumns.push(`${filter.column} as ${filter.column}`)
+                const [colSchema, colTable, _] = filter.column.split('.')
+                colFilterTables.add([colSchema, colTable].join('.'))
+
+                if (filter.op === FilterOp.EqualTo) {
+                    properyColMappings[property] = filter.column
+                    lookupColFilterPaths.push(filter.column)
+                    lookupColFilterProperties.push(property)
+                } else {
+                    colOperatorFilters[property] = filter
+                }
+            } else {
+                valueFilters[property] = filter
+            }
+        }
+
+        // Return early if no =column filters exist.
+        if (!lookupColFilterProperties.length) {
+            return {
+                matchingRecordsRegistry,
+                colOperatorFilters,
+                valueFilters,
+                lookupColFilterProperties,
+            }
+        }
+
+        // If the link table path is referenced at all in this filter group, use it as the lookup table. 
+        // Otherwise, take the first column filter table, which will be foreign (we can make this assumption 
+        // becuase only 1 foreign table can be referenced in a link's filters).
+        const lookupTablePath = colFilterTables.has(this.linkTablePath) 
+            ? this.linkTablePath 
+            : Array.from(colFilterTables)[0] as string
+
+        const queryConditions = {
+            select: selectColumns,
+            join: [],
+            whereIn: [],
+            where: [],
+        }
+
+        for (const colPath of lookupColFilterPaths) {
+            const [colSchemaName, colTableName, _] = colPath.split('.')
+            const colTablePath = [colSchemaName, colTableName].join('.')
+
+            if (colTablePath !== lookupTablePath) {
+                const rel = getRel(lookupTablePath, colTablePath)
+                if (!rel) throw `No rel from ${lookupTablePath} -> ${colTablePath}`
+
+                queryConditions.join.push([
+                    colTableName,
+                    `${colTablePath}.${rel.referenceKey}`,
+                    `${lookupTablePath}.${rel.foreignKey}`,
+                ])
+            }
+        }
+
+        // Use an inclusive-where query if more than one column filter exists in this group.
+        // Otherwise, a where-in query will be used.
+        const useInclusiveWhere = lookupColFilterPaths.length > 1
+        
+        for (const diff of this.liveObjectDiffs) {
+            // Where-in
+            if (!useInclusiveWhere) {
+                const diffValue = diff[lookupColFilterProperties[0]]
+                if (diffValue === null) continue
+                queryConditions.whereIn.push(diffValue)
+                continue
+            }
+
+            // Inclusive where
+            const where = {}
+            let ignoreDiff = false
+            for (let i = 0; i < lookupColFilterProperties.length; i++) {
+                const diffValue = diff[lookupColFilterProperties[i]]
+                if (diffValue === null) {
+                    ignoreDiff = true
+                    break
+                }
+                where[lookupColFilterPaths[i]] = diffValue
+            }
+            if (ignoreDiff) continue
+            queryConditions.where.push(where)
+        }
+
+        // Return early if no where conditions exist.
+        if (!queryConditions.whereIn.length && !queryConditions.where.length) {
+            return {
+                matchingRecordsRegistry,
+                colOperatorFilters,
+                valueFilters,
+                lookupColFilterProperties,
+            }
+        }
+
+        let query = db.from(lookupTablePath)
+
+        for (let join of queryConditions.join) {
+            const [joinTable, joinRefKey, joinForeignKey] = join
+            query.innerJoin(joinTable, joinRefKey, joinForeignKey)
+        }
+
+        query.select(queryConditions.select)
+
+        if (useInclusiveWhere) {
+            const conditions = queryConditions.where
+            if (queryConditions.where.length) {    
+                query.where((builder) => {
+                    for (let i = 0; i < conditions.length; i++) {
+                        i === 0 ? builder.where(conditions[i]) : builder.orWhere(conditions[i])
+                    }
+                })
+            }
+        } else {
+            const whereInColValues = unique(queryConditions.whereIn)
+            whereInColValues && query.whereIn(lookupColFilterPaths[0], whereInColValues)
+        }
+
+        let matchingRecords = []
+        try {
+            matchingRecords = await query
+        } catch (err) {
+            const [lookupSchemaName, lookupTableName] = lookupTablePath.split('.')
+            throw new QueryError('select', lookupSchemaName, lookupTableName, err)
+        }
+
+        // Index matching records by their lookup column values.
+        for (const record of matchingRecords) {
+            const registryKey = lookupColFilterPaths.map(colPath => record[colPath]).join(':')
+            matchingRecordsRegistry[registryKey] = matchingRecordsRegistry[registryKey] || []
+            matchingRecordsRegistry[registryKey].push(record)
+        }
+
+        return {
+            matchingRecordsRegistry,
+            colOperatorFilters,
+            valueFilters,
+            lookupColFilterProperties,
+        }
+    }
+
     async _createUpsertOps() {
         const properties = this.linkProperties
         const tablePath = this.linkTablePath
         const tableDataSources = this.tableDataSources
+
         let diffs = this.liveObjectDiffs
 
         // Get query conditions for the linked foreign tables with relationships.
@@ -150,6 +425,7 @@ class ApplyDiffsService {
             const colTablePath = `${colSchemaName}.${colTableName}`
             if (colTablePath === tablePath) continue
 
+            // At this point, we know a relationship must exist.
             const rel = getRel(tablePath, colTablePath)
             if (!rel) throw `No rel from ${tablePath} -> ${colTablePath}`
 
@@ -170,9 +446,8 @@ class ApplyDiffsService {
             const values = unique(this.liveObjectDiffs.map((diff) => diff[property]).flat())
 
             if (isColTypeArray(colPath)) {
-                // const arrayValuesPlaceholder = `'{${values.map(_ => '?').join(',')}}'`
                 foreignTableQueryConditions[colTablePath].whereRaw.push([
-                    `${colName} && ARRAY[${values.map((v) => '?').join(',')}]`,
+                    `${colName} && ARRAY[${values.map(() => '?').join(',')}]`,
                     values,
                 ])
             } else {
@@ -180,7 +455,7 @@ class ApplyDiffsService {
             }
         }
 
-        // Find foreign table records potentially needed for reference during inserts.
+        // Find any foreign table records needed for their reference key values.
         const referenceKeyValues = {}
         for (const foreignTablePath in foreignTableQueryConditions) {
             const queryConditions = foreignTableQueryConditions[foreignTablePath]
@@ -224,150 +499,12 @@ class ApplyDiffsService {
             }
         }
 
-        let seedWithTablePath = null
-        if (this.seedWithColPaths.length) {
-            const seedWithColPath = Object.values(this.seedWithColPaths[0])[0]
-            const [seedWithSchemaName, seedWithTableName, _] = seedWithColPath.split('.')
-            seedWithTablePath = [seedWithSchemaName, seedWithTableName].join('.')
-        }
-
-        const hasForeignSeedWithTable = seedWithTablePath && tablePath !== seedWithTablePath
-        const seedWithTableIncludedInLinkProperties =
-            seedWithTablePath &&
-            Object.values(this.linkProperties).filter((colPath) =>
-                colPath.startsWith(`${seedWithTablePath}.`)
-            ).length > 0
-
-        /**
-         * `seedWith[]` is used to filter events if the seed table is a foreign table AND
-         * that table is NOT referenced in the `linkOn` map.
-         */
-        const useSeedWithAsFilter =
-            hasForeignSeedWithTable && !seedWithTableIncludedInLinkProperties
-        if (useSeedWithAsFilter) {
-            const conditions = []
-            const allSeedWithColNames = new Set<string>()
-
-            const entryColNames = []
-            const entryProperties = []
-            for (const entry of this.seedWithColPaths) {
-                const properties = Object.keys(entry).sort()
-                // Use an inclusive where query if more than one key per condition group.
-                const useInclusiveWhere = properties.length > 1
-                const colNames = []
-                for (const property of properties) {
-                    const colName = entry[property].split('.').pop()
-                    colNames.push(colName)
-                    allSeedWithColNames.add(colName)
-                }
-                entryColNames.push(colNames)
-                entryProperties.push(properties)
-
-                const whereIn = {}
-                if (!useInclusiveWhere) {
-                    whereIn[colNames[0]] = []
-                }
-                const whereConditions = []
-                for (const diff of diffs) {
-                    // Where-in
-                    if (!useInclusiveWhere) {
-                        const diffValue = diff[properties[0]]
-                        if (diffValue === null) continue
-                        whereIn[colNames[0]].push(diffValue)
-                        continue
-                    }
-
-                    // Inclusive where
-                    const where = {}
-                    let ignoreDiff = false
-                    for (let i = 0; i < properties.length; i++) {
-                        const diffValue = diff[properties[i]]
-                        if (diffValue === null) {
-                            ignoreDiff = true
-                            break
-                        }
-                        where[colNames[i]] = diffValue
-                    }
-                    if (ignoreDiff) continue
-                    whereConditions.push(where)
-                }
-
-                conditions.push(useInclusiveWhere ? whereConditions : whereIn)
-            }
-
-            const seedWithFilterQuery = db
-                .from(seedWithTablePath)
-                .select(Array.from(allSeedWithColNames))
-
-            let addedFirstCondition = false
-            for (const condition of conditions) {
-                const useInclusiveWhere = Array.isArray(condition)
-
-                // Inclusive where
-                if (useInclusiveWhere) {
-                    if (!condition.length) continue
-
-                    const subQuery = (builder) => {
-                        for (let i = 0; i < condition.length; i++) {
-                            i === 0 ? builder.where(condition[i]) : builder.orWhere(condition[i])
-                        }
-                    }
-                    addedFirstCondition
-                        ? seedWithFilterQuery.orWhere(subQuery)
-                        : seedWithFilterQuery.where(subQuery)
-
-                    addedFirstCondition = true
-                }
-                // Where-in
-                else {
-                    const colName = Object.keys(condition)[0]
-                    const values = condition[colName] || []
-                    if (!values.length) continue
-
-                    addedFirstCondition
-                        ? seedWithFilterQuery.orWhereIn(colName, values)
-                        : seedWithFilterQuery.whereIn(colName, values)
-
-                    addedFirstCondition = true
-                }
-            }
-
-            let matchingSeedWithForeignRecords = []
-            try {
-                matchingSeedWithForeignRecords = await seedWithFilterQuery
-            } catch (err) {
-                const [seedWithSchemaName, seedWithTableName] = seedWithTablePath.split('.')
-                throw new QueryError('select', seedWithSchemaName, seedWithTableName, err)
-            }
-
-            const matchingSeedWithForeignRecordsRegistry = new Set<string>()
-            for (const record of matchingSeedWithForeignRecords) {
-                for (const colNames of entryColNames) {
-                    const matchingRecordKey = colNames.map((colName) => record[colName]).join(':')
-                    matchingSeedWithForeignRecordsRegistry.add(matchingRecordKey)
-                }
-            }
-
-            const filteredDiffs = []
-            for (const diff of diffs) {
-                for (const properties of entryProperties) {
-                    const lookupRecordKey = properties.map((property) => diff[property]).join(':')
-
-                    if (matchingSeedWithForeignRecordsRegistry.has(lookupRecordKey)) {
-                        filteredDiffs.push(diff)
-                        break
-                    }
-                }
-            }
-            diffs = filteredDiffs
-        }
-
-        const missingLinkedForeignTables = {}
-
         // Format record objects to upsert.
         const upsertRecords = []
         for (const diff of diffs) {
             const upsertRecord: StringKeyMap = {}
+
+            // Map properties -> column_names
             for (const property in diff) {
                 const colsWithThisPropertyAsDataSource = tableDataSources[property] || []
                 const value = diff[property]
@@ -376,6 +513,7 @@ class ApplyDiffsService {
                 }
             }
 
+            // If no relationships to resolve, the record data is ready & formatted.
             if (!Object.keys(foreignTableQueryConditions).length) {
                 upsertRecords.push(upsertRecord)
                 continue
@@ -384,61 +522,24 @@ class ApplyDiffsService {
             let ignoreDiff = false
             const groupedForeignKeyValues = []
             const foreignKeyColNames = []
-            const missingForeignLookups = {}
-
             for (const foreignTablePath in foreignTableQueryConditions) {
                 const queryConditions = foreignTableQueryConditions[foreignTablePath]
                 const foreignRefKey = queryConditions.properties.map((p) => diff[p]).join(valueSep)
-                const foreignRefKeyValues =
-                    referenceKeyValues[foreignTablePath][foreignRefKey] || []
+                const foreignRefKeyValues = referenceKeyValues[foreignTablePath][foreignRefKey] || []
+
+                // If matching foreign record couldn't be found, ignore this diff.
                 const foreignRecordIsMissing = !foreignRefKeyValues?.length
-
-                // Linked foreign record is missing...
                 if (foreignRecordIsMissing) {
-                    // Don't insert any new foreign records to the relationship with the seed table.
-                    if (foreignTablePath === seedWithTablePath) {
-                        ignoreDiff = true
-                        break
-                    }
-
-                    // HACK/ASSUMPTION: There's only 1 property associated with this foreign table.
-                    const property = queryConditions.properties[0]
-                    const colName = queryConditions.colNames[0]
-                    const foreignKey = queryConditions.rel.foreignKey
-                    const referenceKey = queryConditions.rel.referenceKey
-                    const colValue = diff[property]
-
-                    if (!missingLinkedForeignTables.hasOwnProperty(foreignTablePath)) {
-                        missingLinkedForeignTables[foreignTablePath] = {
-                            tablePath: foreignTablePath,
-                            property,
-                            colName,
-                            foreignKey,
-                            referenceKey,
-                            colValues: [],
-                        }
-                    }
-
-                    missingLinkedForeignTables[foreignTablePath].colValues.push(colValue)
-                    missingForeignLookups[foreignTablePath] = colValue
-
-                    // Just added for the sake of having a single value to run getCombinations against below,
-                    // while acting as a placeholder to be replace with the reference key later.
-                    groupedForeignKeyValues.push([colValue])
-                    foreignKeyColNames.push(foreignKey)
-                } else {
-                    groupedForeignKeyValues.push(foreignRefKeyValues)
-                    foreignKeyColNames.push(queryConditions.rel.foreignKey)
+                    ignoreDiff = true
+                    break
                 }
+
+                groupedForeignKeyValues.push(foreignRefKeyValues)
+                foreignKeyColNames.push(queryConditions.rel.foreignKey)
             }
             if (ignoreDiff) continue
 
-            if (Object.keys(missingForeignLookups).length > 0) {
-                upsertRecord._missingForeignLookups = missingForeignLookups
-            }
-
             const uniqueForeignKeyCombinations = getCombinations(groupedForeignKeyValues)
-
             for (const foreignKeyValues of uniqueForeignKeyCombinations) {
                 const record = { ...upsertRecord }
                 for (let i = 0; i < foreignKeyValues.length; i++) {
@@ -452,52 +553,11 @@ class ApplyDiffsService {
         const op = async () => {
             try {
                 await db.transaction(async (tx) => {
-                    const resolvedDependentForeignTables = await Promise.all(
-                        Object.values(missingLinkedForeignTables)
-                            .filter((v) => (v as any).colValues.length > 0)
-                            .map((v) => this._findOrCreateDependentForeignTable(v, tx))
-                    )
-                    const resolvedDependentForeignTablesMap = {}
-                    for (const resolvedDependentForeignTable of resolvedDependentForeignTables) {
-                        resolvedDependentForeignTablesMap[resolvedDependentForeignTable.tablePath] =
-                            resolvedDependentForeignTable
-                    }
-    
-                    const finalUpsertRecords = []
-                    for (const upsertRecord of upsertRecords) {
-                        if (!upsertRecord.hasOwnProperty('_missingForeignLookups')) {
-                            finalUpsertRecords.push(upsertRecord)
-                            continue
-                        }
-    
-                        let ignoreRecord = false
-                        for (const foreignTablePath in upsertRecord._missingForeignLookups) {
-                            const colValueUsedAtLookup =
-                                upsertRecord._missingForeignLookups[foreignTablePath]
-                            const resolvedDependentForeignTable =
-                                resolvedDependentForeignTablesMap[foreignTablePath] || {}
-                            const { referenceKeyValuesMap = {}, foreignKey } =
-                                resolvedDependentForeignTable
-    
-                            if (!referenceKeyValuesMap.hasOwnProperty(colValueUsedAtLookup)) {
-                                ignoreRecord = true
-                                break
-                            }
-    
-                            upsertRecord[foreignKey] = referenceKeyValuesMap[colValueUsedAtLookup]
-                        }
-                        if (ignoreRecord) continue
-    
-                        delete upsertRecord._missingForeignLookups
-                        finalUpsertRecords.push(upsertRecord)
-                    }
-                    if (!finalUpsertRecords.length) return
-    
                     const upsertBatchOp = {
                         type: OpType.Insert,
                         schema: this.linkSchemaName,
                         table: this.linkTableName,
-                        data: finalUpsertRecords,
+                        data: upsertRecords,
                         conflictTargets: this.linkTableUniqueConstraint,
                         liveTableColumns: this.liveTableColumns,
                         primaryTimestampColumn: this.primaryTimestampColumn,
@@ -506,10 +566,9 @@ class ApplyDiffsService {
     
                     logger.info(
                         chalk.green(
-                            `Upserting ${finalUpsertRecords.length} records in ${this.linkSchemaName}.${this.linkTableName}...`
+                            `Upserting ${upsertRecords.length} records in ${this.linkSchemaName}.${this.linkTableName}...`
                         )
                     )
-    
                     await new RunOpService(upsertBatchOp, tx).perform()
                 })
             } catch (err) {
@@ -518,336 +577,6 @@ class ApplyDiffsService {
         }
 
         await withDeadlockProtection(op)
-    }
-
-    async _findOrCreateDependentForeignTable(missingLinkedForeignTableEntry, tx) {
-        const { tablePath, property, colName, foreignKey, referenceKey } =
-            missingLinkedForeignTableEntry
-        const colValues = unique(missingLinkedForeignTableEntry.colValues)
-        const resp = {
-            tablePath,
-            property,
-            colName,
-            foreignKey,
-            referenceKey,
-            referenceKeyValuesMap: {},
-        }
-        if (!colValues.length) return resp
-
-        const colValuesSet = new Set(colValues)
-
-        let data = colValues.map((value) => ({ [colName]: value }))
-
-        // Apply any default column values configured by the user.
-        const defaultColValues = config.getDefaultColumnValuesForTable(tablePath)
-        if (Object.keys(defaultColValues).length) {
-            data = applyDefaults(data, defaultColValues) as StringKeyMap[]
-        }
-
-        // TODO: If colName doesn't have a unique constraint, this method will fail
-        // and you'll need to do a classic find...create.
-        let results = []
-        try {
-            results = await tx(tablePath)
-                .returning(unique([referenceKey, colName]))
-                .insert(data)
-                .onConflict(colName)
-                .ignore()
-
-            results = results || []
-
-            if (results.length < data.length) {
-                for (const newRecord of results) {
-                    colValuesSet.delete(newRecord[colName])
-                }
-                const existingRecordColValues = Array.from(colValuesSet)
-                if (existingRecordColValues.length) {
-                    const existingResults = await tx(tablePath)
-                        .select(unique([referenceKey, colName]))
-                        .whereIn(colName, existingRecordColValues)
-                    results.push(...(existingResults || []))
-                }
-            }
-        } catch (err) {
-            logger.error(`Error creating dependent foreign table ${tablePath}: ${err}`)
-            return resp
-        }
-
-        const referenceKeyValuesMap = {}
-        for (const result of results || []) {
-            const colValue = result[colName]
-            const referenceKeyValue = result[referenceKey]
-            referenceKeyValuesMap[colValue] = referenceKeyValue
-        }
-
-        resp.referenceKeyValuesMap = referenceKeyValuesMap
-        return resp
-    }
-
-    async _createUpdateOps() {
-        await (this.liveObjectDiffs > constants.MAX_UPDATES_BEFORE_BULK_UPDATE_USED
-            ? this._createBulkUpdateOp()
-            : this._createIndividualUpdateOps())
-    }
-
-    async _createIndividualUpdateOps() {
-        const properties = this.linkProperties
-        const tablePath = this.linkTablePath
-        const tableDataSources = this.tableDataSources
-
-        // Get query conditions for the linked foreign tables.
-        const foreignTableQueryConditions = {}
-        for (const property in properties) {
-            const colPath = properties[property]
-            const [colSchemaName, colTableName, colName] = colPath.split('.')
-            const colTablePath = `${colSchemaName}.${colTableName}`
-            if (colTablePath === tablePath) continue
-
-            const rel = getRel(tablePath, colTablePath)
-            if (!rel) throw `No rel from ${tablePath} -> ${colTablePath}`
-
-            if (!foreignTableQueryConditions.hasOwnProperty(colTablePath)) {
-                foreignTableQueryConditions[colTablePath] = {
-                    rel,
-                    tablePath: colTablePath,
-                    whereIn: [],
-                    properties: [],
-                    colNames: [],
-                }
-            }
-
-            foreignTableQueryConditions[colTablePath].properties.push(property)
-            foreignTableQueryConditions[colTablePath].colNames.push(colName)
-            foreignTableQueryConditions[colTablePath].whereIn.push([
-                colName,
-                unique(this.liveObjectDiffs.map((diff) => diff[property])),
-            ])
-        }
-
-        // Find foreign table records potentially needed for reference.
-        const referenceKeyValues = {}
-        for (const foreignTablePath in foreignTableQueryConditions) {
-            const queryConditions = foreignTableQueryConditions[foreignTablePath]
-            let query = db.from(foreignTablePath)
-
-            for (let i = 0; i < queryConditions.whereIn.length; i++) {
-                const [col, vals] = queryConditions.whereIn[i]
-                query.whereIn(col, vals)
-            }
-
-            let records
-            try {
-                records = await query
-            } catch (err) {
-                const [foreignSchema, foreignTable] = foreignTablePath.split('.')
-                throw new QueryError('select', foreignSchema, foreignTable, err)
-            }
-            records = records || []
-            if (records.length === 0) {
-                return
-            }
-
-            referenceKeyValues[foreignTablePath] = {}
-            for (const record of records) {
-                const key = queryConditions.colNames
-                    .map((colName) => record[colName])
-                    .join(valueSep)
-                if (referenceKeyValues[foreignTablePath].hasOwnProperty(key)) continue
-                referenceKeyValues[foreignTablePath][key] = record[queryConditions.rel.referenceKey]
-            }
-        }
-
-        // Format record objects to update.
-        for (const diff of this.liveObjectDiffs) {
-            const updates = {}
-            const where = {}
-            for (const property in diff) {
-                const value = diff[property]
-                // If this is a linked property...
-                if (properties.hasOwnProperty(property)) {
-                    const linkedColPath = properties[property]
-                    const [colSchemaName, colTableName, colName] = linkedColPath.split('.')
-                    const colTablePath = `${colSchemaName}.${colTableName}`
-                    if (colTablePath === tablePath) {
-                        where[colName] = value
-                    }
-                } else {
-                    const colsWithThisPropertyAsDataSource = tableDataSources[property] || []
-                    for (const { columnName } of colsWithThisPropertyAsDataSource) {
-                        updates[columnName] = value
-                    }
-                }
-            }
-            if (!Object.keys(updates).length) continue
-
-            let ignoreDiff = false
-            for (const foreignTablePath in foreignTableQueryConditions) {
-                const queryConditions = foreignTableQueryConditions[foreignTablePath]
-                const uniqueForeignRefKey = queryConditions.properties
-                    .map((property) => diff[property])
-                    .join(valueSep)
-                if (!referenceKeyValues[foreignTablePath].hasOwnProperty(uniqueForeignRefKey)) {
-                    ignoreDiff = true
-                    break
-                }
-                const referenceKeyValue = referenceKeyValues[foreignTablePath][uniqueForeignRefKey]
-                where[queryConditions.rel.foreignKey] = referenceKeyValue
-            }
-            if (ignoreDiff) continue
-
-            this.ops.push({
-                type: OpType.Update,
-                schema: this.linkSchemaName,
-                table: this.linkTableName,
-                where,
-                data: updates,
-                liveTableColumns: this.liveTableColumns,
-                primaryTimestampColumn: this.primaryTimestampColumn,
-                defaultColumnValues: this.defaultColumnValues,
-            })
-        }
-    }
-
-    async _createBulkUpdateOp() {
-        const queryConditions = this._getExistingRecordQueryConditions()
-
-        // Start a new query on the linked table.
-        let query = db.from(this.linkTablePath)
-
-        // Add JOIN conditions.
-        for (let join of queryConditions.join) {
-            const [joinTable, joinRefKey, joinForeignKey] = join
-            query.innerJoin(joinTable, joinRefKey, joinForeignKey)
-        }
-
-        // Add SELECT conditions.
-        query.select(queryConditions.select)
-
-        // Add WHERE-IN conditions.
-        for (let i = 0; i < queryConditions.whereIn.length; i++) {
-            const [col, vals] = queryConditions.whereIn[i]
-            query.whereIn(col, vals)
-        }
-
-        let records = []
-        try {
-            records = await query
-        } catch (err) {
-            throw new QueryError('select', this.linkSchemaName, this.linkTableName, err)
-        }
-        if (!records.length) return
-
-        const uniqueByProperties = this.linkUniqueByProperties
-        const uniqueDiffs = {}
-        for (const diff of this.liveObjectDiffs) {
-            const uniqueKeyComps = []
-            for (const linkPropertyKey of uniqueByProperties) {
-                const value = diff[linkPropertyKey] || ''
-                uniqueKeyComps.push(value)
-            }
-            const uniqueKey = uniqueKeyComps.join(valueSep)
-            uniqueDiffs[uniqueKey] = { ...(uniqueDiffs[uniqueKey] || {}), ...diff }
-        }
-
-        const linkProperties = this.linkProperties
-        const where = []
-        const updates = []
-        const tablePrimaryKeys = this.tablePrimaryKeys
-        const tableDataSources = this.tableDataSources
-
-        for (const record of records) {
-            // Get the diff associated with this record (if exists).
-            const uniqueKeyComps = []
-            let ignoreRecord = false
-            for (const linkPropertyKey of uniqueByProperties) {
-                const colPath = linkProperties[linkPropertyKey]
-                if (!colPath) {
-                    ignoreRecord = true
-                    break
-                }
-                const [colSchemaName, colTableName, colName] = colPath.split('.')
-                const colTablePath = `${colSchemaName}.${colTableName}`
-                const value = record[colTablePath === this.linkTablePath ? colName : colPath] || ''
-                uniqueKeyComps.push(value)
-            }
-            if (ignoreRecord) continue
-            const uniqueKey = uniqueKeyComps.join(valueSep)
-            const diff = uniqueDiffs[uniqueKey]
-            if (!diff) continue
-
-            // Build a record updates map using the diff, ignoring any linked properties.
-            const recordUpdates = {}
-            for (const property in tableDataSources) {
-                if (linkProperties.hasOwnProperty(property) || !diff.hasOwnProperty(property))
-                    continue
-                const colNames = tableDataSources[property].map((ds) => ds.columnName)
-                for (const colName of colNames) {
-                    recordUpdates[colName] = diff[property]
-                }
-            }
-            if (!Object.keys(recordUpdates).length) continue
-
-            // Create the lookup/where conditions for the update.
-            // These will just be the primary keys / values of this record.
-            const pkConditions = {}
-            for (let primaryKey of tablePrimaryKeys) {
-                pkConditions[primaryKey] = record[primaryKey]
-            }
-
-            updates.push(recordUpdates)
-            where.push(pkConditions)
-        }
-        if (!updates.length) return
-
-        this.ops.push({
-            type: OpType.Update,
-            schema: this.linkSchemaName,
-            table: this.linkTableName,
-            where,
-            data: updates,
-            liveTableColumns: this.liveTableColumns,
-            primaryTimestampColumn: this.primaryTimestampColumn,
-            defaultColumnValues: this.defaultColumnValues,
-        })
-    }
-
-    _getExistingRecordQueryConditions(): StringKeyMap {
-        const queryConditions = {
-            join: [],
-            select: [`${this.linkTablePath}.*`],
-            whereIn: [],
-        }
-        const properties = this.linkProperties
-        const tablePath = this.linkTablePath
-
-        for (const property in properties) {
-            const colPath = properties[property]
-            const [colSchemaName, colTableName, colName] = colPath.split('.')
-            const colTablePath = `${colSchemaName}.${colTableName}`
-
-            if (colTablePath === tablePath) {
-                queryConditions.whereIn.push([
-                    colName,
-                    unique(this.liveObjectDiffs.map((diff) => diff[property])),
-                ])
-            } else {
-                const rel = getRel(tablePath, colTablePath)
-                if (!rel) throw `No rel from ${tablePath} -> ${colTablePath}`
-
-                queryConditions.join.push([
-                    colTableName,
-                    `${colTablePath}.${rel.referenceKey}`,
-                    `${tablePath}.${rel.foreignKey}`,
-                ])
-
-                queryConditions.select.push(`${colPath} as ${colPath}`)
-                queryConditions.whereIn.push([
-                    colPath,
-                    unique(this.liveObjectDiffs.map((diff) => diff[property])),
-                ])
-            }
-        }
-        return queryConditions
     }
 }
 

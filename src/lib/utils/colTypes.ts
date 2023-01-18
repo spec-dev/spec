@@ -12,3 +12,5 @@ export const numericColTypes = new Set([
 ])
 
 export const isTimestampColType = (colType: string): boolean => !!colType.match(/timestamp/gi)
+
+export const isDateColType = (colType: string): boolean => colType === 'date'

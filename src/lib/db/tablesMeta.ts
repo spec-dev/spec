@@ -67,7 +67,7 @@ export async function pullTableMeta(tablePath: string) {
     for (const colType of colTypes) {
         colTypesMap[colType.name] = colType.type
     }
-
+    
     // Register table with the global metadata holder.
     tablesMeta[tablePath] = {
         schema,
@@ -87,6 +87,11 @@ export function getRel(tablePath: string, foreignTablePath: string): ForeignKeyC
             (fk) => fk.foreignSchema === foreignSchema && fk.foreignTable === foreignTable
         ) || null
     )
+}
+
+export function getTableColNames(tablePath: string): string[] {
+    const meta = tablesMeta[tablePath]
+    return Object.keys(meta?.colTypes || {})
 }
 
 export async function getTableConstraints(
