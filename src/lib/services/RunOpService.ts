@@ -5,8 +5,9 @@ import { Knex } from 'knex'
 import short from 'short-uuid'
 import { tablesMeta } from '../db/tablesMeta'
 import { pool, db } from '../db'
-import { mergeByKeys } from '../utils/formatters'
+import { mergeByKeys, stringify } from '../utils/formatters'
 import { applyDefaults } from '../defaults'
+import { isJSONColType } from '../utils/colTypes'
 
 class RunOpService {
     op: Op
@@ -47,6 +48,9 @@ class RunOpService {
         if (Object.keys(this.op.defaultColumnValues).length) {
             data = applyDefaults(data, this.op.defaultColumnValues) as StringKeyMap[]
         }
+
+        // Ensure JSON columns are JSON.
+        data = this._enforceJSONColumns(data)
 
         // Add upsert functionality if specified.
         const conflictTargets = this.op.conflictTargets
@@ -96,6 +100,31 @@ class RunOpService {
         } catch (err) {
             throw new QueryError('insert', this.op.schema, this.op.table, err)
         }
+    }
+
+    _enforceJSONColumns(data: StringKeyMap[]): StringKeyMap[] {
+        const colTypes = tablesMeta[this.tablePath].colTypes
+        const jsonColNames = []
+        for (const colName in colTypes) {
+            const colType = colTypes[colName]
+            if (isJSONColType(colType)) {
+                jsonColNames.push(colName)
+            }
+        }
+        if (!jsonColNames.length) return data
+
+        const newData = []
+        for (const record of data) {
+            const updates = {}
+            for (const colName of jsonColNames) {
+                updates[colName] = stringify(record[colName])
+            }
+            newData.push({
+                ...record,
+                ...updates,
+            })
+        }
+        return newData
     }
 
     async _runUpdate() {

@@ -13,7 +13,7 @@ import {
 } from '../types'
 import { reverseMap, toMap, unique, getCombinations, groupByKeys } from '../utils/formatters'
 import RunOpService from './RunOpService'
-import { callSpecFunction } from '../utils/requests'
+import { querySharedTable } from '../shared-tables/client'
 import config from '../config'
 import { db } from '../db'
 import { QueryError } from '../errors'
@@ -40,8 +40,6 @@ class ResolveRecordsService {
     cursor: number
 
     seedCount: number = 0
-
-    resolveFunction: EdgeFunction | null
 
     inputArgColPaths: string[] = []
 
@@ -110,6 +108,10 @@ class ResolveRecordsService {
         return this.liveObject.config?.primaryTimestampProperty || null
     }
 
+    get sharedTablePath(): string {
+        return this.liveObject.config.table
+    }
+
     constructor(
         resolveRecordsSpec: ResolveRecordsSpec,
         liveObject: LiveObject,
@@ -121,7 +123,6 @@ class ResolveRecordsService {
         this.primaryKeyData = resolveRecordsSpec.primaryKeyData
         this.seedCursorId = seedCursorId
         this.cursor = cursor
-        this.resolveFunction = null
         this.liveTableColumns = Object.keys(config.getTable(this.schemaName, this.tableName) || {})
         this.tableDataSources = config.getLiveObjectTableDataSources(this.liveObject.id, this.tablePath)
 
@@ -136,13 +137,6 @@ class ResolveRecordsService {
     }
 
     async perform() {
-        // Find resolve function to use.
-        this._findResolveFunction()
-        if (!this.resolveFunction) {
-            // logger.warn(`Live object ${this.liveObject.id} has no associated resolve function.`)
-            return
-        }
-
         // Find the input args for this function and their associated columns.
         this._findInputArgColumns()
         if (!this.inputArgColPaths.length) throw 'No input arg column paths found.'
@@ -164,8 +158,8 @@ class ResolveRecordsService {
         const sharedErrorContext = { error: null }
         const t0 = performance.now()
         try {
-            await callSpecFunction(
-                this.resolveFunction,
+            await querySharedTable(
+                this.sharedTablePath,
                 this.batchFunctionInputs,
                 async (data) =>
                     await this._handleFunctionRespData(data as StringKeyMap[]).catch((err) => {
@@ -402,26 +396,17 @@ class ResolveRecordsService {
         return queryConditions
     }
 
-    _findResolveFunction() {
-        this.liveObject.edgeFunctions.find(ef => (
-            ef.role === LiveObjectFunctionRole.GetOne
-        )) || this.liveObject.edgeFunctions[0]
-    }
-
     /**
      * Just use all linked property columns.
      */
     _findInputArgColumns() {
-        const { argsMap } = this.resolveFunction
         const linkProperties = this.linkProperties
-
         const inputArgColPaths = []
         const colPathToFunctionInputArg = {}
         for (let property in this.linkProperties) {
             const colPath = linkProperties[property]
-            const inputArg = argsMap[property] || property
             inputArgColPaths.push(colPath)
-            colPathToFunctionInputArg[colPath] = inputArg
+            colPathToFunctionInputArg[colPath] = property
         }
 
         this.inputArgColPaths = inputArgColPaths

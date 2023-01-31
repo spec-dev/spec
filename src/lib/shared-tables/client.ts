@@ -1,28 +1,36 @@
-import { StringKeyMap, EdgeFunction } from '../types'
+import { StringKeyMap } from '../types'
 import fetch, { Response } from 'node-fetch'
 import { JSONParser } from '@streamparser/json'
 import constants from '../constants'
 import logger from '../logger'
+import { buildQuery } from './queryBuilder'
+import { camelizeKeys } from 'humps'
 
 type onDataCallbackType = (data: StringKeyMap | StringKeyMap[]) => Promise<void>
 
-const isStreamingResp = (resp: Response): boolean =>
-    resp.headers?.get('Transfer-Encoding') === 'chunked'
+const isStreamingResp = (resp: Response): boolean => resp.headers?.get('Transfer-Encoding') === 'chunked'
 
-export async function callSpecFunction(
-    edgeFunction: EdgeFunction,
+const queryUrl = (() => {
+    const url = new URL(constants.SHARED_TABLES_ORIGIN)
+    url.pathname = '/stream'
+    return url.toString()
+})()
+
+export async function querySharedTable(
+    tablePath: string,
     payload: StringKeyMap | StringKeyMap[],
     onData: onDataCallbackType,
     sharedErrorContext: StringKeyMap,
     hasRetried?: boolean
 ) {
+    const filters = buildQuery(tablePath, stringifyAnyDates(payload))
     const abortController = new AbortController()
     const initialRequestTimer = setTimeout(() => abortController.abort(), 60000)
-    const resp = await makeRequest(edgeFunction, payload, abortController)
+    const resp = await makeRequest(tablePath, filters, abortController)
     clearTimeout(initialRequestTimer)
 
     if (!isStreamingResp(resp)) {
-        await handleJSONResp(resp, edgeFunction, onData)
+        await handleJSONResp(resp, tablePath, onData)
         return
     }
 
@@ -32,7 +40,7 @@ export async function callSpecFunction(
         const message = err.message || err || ''
         if (!hasRetried && message.toLowerCase().includes('user aborted')) {
             logger.warn('Retrying spec function request...')
-            await callSpecFunction(edgeFunction, payload, onData, sharedErrorContext, true)
+            await querySharedTable(tablePath, payload, onData, sharedErrorContext, true)
         } else {
             throw err
         }
@@ -41,14 +49,14 @@ export async function callSpecFunction(
 
 async function handleJSONResp(
     resp: Response,
-    edgeFunction: EdgeFunction,
+    tablePath: string,
     onData: onDataCallbackType
 ) {
     let data
     try {
         data = await resp.json()
     } catch (err) {
-        throw `Failed to parse JSON response data from edge function ${edgeFunction.name}: ${
+        throw `Failed to parse JSON response data while querying shared table ${tablePath}: ${
             err?.message || err
         }`
     }
@@ -83,7 +91,9 @@ async function handleStreamingResp(
         if (!obj) return
         obj = obj as StringKeyMap
         if (obj.error) throw obj.error // Throw any errors explicitly passed back
-
+        
+        obj = camelizeKeys(obj)
+        
         batch.push(obj)
         if (batch.length === constants.STREAMING_SEED_UPSERT_BATCH_SIZE) {
             pendingDataPromise = onData([...batch])
@@ -95,16 +105,13 @@ async function handleStreamingResp(
     try {
         for await (chunk of resp.body) {
             renewTimer()
-
             if (sharedErrorContext.error) {
                 throw `Error handling streaming response batch: ${sharedErrorContext.error}`
             }
-
             if (pendingDataPromise) {
                 await pendingDataPromise
                 pendingDataPromise = null
             }
-
             jsonParser.write(chunk)
         }
     } catch (err) {
@@ -119,25 +126,23 @@ async function handleStreamingResp(
 }
 
 async function makeRequest(
-    edgeFunction: EdgeFunction,
+    tablePath: string,
     payload: StringKeyMap | StringKeyMap[],
     abortController: AbortController
 ): Promise<Response> {
-    payload = stringifyAnyDates(payload)
-
     let resp: Response
     try {
-        resp = await fetch(edgeFunction.url, {
+        resp = await fetch(queryUrl, {
             method: 'POST',
-            body: JSON.stringify(payload || {}),
+            body: JSON.stringify(payload),
             headers: { 'Content-Type': 'application/json' },
             signal: abortController.signal,
         })
     } catch (err) {
-        throw `Unexpected error calling edge function ${edgeFunction.name}: ${err?.message || err}`
+        throw `Unexpected error querying shared table ${tablePath}: ${err?.message || err}`
     }
     if (resp?.status !== 200) {
-        throw `Edge function (${edgeFunction.name}) call failed: got response code ${resp?.status}`
+        throw `Querying shared table (${tablePath}) failed: got response code ${resp?.status}`
     }
     return resp
 }

@@ -50,6 +50,8 @@ const constants: StringKeyMap = {
     LOGS_HOSTNAME: ev('LOGS_HOSTNAME', 'logs.spec.dev'),
     LOGS_PORT: Number(ev('LOGS_PORT', 443)),
     STREAM_LOGS: !['false', false].includes(ev('STREAM_LOGS')),
+
+    SHARED_TABLES_ORIGIN: ev('SHARED_TABLES_ORIGIN', 'https://tables-ingress.spec.dev'),
 }
 
 constants.PROJECT_CONFIG_PATH = path.join(

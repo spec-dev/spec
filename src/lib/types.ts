@@ -314,3 +314,8 @@ export interface EnrichedLink {
     linkOn: StringKeyMap,
     filterBy: FilterGroup[]
 }
+
+export type SharedTablesQueryPayload = {
+    sql: string
+    bindings: any[]
+}

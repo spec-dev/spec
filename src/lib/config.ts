@@ -1041,7 +1041,7 @@ class Config {
                 this.prevConfig = this.config
             }
             const file = fs.readFileSync(constants.PROJECT_CONFIG_PATH, 'utf-8')
-            this.config = toml.parse(file) as unknown as ProjectConfig
+            this.config = toml.parse(file, { bigint: false }) as unknown as ProjectConfig
             this.fileContents = file.toString()
         } catch (err) {
             throw new ConfigError(err)

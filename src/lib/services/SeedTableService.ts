@@ -17,7 +17,7 @@ import {
 import { reverseMap, getCombinations, unique, groupByKeys } from '../utils/formatters'
 import { areColumnsEmpty } from '../db/ops'
 import RunOpService from './RunOpService'
-import { callSpecFunction } from '../utils/requests'
+import { querySharedTable } from '../shared-tables/client'
 import config from '../config'
 import { db } from '../db'
 import { QueryError } from '../errors'
@@ -40,8 +40,6 @@ class SeedTableService {
     seedCursorId: string
 
     cursor: number
-
-    seedFunction: EdgeFunction | null
 
     seedColNames: Set<string>
 
@@ -103,12 +101,15 @@ class SeedTableService {
         return this.liveObject.config?.primaryTimestampProperty || null
     }
 
+    get sharedTablePath(): string {
+        return this.liveObject.config.table
+    }
+
     constructor(seedSpec: SeedSpec, liveObject: LiveObject, seedCursorId: string, cursor: number) {
         this.seedSpec = seedSpec
         this.liveObject = liveObject
         this.seedCursorId = seedCursorId
         this.cursor = cursor || 0
-        this.seedFunction = null
         this.seedColNames = new Set<string>(this.seedSpec.seedColNames)
         this.tableDataSources = config.getLiveObjectTableDataSources(
             this.liveObject.id,
@@ -128,6 +129,7 @@ class SeedTableService {
             ? ((this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null)
             : null
 
+
         this.seedStrategy = null
     }
 
@@ -137,10 +139,6 @@ class SeedTableService {
     }
 
     async determineSeedStrategy() {
-        // Find seed function to use.
-        this._findSeedFunction()
-        if (!this.seedFunction) throw 'Live object doesn\'t have an associated seed function.'
-
         // Find the required args for this function and their associated columns.
         this._findRequiredArgColumns()
 
@@ -205,10 +203,6 @@ class SeedTableService {
     }
 
     async seedWithForeignRecords(foreignTablePath: string, records: StringKeyMap[]) {
-        // Find seed function to use.
-        this._findSeedFunction()
-        if (!this.seedFunction) throw "Live object doesn't have an associated seed function."
-
         // Find the required args for this function and their associated columns.
         this._findRequiredArgColumns()
         if (!this.requiredArgColPaths.length) throw 'No required arg column paths found.'
@@ -261,8 +255,8 @@ class SeedTableService {
         const sharedErrorContext = { error: null }
         const t0 = performance.now()
         try {
-            await callSpecFunction(
-                this.seedFunction,
+            await querySharedTable(
+                this.sharedTablePath,
                 inputArgs,
                 async (data) =>
                     this._handleDataOnSeedFromScratch(data as StringKeyMap[]).catch((err) => {
@@ -370,8 +364,8 @@ class SeedTableService {
             // Call spec function and handle response data.
             t0 = t0 || performance.now()
             try {
-                await callSpecFunction(
-                    this.seedFunction,
+                await querySharedTable(
+                    this.sharedTablePath,
                     batchFunctionInput,
                     onFunctionRespData,
                     sharedErrorContext
@@ -536,8 +530,8 @@ class SeedTableService {
             this.inputBatchSeedCount = 0
             t0 = t0 || performance.now()
             try {
-                await callSpecFunction(
-                    this.seedFunction,
+                await querySharedTable(
+                    this.sharedTablePath,
                     batchFunctionInputs,
                     onFunctionRespData,
                     sharedErrorContext
@@ -1098,12 +1092,6 @@ class SeedTableService {
             logger.error(new QueryError('select', schema, table, err).message)
             return null
         }
-    }
-
-    _findSeedFunction() {
-        this.seedFunction = this.liveObject.edgeFunctions.find(ef => (
-            ef.role === LiveObjectFunctionRole.GetMany
-        ))
     }
 
     _findRequiredArgColumns() {

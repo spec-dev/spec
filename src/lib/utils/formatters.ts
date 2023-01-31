@@ -30,21 +30,30 @@ export function unique(arr: any[]): any[] {
     return Array.from(new Set(arr))
 }
 
-export function fromNamespacedVersion(namespacedVersion: string): {
+export const toNamespacedVersion = (nsp: string, name: string, version: string) =>
+    `${nsp}.${name}@${version}`
+
+export const fromNamespacedVersion = (
+    namespacedVersion: string
+): {
     nsp: string
     name: string
     version: string
-} {
+} => {
     const atSplit = (namespacedVersion || '').split('@')
     if (atSplit.length !== 2) {
         return { nsp: '', name: '', version: '' }
     }
+
     const [nspName, version] = atSplit
     const dotSplit = (nspName || '').split('.')
-    if (dotSplit.length !== 2) {
+    if (dotSplit.length < 2) {
         return { nsp: '', name: '', version: '' }
     }
-    const [nsp, name] = dotSplit
+
+    const name = dotSplit.pop()
+    const nsp = dotSplit.join('.')
+
     return { nsp, name, version }
 }
 
@@ -134,4 +143,12 @@ export function keysWithNonEmptyValues(obj: AnyMap): string[] {
         nonEmptyKeys.push(key)
     }
     return nonEmptyKeys
+}
+
+export function stringify(data: any, fallback: any = null): string | null {
+    try {
+        return JSON.stringify(data)
+    } catch (err) {
+        return fallback
+    }
 }
