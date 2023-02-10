@@ -637,12 +637,32 @@ class Config {
         // REQ: For each property in uniqueByProperties...
         // EITHER, the property is being used as a live column in this table...
         // OR, the property exists in one of the filterBy groups as a column filter...
-        // AND if the table it's linked to is EITHER the target table OR a foreign table with an actual relationship.
+        // AND the table it's linked to is EITHER the target table OR a foreign table with an actual relationship.
 
-        const nonLiveColumnUniqueByProperties = []
         for (const property of uniqueByProperties) {
-            const liveColNamesUsingProperty = (liveObjectTableDataSources[property] || []).map(ds => ds.columnName)
+            let liveColName
+            for (const filterGroup of filterBy) {
+                const colPath = (filterGroup[property] || {}).column
+                if (!colPath) continue
 
+                const [colSchema, colTable, colName] = colPath.split('.')
+                const colTablePath = [colSchema, colTable].join('.')
+
+                if (colTablePath === tablePath) {
+                    propertyColPathMappings[property] = colPath
+                    liveColName = colName
+                    break
+                }
+
+                const rel = getRel(tablePath, colTablePath)
+                if (rel) {
+                    propertyColPathMappings[property] = colPath
+                    liveColName = rel.foreignKey
+                    break
+                }
+            }
+
+            const liveColNamesUsingProperty = (liveObjectTableDataSources[property] || []).map(ds => ds.columnName)
             if (liveColNamesUsingProperty.length > 1) {
                 logger.error(
                     `A "uniqueBy" property (${property}) shouldn't be mapped to multiple columns in the same table (${tablePath}).`
@@ -650,65 +670,24 @@ class Config {
                 return null
             }
 
-            const liveColName = liveColNamesUsingProperty[0]
+            const liveColNameOnTargetTable = liveColNamesUsingProperty[0]
+            if (liveColNameOnTargetTable) {
+                liveColName = liveColNameOnTargetTable
+                propertyColPathMappings[property] = (
+                    propertyColPathMappings[property] || [tablePath, liveColNameOnTargetTable].join('.')
+                )
+            }
+
             if (liveColName) {
                 uniqueByColNames.push(liveColName)
-                propertyColPathMappings[property] = [tablePath, liveColName].join('.')
-            } else {
-                nonLiveColumnUniqueByProperties.push(property)
+                continue
             }
-        }
-
-        if (nonLiveColumnUniqueByProperties.length) {
-            let foundMatchingFilterGroup = false
-            for (const filterGroup of filterBy) {
-                const additionalUniqueByColNames = []
-                const additionalPropertyColPathMappings = {}
-
-                let skipGroup = false
-                for (const property of nonLiveColumnUniqueByProperties) {
-                    const colPath = (filterGroup[property] || {}).column
-                    if (!colPath) {
-                        skipGroup = true
-                        break
-                    }
-
-                    const [colSchema, colTable, colName] = colPath.split('.')
-                    const colTablePath = [colSchema, colTable].join('.')
-    
-                    if (colTablePath === tablePath) {
-                        additionalUniqueByColNames.push(colName)
-                        propertyColPathMappings[property] = colPath
-                        continue
-                    }
-
-                    const foreignKeyConstraint = getRel(tablePath, colTablePath)
-                    if (!foreignKeyConstraint) {
-                        skipGroup = true
-                        break
-                    }
-
-                    additionalUniqueByColNames.push(foreignKeyConstraint.foreignKey)
-                    propertyColPathMappings[property] = colPath
-                }
-                if (skipGroup) continue
-
-                foundMatchingFilterGroup = true
-                uniqueByColNames.push(...additionalUniqueByColNames)
-                propertyColPathMappings = { 
-                    ...propertyColPathMappings, 
-                    ...additionalPropertyColPathMappings,
-                }
-                break
-            }
-
-            if (!foundMatchingFilterGroup) {
-                logger.error(
-                    `[${liveObjectId} <> ${tablePath}] Failed to find valid column mappings for\n` +
-                    `the following "uniqueBy" properties: ${nonLiveColumnUniqueByProperties.join(', ')}`
-                )
-                return null
-            }
+            
+            logger.error(
+                `[${liveObjectId} <> ${tablePath}] Failed to find valid column mappings for\n` +
+                `the "uniqueBy" property: ${property}`
+            )
+            return null
         }
 
         // Sort and convert to string to match against.

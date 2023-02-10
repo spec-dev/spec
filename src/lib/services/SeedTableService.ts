@@ -3,8 +3,6 @@ import {
     SeedSpec,
     StringMap,
     LiveObject,
-    EdgeFunction,
-    LiveObjectFunctionRole,
     StringKeyMap,
     TableDataSources,
     OpType,
@@ -128,7 +126,6 @@ class SeedTableService {
         this.primaryTimestampColumn = this.primaryTimestampProperty
             ? ((this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null)
             : null
-
 
         this.seedStrategy = null
     }
@@ -411,6 +408,11 @@ class SeedTableService {
         const inputPropertyKeys = inputColNames.map(
             (colName) => reverseLinkProperties[`${foreignTablePath}.${colName}`]
         )
+
+        console.log('inputColNames', inputColNames)
+        console.log('inputPropertyKeys', inputPropertyKeys)
+        console.log('reverseLinkProperties', reverseLinkProperties)
+
         const arrayInputColNames = inputColNames.filter((colName) =>
             isColTypeArray([foreignTablePath, colName].join('.'))
         )
@@ -677,6 +679,12 @@ class SeedTableService {
             const foreignInputRecordKey = inputPropertyKeys
                 .map((k) => liveObjectData[k])
                 .join(valueSep)
+
+            // if (this.seedCount <= 1000) {
+            //     console.log('inputPropertyKeys', inputPropertyKeys)
+            //     console.log('foreignInputRecordKey', foreignInputRecordKey)
+            // }
+
             if (!referenceKeyValues.hasOwnProperty(foreignInputRecordKey)) continue
 
             const foreignInputRecordReferenceKeyValues =
