@@ -202,23 +202,8 @@ class Spec {
     }
 
     async _getLiveObjectsInConfig() {
-        // Get the list of live object version ids that haven't already been fetched.
-        const newlyDetectedLiveObjectVersionIds = config.liveObjectIds.filter(
-            (id) => !this.liveObjects.hasOwnProperty(id)
-        )
-        if (!newlyDetectedLiveObjectVersionIds.length) return
-
-        // Fetch the newly detected live objects via rpc.
-        const newLiveObjects = await resolveLiveObjects(newlyDetectedLiveObjectVersionIds)
-        if (newLiveObjects === null) {
-            logger.error(
-                `Failed to fetch new live objects: ${newlyDetectedLiveObjectVersionIds.join(', ')}.`
-            )
-            return
-        }
-
-        // Add them to the live objects map.
-        for (let liveObject of newLiveObjects) {
+        const liveObjects = await resolveLiveObjects(config.liveObjectIds, this.liveObjects)
+        for (const liveObject of liveObjects) {
             this.liveObjects[liveObject.id] = liveObject
         }
     }
