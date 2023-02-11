@@ -82,11 +82,9 @@ class ApplyEventService {
     async getOps(): Promise<Op[]> {
         let promises = []
         for (let enrichedLink of this.linksToApplyDiffsTo) {
-            promises.push(
-                new ApplyDiffsService(this.liveObjectDiffs, enrichedLink, this.liveObject).getOps()
-            )
+            const service = new ApplyDiffsService(this.liveObjectDiffs, enrichedLink, this.liveObject)
+            promises.push(service.getOps())
         }
-
         this.ops = (await Promise.all(promises)).flat()
         return this.ops
     }
