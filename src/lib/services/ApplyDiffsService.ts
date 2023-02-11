@@ -411,11 +411,22 @@ class ApplyDiffsService {
     }
 
     async _createUpsertOps() {
-        const properties = this.linkProperties
+        // const properties = this.linkProperties
         const tablePath = this.linkTablePath
         const tableDataSources = this.tableDataSources
 
         let diffs = this.liveObjectDiffs
+
+        const properties = { ...this.linkProperties }
+        for (let filterGroup of this.linkFilters) {
+            filterGroup = toMap(filterGroup)
+            for (const property in filterGroup) {
+                const filter = filterGroup[property]
+                if (filter.column && filter.op === FilterOp.EqualTo && !properties.hasOwnProperty(property)) {
+                    properties[property] = filter.column
+                }
+            }
+        }
 
         // Get query conditions for the linked foreign tables with relationships.
         const foreignTableQueryConditions = {}
@@ -425,9 +436,8 @@ class ApplyDiffsService {
             const colTablePath = `${colSchemaName}.${colTableName}`
             if (colTablePath === tablePath) continue
 
-            // At this point, we know a relationship must exist.
             const rel = getRel(tablePath, colTablePath)
-            if (!rel) throw `No rel from ${tablePath} -> ${colTablePath}`
+            if (!rel) continue
 
             if (!foreignTableQueryConditions.hasOwnProperty(colTablePath)) {
                 foreignTableQueryConditions[colTablePath] = {
