@@ -499,6 +499,10 @@ class ApplyDiffsService {
             }
         }
 
+        if (this.linkTablePath === 'public.transactions') {
+            console.log(foreignTableQueryConditions)
+        }
+
         // Format record objects to upsert.
         const upsertRecords = []
         for (const diff of diffs) {

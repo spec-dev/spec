@@ -33,6 +33,7 @@ import ResolveRecordsService from './lib/services/ResolveRecordsService'
 import { unique } from './lib/utils/formatters'
 import { getRecordsForPrimaryKeys } from './lib/db/ops'
 import { importHooks } from './lib/hooks'
+import { sleep } from './lib/utils/time'
 
 class Spec {
     liveObjects: { [key: string]: LiveObject } = {}
@@ -188,17 +189,14 @@ class Spec {
             const liveObject = this.liveObjects[liveObjectId]
             if (!liveObject) continue
 
-            const onError = (err: any) => {
-                const msg = (err?.message || err).toString()
-                if (msg.includes('deadlock')) return
-                logger.error(
-                    `Failed to apply event to live object - (event=${event.name}; liveObject=${liveObjectId}): ${err}`
-                )
-            }
             try {
-                new ApplyEventService(event, liveObject).perform().catch(onError)
+                const service = new ApplyEventService(event, liveObject)
+                await service.perform()
             } catch (err) {
-                onError(err)
+                logger.error(
+                    `Failed to apply event to live object - (event=${event.name}; ` + 
+                    `liveObject=${liveObjectId}): ${err?.message || err}`
+                )
             }
         }
     }
@@ -685,11 +683,12 @@ class Spec {
         // Sort buffered events oldest-to-newest.
         await this._sortEventBuffer(eventName)
 
-        // Process each event (but don't await the processing).
+        // Process each event.
         let event
         while (this.eventSubs[eventName].buffer.length > 0) {
             event = this.eventSubs[eventName].buffer.shift()
-            this._processEvent(event)
+            await this._processEvent(event) 
+            await sleep(5)
         }
 
         // Turn buffer off and use the last seen event as the new cursor.

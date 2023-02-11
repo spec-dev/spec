@@ -405,13 +405,22 @@ class SeedTableService {
 
         // Get the live object property keys associated with each input column.
         const reverseLinkProperties = this.reverseLinkProperties
-        const inputPropertyKeys = inputColNames.map(
-            (colName) => reverseLinkProperties[`${foreignTablePath}.${colName}`]
-        )
+        const inputPropertyKeys = inputColNames.map(colName => {
+            const foreignInputColPath = [foreignTablePath, colName].join('.')
+            let property = reverseLinkProperties[foreignInputColPath]
+            if (property) return property
 
-        console.log('inputColNames', inputColNames)
-        console.log('inputPropertyKeys', inputPropertyKeys)
-        console.log('reverseLinkProperties', reverseLinkProperties)
+            for (const filterGroup of this.enrichedLink.filterBy) {
+                for (const property in filterGroup) {
+                    const filter = filterGroup[property]
+                    const colPath = filter.column
+                    if (colPath === foreignInputColPath && filter.op === FilterOp.EqualTo) {
+                        return property
+                    }
+                }
+            }
+            return null // really should just throw
+        })
 
         const arrayInputColNames = inputColNames.filter((colName) =>
             isColTypeArray([foreignTablePath, colName].join('.'))
@@ -679,11 +688,6 @@ class SeedTableService {
             const foreignInputRecordKey = inputPropertyKeys
                 .map((k) => liveObjectData[k])
                 .join(valueSep)
-
-            // if (this.seedCount <= 1000) {
-            //     console.log('inputPropertyKeys', inputPropertyKeys)
-            //     console.log('foreignInputRecordKey', foreignInputRecordKey)
-            // }
 
             if (!referenceKeyValues.hasOwnProperty(foreignInputRecordKey)) continue
 
