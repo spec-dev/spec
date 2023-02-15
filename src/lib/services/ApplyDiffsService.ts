@@ -113,6 +113,7 @@ class ApplyDiffsService {
         // Apply filters to diffs when present.
         if (this.linkFilters.length) {
             await this._filterDiffs()
+            if (!this.filteredDiffs.length) return this.ops
         }
 
         // Convert diffs into upsert operations.
@@ -411,11 +412,10 @@ class ApplyDiffsService {
     }
 
     async _createUpsertOps() {
-        // const properties = this.linkProperties
         const tablePath = this.linkTablePath
         const tableDataSources = this.tableDataSources
 
-        let diffs = this.liveObjectDiffs
+        let diffs = this.filteredDiffs
 
         const properties = { ...this.linkProperties }
         for (let filterGroup of this.linkFilters) {

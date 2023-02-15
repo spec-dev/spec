@@ -23,6 +23,14 @@ class ApplyEventService {
         return this.liveObject.links || []
     }
 
+    get wasSkipped(): boolean {
+        return (this.event.origin as StringKeyMap).skipped === true
+    }
+
+    get isReplay(): boolean {
+        return (this.event.origin as StringKeyMap).replay === true
+    }
+
     constructor(event: SpecEvent<StringKeyMap>, liveObject: LiveObject) {
         this.event = event
         this.liveObject = liveObject
@@ -101,8 +109,9 @@ class ApplyEventService {
             }
         }
 
+        const allowUpdatesBackwardsInTime = this.wasSkipped || this.isReplay
         await db.transaction(async (tx) => {
-            await Promise.all(this.ops.map((op) => new RunOpService(op, tx).perform()))
+            await Promise.all(this.ops.map((op) => new RunOpService(op, tx, allowUpdatesBackwardsInTime).perform()))
         })
     }
 }
