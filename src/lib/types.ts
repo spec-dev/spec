@@ -134,7 +134,7 @@ export interface EventSub {
     cursor: EventCursor
     cursorChanged: boolean
     shouldBuffer: boolean
-    buffer: SpecEvent<StringKeyMap | StringKeyMap[]>[]
+    buffer: SpecEvent[]
 }
 
 export enum TableSubStatus {
@@ -188,6 +188,7 @@ export interface Op {
 }
 
 export enum SeedCursorStatus {
+    InLine = 'in-line',
     InProgress = 'in-progress',
     Succeeded = 'succeeded',
     Failed = 'failed',
@@ -319,3 +320,5 @@ export type SharedTablesQueryPayload = {
     sql: string
     bindings: any[]
 }
+
+export type MissedEventsCallback = (event: SpecEvent[]) => void

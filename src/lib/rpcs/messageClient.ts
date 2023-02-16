@@ -1,11 +1,12 @@
 import { createEventClient, SpecEventClient, EventCallback } from '@spec.dev/event-client'
-import { EventCursor, MessageClientOptions, ResolvedLiveObject, StringKeyMap } from '../types'
+import { EventCursor, MessageClientOptions, ResolvedLiveObject, StringKeyMap, MissedEventsCallback } from '../types'
 import constants from '../constants'
 import { noop } from '../utils/formatters'
 import { RpcError } from '../errors'
 import RPC from './functionNames'
 import logger from '../logger'
 import short from 'short-uuid'
+import chalk from 'chalk'
 
 const DEFAULT_OPTIONS = {
     onConnect: noop,
@@ -42,6 +43,7 @@ export class MessageClient {
 
     on(eventName: string, cb: EventCallback, opts?: StringKeyMap) {
         this.client.on(eventName, cb, opts)
+        logger.info(chalk.green(`Subscribed to event ${eventName}`))
     }
 
     async off(eventName: string) {
@@ -61,7 +63,7 @@ export class MessageClient {
         }
     }
 
-    async fetchMissedEvents(cursors: EventCursor[], cb: EventCallback, onDone?: any) {
+    async fetchMissedEvents(cursors: EventCursor[], cb: MissedEventsCallback, onDone?: any) {
         // Subscribe to a unique, temporary channel to use for missed-event transfer.
         const channel = short.generate()
         this.on(

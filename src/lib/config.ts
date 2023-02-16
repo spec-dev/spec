@@ -45,8 +45,6 @@ class Config {
 
     isValid: boolean
 
-    // linkUniqueConstraints: { [key: string]: string[] } = {}
-
     enrichedLinks: { [key: string]: EnrichedLink } = {}
 
     checkTablesTimer: any = null
@@ -127,6 +125,19 @@ class Config {
         return tableLinks
     }
 
+    getTableOrder(matchTablePath: string): number | null {
+        const tables = this.tables
+        let i = 0
+        for (const schema in tables) {
+            for (const tableName in tables[schema]) {
+                const tablePath = [schema, tableName].join('.')
+                if (tablePath === matchTablePath) return i
+                i++
+            }
+        }
+        return null
+    }
+
     getDefaultColumnValuesForTable(tablePath: string): { [key: string]: ColumnDefaultsConfig } {
         const [schemaName, tableName] = tablePath.split('.')
         const defaults = this.defaults
@@ -168,48 +179,6 @@ class Config {
 
         return defaultColValues
     }
-
-    // getSeedColPaths(seedWith: string | string[] | StringMap, linkOn: StringMap): StringMap[] {
-    //     if (!seedWith) return []
-    //     const isString = typeof seedWith === 'string'
-    //     const isArray = Array.isArray(seedWith)
-
-    //     // String or array of object properties.
-    //     if (isString || isArray) {
-    //         const seedProperties = (isArray ? seedWith : [seedWith]) as any[]
-    //         linkOn = toMap(linkOn || {})
-
-    //         let seedColPaths = []
-    //         let newEntry = {}
-    //         for (const val of seedProperties) {
-    //             if (typeof val === 'object') {
-    //                 if (Object.keys(newEntry).length) {
-    //                     seedColPaths.push(newEntry)
-    //                     newEntry = {}
-    //                 }
-    //                 seedColPaths.push(toMap(val))
-    //             } else if (linkOn.hasOwnProperty(val)) {
-    //                 newEntry[val] = linkOn[val]
-    //             } else {
-    //                 if (Object.keys(newEntry).length) {
-    //                     seedColPaths.push(newEntry)
-    //                     newEntry = {}
-    //                 }
-    //             }
-    //         }
-    //         if (Object.keys(newEntry).length) {
-    //             seedColPaths.push(newEntry)
-    //         }
-    //         return seedColPaths
-    //     }
-
-    //     // Map of property:colPath
-    //     if (typeof seedWith === 'object') {
-    //         return [toMap(seedWith || {})]
-    //     }
-
-    //     return []
-    // }
 
     getExternalTableLinksDependentOnTableForSeed(tablePath: string): TableLink[] {
         const depTableLinks = []
@@ -382,112 +351,6 @@ class Config {
             return isTimestampColType(updatedAtColType)
         })
     }
-
-    // getUniqueConstraintForLink(
-    //     liveObjectId: string,
-    //     tablePath: string,
-    //     useCache: boolean = true
-    // ): string[] | null {
-    //     const cacheKey = [liveObjectId, tablePath].join(':')
-    //     if (useCache) {
-    //         const result = this.linkUniqueConstraints[cacheKey]
-    //         if (result) return result
-    //     }
-
-    //     const link = this.getLink(liveObjectId, tablePath)
-    //     if (!link) return null
-
-    //     const uniqueBy = link.uniqueBy || []
-    //     if (!uniqueBy.length) return null
-
-    //     const meta = tablesMeta[tablePath]
-    //     const primaryKeyColNames = meta?.primaryKey?.map((col) => col.name) || []
-
-    //     let uniqueColGroups = meta.uniqueColGroups || []
-    //     uniqueColGroups = uniqueColGroups.length ? uniqueColGroups : [primaryKeyColNames]
-    //     if (!uniqueColGroups.length) return null
-
-    //     // Resolve uniqueBy properties to their respective column names.
-    //     const uniqueByColNames = []
-    //     for (const property of uniqueBy) {
-    //         const colPath = link.linkOn[property]
-    //         if (!colPath) return null
-    //         const [colSchema, colTable, colName] = colPath.split('.')
-    //         const colTablePath = [colSchema, colTable].join('.')
-
-    //         if (colTablePath === link.table) {
-    //             uniqueByColNames.push(colName)
-    //         } else {
-    //             const foreignKeyConstraint = getRel(link.table, colTablePath)
-    //             if (!foreignKeyConstraint) return null
-    //             uniqueByColNames.push(foreignKeyConstraint.foreignKey)
-    //         }
-    //     }
-
-    //     // Sort and convert to string to match against.
-    //     const uniqueByColNamesId = uniqueByColNames.sort().join(':')
-
-    //     // Find the matching unique col group (if any).
-    //     let uniqueColGroup = uniqueColGroups.find(
-    //         (colGroup) => [...colGroup].sort().join(':') === uniqueByColNamesId
-    //     )
-
-    //     // If no matching col group exactly, find one that's even more unique.
-    //     if (!uniqueColGroup) {
-    //         uniqueColGroup = uniqueColGroups.find((colGroup) =>
-    //             uniqueByColNames.every((val) => colGroup.includes(val))
-    //         )
-    //     }
-
-    //     return uniqueColGroup || null
-    // }
-
-    // categorizeFilters(filters: StringKeyMap): { [key: string]: Filter }[] {
-    //     const staticFilters = {}
-    //     const columnFilters = {}
-
-    //     for (const key in filters) {
-    //         let value = filters[key]
-
-    //         // String filter.
-    //         if (typeof value !== 'object') {
-    //             staticFilters[key] = {
-    //                 op: FilterOp.EqualTo,
-    //                 value: value,
-    //             }
-    //             continue
-    //         }
-
-    //         try {
-    //             value = toMap(value)
-    //         } catch (err) {
-    //             logger.warn(`Tried to convert filter into map but failed`, value)
-    //             continue
-    //         }
-
-    //         // Non-column, object filter.
-    //         if (value.hasOwnProperty('value')) {
-    //             staticFilters[key] = {
-    //                 op: value.op || FilterOp.EqualTo,
-    //                 value: value.value,
-    //             }
-    //             continue
-    //         }
-
-    //         // Column filter.
-    //         if (value.hasOwnProperty('column')) {
-    //             if (typeof value.column !== 'string') continue
-    //             const splitColPath = (value.column || '').split('.')
-    //             if (splitColPath.length !== 3) continue
-
-    //             columnFilters[key] = {
-    //                 op: value.op || FilterOp.EqualTo,
-    //                 column: value.column,
-    //             }
-    //         }
-    //     }
-    //     return [staticFilters, columnFilters]
-    // }
 
     load(): boolean {
         try {
@@ -960,53 +823,6 @@ class Config {
 
         return true
     }
-
-    // _checkUniqueConstraintsForAllLinks(): boolean {
-    //     const linkUniqueConstraints = {}
-    //     const objects = this.liveObjects
-    //     let isValid = true
-
-    //     for (const configName in objects) {
-    //         const obj = objects[configName]
-    //         for (const link of obj.links || []) {
-    //             const uniqueConstraint = this.getUniqueConstraintForLink(obj.id, link.table, false)
-    //             if (!uniqueConstraint) {
-    //                 this._logMissingUniqueConstraint(link, obj.id)
-    //                 isValid = false
-    //                 continue
-    //             }
-    //             const key = [obj.id, link.table].join(':')
-    //             linkUniqueConstraints[key] = uniqueConstraint
-    //         }
-    //     }
-    //     if (!isValid) return false
-
-    //     this.linkUniqueConstraints = linkUniqueConstraints
-    //     return true
-    // }
-
-    // _logMissingUniqueConstraint(link: LiveObjectLink, liveObjectId: string) {
-    //     const uniqueByColNames = []
-    //     const linkOn = toMap(link.linkOn || {})
-    //     const uniqueByProperties = link.uniqueBy || Object.keys(linkOn)
-    //     for (const property of uniqueByProperties) {
-    //         const colPath = linkOn[property]
-    //         if (!colPath) return null
-    //         const [colSchema, colTable, colName] = colPath.split('.')
-    //         const colTablePath = [colSchema, colTable].join('.')
-
-    //         if (colTablePath === link.table) {
-    //             uniqueByColNames.push(colName)
-    //         } else {
-    //             const foreignKeyConstraint = getRel(link.table, colTablePath)
-    //             if (!foreignKeyConstraint) return null
-    //             uniqueByColNames.push(foreignKeyConstraint.foreignKey)
-    //         }
-    //     }
-    //     logger.error(
-    //         `No unique constraint exists on "${link.table}" for column(s): ${uniqueByColNames}\nPlease add a unique contraint on this group of columns in order to make the link between ${link.table} and ${liveObjectId} work.`
-    //     )
-    // }
 
     _ensureFileExists() {
         if (!fs.existsSync(constants.PROJECT_CONFIG_PATH)) {

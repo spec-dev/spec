@@ -21,6 +21,8 @@ import {
     seedSucceeded,
     processSeedCursorBatch,
     failedSeedCursorsExist,
+    updateStatus,
+    getSeedCursorWaitingInLine,
 } from './lib/db/spec'
 import { SpecEvent } from '@spec.dev/event-client'
 import LRU from 'lru-cache'
@@ -30,10 +32,10 @@ import SeedTableService from './lib/services/SeedTableService'
 import { tableSubscriber } from './lib/db/subscriber'
 import short from 'short-uuid'
 import ResolveRecordsService from './lib/services/ResolveRecordsService'
-import { unique } from './lib/utils/formatters'
 import { getRecordsForPrimaryKeys } from './lib/db/ops'
 import { importHooks } from './lib/hooks'
 import { sleep } from './lib/utils/time'
+import chalk from 'chalk'
 
 class Spec {
     liveObjects: { [key: string]: LiveObject } = {}
@@ -139,7 +141,7 @@ class Spec {
         this._doneProcessingNewConfig()
     }
 
-    async _onEvent(event: SpecEvent<StringKeyMap | StringKeyMap[]>, options?: StringKeyMap) {
+    async _onEvent(event: SpecEvent, options?: StringKeyMap) {
         // Ensure we're actually subscribed to this event.
         const sub = this.eventSubs[event.name]
         if (!sub) {
@@ -172,7 +174,7 @@ class Spec {
         this._updateEventCursor(event)
     }
 
-    async _processEvent(event: SpecEvent<StringKeyMap | StringKeyMap[]>) {
+    async _processEvent(event: SpecEvent) {
         // Get sub for event.
         const sub = this.eventSubs[event.name]
         if (!sub) {
@@ -215,9 +217,9 @@ class Spec {
         // Subscribe to new events.
         for (const newEventName in liveObjectsByEvent) {
             if (this.eventSubs.hasOwnProperty(newEventName)) continue
-
+            
             // Register event callback.
-            messageClient.on(newEventName, (event: SpecEvent<StringKeyMap | StringKeyMap[]>) =>
+            messageClient.on(newEventName, (event: SpecEvent) =>
                 this._onEvent(event)
             )
 
@@ -275,7 +277,7 @@ class Spec {
             try {
                 await messageClient.fetchMissedEvents(
                     cursors,
-                    (events: SpecEvent<StringKeyMap | StringKeyMap[]>[]) => {
+                    (events: SpecEvent[]) => {
                         logger.info(`Fetched ${events.length} missed events.`)
                         events.forEach((event) => this._onEvent(event, { forceToBuffer: true }))
                     },
@@ -296,6 +298,7 @@ class Spec {
         let liveColumnsToSeed = []
 
         // Upsert any new/changed live columns listed in the config.
+        // We will seed (or re-seed) all live columns that were upserted.
         const upsertLiveColumnService = new UpsertLiveColumnsService()
         try {
             await upsertLiveColumnService.perform()
@@ -305,8 +308,8 @@ class Spec {
             liveColumnsToSeed = []
         }
 
-        // Seed (or re-seed) all live columns that were upserted.
         const tablePathsUsingLiveObjectId = upsertLiveColumnService.tablePathsUsingLiveObjectId
+        const newLiveTablePaths = upsertLiveColumnService.newLiveTablePaths
 
         // Get a map of unique live-object/table relations (grouping the column names).
         const uniqueLiveObjectTablePaths = {}
@@ -409,18 +412,67 @@ class Spec {
             }
         }
 
-        const seedSpecsWithCursors = []
+        const seedSpecsToRunNow = []
+        const seedSpecsOnNewLiveTables = []
+        for (const seedSpec of seedSpecs) {
+            if (newLiveTablePaths.has(seedSpec.tablePath)) {
+                seedSpecsOnNewLiveTables.push(seedSpec)
+            } else {
+                seedSpecsToRunNow.push(seedSpec)
+            }
+        }
+        seedSpecsOnNewLiveTables.sort((a, b) => (
+            config.getTableOrder(a.tablePath) - config.getTableOrder(b.tablePath)
+        ))
+
+        if (seedSpecsOnNewLiveTables.length) {
+            logger.info(chalk.cyanBright(
+                `New live tables detected - will seed in series: ${
+                    seedSpecsOnNewLiveTables.map(seedSpec => seedSpec.tablePath).join(', ')
+                }`
+            ))
+        }
+
+        let seedSpecsToWaitInLine = []
+        if (seedSpecsOnNewLiveTables.length >= 1) {
+            seedSpecsToRunNow.push(seedSpecsOnNewLiveTables[0])
+            seedSpecsToWaitInLine = seedSpecsOnNewLiveTables.slice(1)
+        }
+
+        const seedCursorsToWaitInLine: StringKeyMap[] = seedSpecsToWaitInLine.map(seedSpec => ({
+            id: short.generate(),
+            jobType: SeedCursorJobType.SeedTable,
+            spec: seedSpec,
+            status: SeedCursorStatus.InLine,
+            cursor: 0,
+        }))
+        for (let i = 0; i < seedCursorsToWaitInLine.length; i++) {
+            if (i < seedCursorsToWaitInLine.length - 1) {
+                seedCursorsToWaitInLine[i].metadata = {
+                    nextId: seedCursorsToWaitInLine[i + 1].id
+                }
+            }
+        }
 
         // Compile instructions for new seed cursors to create.
-        const createSeedCursors = []
-        for (const seedSpec of seedSpecs) {
-            const seedCursor = {
+        const createSeedCursors = [ ...seedCursorsToWaitInLine ]
+        const seedSpecsWithCursors = []
+        for (let i = 0; i < seedSpecsToRunNow.length; i++) {
+            const seedSpec = seedSpecsToRunNow[i]
+            const seedCursor: StringKeyMap = {
                 id: short.generate(),
                 jobType: SeedCursorJobType.SeedTable,
                 spec: seedSpec,
                 status: SeedCursorStatus.InProgress,
                 cursor: 0,
             }
+
+            if (i === seedSpecsToRunNow.length - 1 && seedCursorsToWaitInLine.length) {
+                seedCursor.metadata = {
+                    nextId: seedCursorsToWaitInLine[0].id
+                }
+            }
+
             createSeedCursors.push(seedCursor)
             seedSpecsWithCursors.push([seedSpec, seedCursor])
         }
@@ -439,24 +491,22 @@ class Spec {
             seedSpecsWithCursors.push([spec, seedCursor])
         }
 
-        // seedSpecsWithCursors.forEach(([seedSpec, _]) => {
-        //     if (
-        //         !tablePathsUsingLiveObjectId.hasOwnProperty(seedSpec.liveObjectId) ||
-        //         !tablePathsUsingLiveObjectIdForSeed.hasOwnProperty(seedSpec.liveObjectId)
-        //     ) {
-        //         return
-        //     }
-
-        //     const numTablesUsingLiveObject = tablePathsUsingLiveObjectId[seedSpec.liveObjectId].size
-        //     const numTablesUsingLiveObjectForSeed =
-        //         tablePathsUsingLiveObjectIdForSeed[seedSpec.liveObjectId].size
-
-        //     // If this live object is only used in the table(s) about to be seeded,
-        //     // then add it to a list to indicates that events should be ignored.
-        //     if (numTablesUsingLiveObject === numTablesUsingLiveObjectForSeed) {
-        //         this.liveObjectsToIgnoreEventsFrom.add(seedSpec.liveObjectId)
-        //     }
-        // })
+        // Ignore events from live objects exclusively tied to seeds to wait on.
+        seedSpecsToWaitInLine.forEach(seedSpec => {
+            const { liveObjectId } = seedSpec
+            if (
+                !tablePathsUsingLiveObjectId.hasOwnProperty(liveObjectId) ||
+                !tablePathsUsingLiveObjectIdForSeed.hasOwnProperty(liveObjectId)
+            ) {
+                return
+            }
+ 
+            const numTablesUsingLiveObject = tablePathsUsingLiveObjectId[liveObjectId].size
+            const numTablesUsingLiveObjectForSeed = tablePathsUsingLiveObjectIdForSeed[liveObjectId].size
+            const waitOnLiveObjectEvents = numTablesUsingLiveObject === numTablesUsingLiveObjectForSeed
+            waitOnLiveObjectEvents && this.liveObjectsToIgnoreEventsFrom.add(liveObjectId)
+            console.log(`ignoring events for ${liveObjectId}`)
+        })
 
         // Create seed jobs and determine the seed strategies up-front for each.
         const seedJobs = {}
@@ -551,27 +601,33 @@ class Spec {
     }
 
     async _runSeedJobs(jobs: StringKeyMap) {
-        const seedTableJobs = jobs.seedTableJobs || []
-        const resolveRecordsJobs = jobs.resolveRecordsJobs || []
-        const seedLiveObjectIds = unique(seedTableJobs.map((j) => j[1].liveObjectId))
-        const resolveLiveObjectIds = unique(resolveRecordsJobs.map((j) => j[1].liveObjectId))
-        const liveObjectIdsOnlyInResolveJobs = resolveLiveObjectIds.filter(
-            (liveObjectId) => !seedLiveObjectIds.includes(liveObjectId)
-        )
-
         // Run all resolve records jobs first.
         await Promise.all(
-            resolveRecordsJobs.map(([service, spec]) => this._resolveRecords(service, spec))
+            (jobs.resolveRecordsJobs || []).map(([service, spec]) => this._resolveRecords(service, spec))
         )
 
-        // this._processEventsPostSeed(liveObjectIdsOnlyInResolveJobs)
+        const normalSeedTableJobs = []
+        const seedTableJobsInSeries = []
+        for (const seedTableJob of jobs.seedTableJobs || []) {
+            const [service, spec, metadata] = seedTableJob
+            if (metadata?.nextId) {
+                seedTableJobsInSeries.push(seedTableJob)
+            } else {
+                normalSeedTableJobs.push(seedTableJob)
+            }
+        }
 
-        // Run all seed jobs.
+        // Run all normal seed jobs.
         await Promise.all(
-            seedTableJobs.map(([service, spec, metadata]) =>
+            normalSeedTableJobs.map(([service, spec, metadata]) =>
                 this._seedTable(service, spec, metadata || {})
             )
         )
+
+        // Run seed table jobs in series.
+        seedTableJobsInSeries.forEach(([service, spec, metadata]) => {
+            this._seedTable(service, spec, metadata || {})
+        })
     }
 
     async _resolveRecords(
@@ -624,10 +680,60 @@ class Spec {
             }
         }
 
-        await Promise.all([
-            seedSucceeded(seedTableService.seedCursorId),
-            // this._processEventsPostSeed([liveObjectId]),
-        ])
+        await seedSucceeded(seedTableService.seedCursorId)
+
+        // Run next seed cursor in series if one is registered.
+        metadata?.nextId && this._runNextSeedCursorInSeries(metadata.nextId)
+    }
+
+    async _runNextSeedCursorInSeries(id: string) {
+        // Find the 'in-line' seed cursor by id. 
+        const seedCursor = await getSeedCursorWaitingInLine(id)
+        if (!seedCursor) {
+            logger.error(`Next seed cursor in series (id=${id}) was missing...`)
+            return
+        }
+
+        // Make sure the live object is still being used.
+        const seedSpec = seedCursor.spec as SeedSpec
+        const { liveObjectId } = seedSpec
+
+        const liveObject = this.liveObjects[liveObjectId]
+        if (!liveObject) {
+            logger.error(`Live object ${liveObjectId} isn't registered anymore - skipping seed cursor in series.`)
+            // Register success anyway and go to next in series.
+            await seedSucceeded(seedCursor.id)
+            seedCursor.metadata?.nextId && this._runNextSeedCursorInSeries(seedCursor.metadata?.nextId)
+            return
+        }
+
+        let seedTableService: SeedTableService
+        try {
+            seedTableService = new SeedTableService(
+                seedSpec,
+                liveObject,
+                seedCursor.id,
+                seedCursor.cursor,
+            )
+
+            // Determine seed strategy up-front unless already determined
+            // (see '_processExternalTableLinkDataChanges()' within subscriber.ts)
+            if (!seedCursor.metadata?.foreignTablePath) {
+                await seedTableService.determineSeedStrategy()
+            }
+        } catch (err) {
+            logger.error(`Creating seed table service for seed_cursor in series (id=${seedCursor.id}) failed: ${err}`)
+            return
+        }
+
+        // Update seed cursor to in-progress and run it.
+        await updateStatus(seedCursor.id, SeedCursorStatus.InProgress)
+        this._seedTable(seedTableService, seedSpec, seedCursor.metadata)
+
+        // Start to process events for this live object at the same time as starting the table seed.
+        if (this.liveObjectsToIgnoreEventsFrom.has(liveObjectId)) {
+            this._processEventsPostSeed([liveObjectId])
+        }
     }
 
     async _processEventsPostSeed(liveObjectIds: string[]) {
@@ -766,7 +872,7 @@ class Spec {
     _mapLiveObjectsByEvent(): { [key: string]: string[] } {
         const subs = {}
         for (const liveObjectId in this.liveObjects) {
-            // Ignore events from live objects actively/exclusively being used to seed.
+            // Ignore events from live objects waiting their turn to seed.
             if (this.liveObjectsToIgnoreEventsFrom.has(liveObjectId)) continue
 
             const eventNames = this.liveObjects[liveObjectId].events.map((e) => e.name)
@@ -780,7 +886,7 @@ class Spec {
         return subs
     }
 
-    _registerEventAsSeen(event: SpecEvent<StringKeyMap | StringKeyMap[]>, liveObjectIds: string[]) {
+    _registerEventAsSeen(event: SpecEvent, liveObjectIds: string[]) {
         liveObjectIds.forEach((liveObjectId) => {
             this.seenEvents.set(`${event.id}:${liveObjectId}`, true)
         })
@@ -795,7 +901,7 @@ class Spec {
         return true
     }
 
-    _updateEventCursor(event: SpecEvent<StringKeyMap | StringKeyMap[]>) {
+    _updateEventCursor(event: SpecEvent) {
         this.eventSubs[event.name].cursor = {
             name: event.name,
             id: event.id,

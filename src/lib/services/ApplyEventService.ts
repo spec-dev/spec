@@ -9,7 +9,7 @@ import chalk from 'chalk'
 
 class ApplyEventService {
     
-    event: SpecEvent<StringKeyMap | StringKeyMap[]>
+    event: SpecEvent
 
     liveObject: LiveObject
 
@@ -31,7 +31,7 @@ class ApplyEventService {
         return (this.event.origin as StringKeyMap).replay === true
     }
 
-    constructor(event: SpecEvent<StringKeyMap>, liveObject: LiveObject) {
+    constructor(event: SpecEvent, liveObject: LiveObject) {
         this.event = event
         this.liveObject = liveObject
         if (!this.links.length) throw 'Live object has no links...'

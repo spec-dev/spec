@@ -152,3 +152,12 @@ export function stringify(data: any, fallback: any = null): string | null {
         return fallback
     }
 }
+
+export const attemptToParseNumber = (originalValue: any): any => {
+    try {
+        const numberValue = Number(originalValue)
+        return numberValue > Number.MAX_SAFE_INTEGER ? originalValue : numberValue
+    } catch (err) {
+        return originalValue
+    }
+}

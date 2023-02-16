@@ -18,6 +18,8 @@ class UpsertLiveColumnsService {
 
     tablePathsUsingLiveObjectId: { [key: string]: Set<string> } = {}
 
+    newLiveTablePaths: Set<string> = new Set()
+
     async perform() {
         await this._getExistingLiveColumns()
         await this._upsertLiveColumns()
@@ -51,10 +53,19 @@ class UpsertLiveColumnsService {
         const querySpecsToUpsert = []
         const prevLiveColumnsMap = mapBy<LiveColumn>(this.prevLiveColumns, 'columnPath')
 
+        // Get all previous live table paths.
+        const prevLiveTablePaths = new Set()
+        for (const { columnPath } of this.prevLiveColumns) {
+            const [schema, table, _] = columnPath.split('.')
+            prevLiveTablePaths.add([schema, table].join('.'))
+        }
+
         // Compare querySpecs and prevLiveColumns, to find:
         // -----
         // (1) The live columns that don't exist yet.
         // (2) The live columns where the data source has changed.
+        // (3) The new live tables.
+        const newLiveTablePaths = new Set<string>()
         for (const querySpec of this.querySpecs) {
             const isNewColPath = !prevLiveColumnsMap.hasOwnProperty(querySpec.columnPath)
             const colDataSourceChanged =
@@ -64,9 +75,16 @@ class UpsertLiveColumnsService {
             if (isNewColPath || colDataSourceChanged) {
                 querySpecsToUpsert.push(querySpec)
             }
+            
+            const [schema, table, _] = querySpec.columnPath.split('.')
+            const colTablePath = [schema, table].join('.')
+            if (!prevLiveTablePaths.has(colTablePath)) {
+                newLiveTablePaths.add(colTablePath)
+            }
         }
 
         this.liveColumnsToUpsert = querySpecsToUpsert
+        this.newLiveTablePaths = newLiveTablePaths
     }
 
     _getQuerySpecs() {

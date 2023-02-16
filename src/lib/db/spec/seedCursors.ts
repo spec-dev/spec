@@ -7,6 +7,17 @@ import { camelizeKeys, decamelizeKeys } from 'humps'
 
 export const seedCursors = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(SEED_CURSORS_TABLE_NAME)
 
+export async function getSeedCursorWaitingInLine(id: string): Promise<SeedCursor | null> {
+    let records
+    try {
+        records = await seedCursors().select('*').where({ id, status: SeedCursorStatus.InLine }).limit(1)
+    } catch (err) {
+        logger.error(`Error getting seed_cursor where id=${id}: ${err}`)
+        return null
+    }
+    return camelizeKeys(records || [])[0] as SeedCursor
+}
+
 export async function getSeedCursorsWithStatus(
     status: SeedCursorStatus | SeedCursorStatus[]
 ): Promise<SeedCursor[]> {
