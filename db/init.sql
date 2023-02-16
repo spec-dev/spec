@@ -143,3 +143,10 @@ alter table spec.seed_cursors owner to spec;
 create trigger on_insert_seed_cursors after insert on spec.seed_cursors for each row execute function spec_table_sub('id');
 create trigger on_update_seed_cursors after update on spec.seed_cursors for each row execute function spec_table_sub('id');
 create trigger on_delete_seed_cursors after delete on spec.seed_cursors for each row execute function spec_table_sub('id');
+
+-- Migrations Table
+create table if not exists spec.migrations (
+    "version" character varying not null primary key
+);
+comment on table spec.migrations is 'Spec: Stores the latest schema migration version.';
+alter table spec.migrations owner to spec;
