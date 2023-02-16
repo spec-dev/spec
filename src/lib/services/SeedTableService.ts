@@ -282,7 +282,8 @@ class SeedTableService {
     async _seedWithAdjacentCols() {
         logger.info(chalk.cyanBright(`\nSeeding ${this.seedTablePath} from adjacent columns...`))
 
-        throw 'Update this'
+        // TODO: Re-implement this.
+        return
 
         const queryConditions = this._buildQueryForSeedWithAdjacentCols()
 
