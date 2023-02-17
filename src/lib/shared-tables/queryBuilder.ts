@@ -1,12 +1,17 @@
-import { SharedTablesQueryPayload, StringKeyMap, FilterOp } from '../types'
+import { SharedTablesQueryPayload, StringKeyMap, FilterOp, SelectOptions, OrderByDirection } from '../types'
 import { decamelize } from 'humps'
+import { literal, ident } from 'pg-format'
 
 const filterOpValues = new Set(Object.values(FilterOp))
 
 /**
  * Create a sql query with bindings for the given table & filters.
  */
-export function buildQuery(table: string, filters: StringKeyMap | StringKeyMap[]): SharedTablesQueryPayload {
+export function buildQuery(
+    table: string,
+    filters: StringKeyMap | StringKeyMap[],
+    options?: SelectOptions
+): SharedTablesQueryPayload {
     // Build initial select query.
     const select = `select * from ${formatRelation(table)}`
 
@@ -18,7 +23,10 @@ export function buildQuery(table: string, filters: StringKeyMap | StringKeyMap[]
         (filtersIsArray && !filters.length) ||
         (filtersIsObject && !Object.keys(filters).length)
     ) {
-        return { sql: select, bindings: [] }
+        return {
+            sql: addSelectOptionsToQuery(select, options),
+            bindings: [],
+        }
     }
 
     // Go ahead and group filters into an array for processing, even if not one.
@@ -34,14 +42,20 @@ export function buildQuery(table: string, filters: StringKeyMap | StringKeyMap[]
         andStatement?.length && orStatements.push(andStatement)
     }
     if (!orStatements.length) {
-        return { sql: select, bindings: [] }
+        return {
+            sql: addSelectOptionsToQuery(select, options),
+            bindings: [],
+        }
     }
 
-    const suffix =
-        orStatements.length > 1 ? orStatements.map((s) => `(${s})`).join(' or ') : orStatements[0]
+    const suffix = orStatements.length > 1 
+        ? orStatements.map((s) => `(${s})`).join(' or ') 
+        : orStatements[0]
+
+    let sql = `${select} where ${suffix}`
 
     return {
-        sql: `${select} where ${suffix}`,
+        sql: addSelectOptionsToQuery(sql, options),
         bindings: values,
     }
 }
@@ -112,6 +126,28 @@ export function buildAndStatement(
 function formatRelation(relation: string): string {
     return relation
         .split('.')
-        .map((v) => `"${decamelize(v)}"`)
+        .map((v) => `${ident(decamelize(v))}`)
         .join('.')
+}
+
+function addSelectOptionsToQuery(sql: string, options?: SelectOptions): string {
+    options = options || {}
+    const orderBy = options.orderBy
+
+    // Order by
+    if (orderBy?.column && Object.values(OrderByDirection).includes(orderBy?.direction)) {
+        sql += ` order by ${formatRelation(orderBy.column)} ${orderBy.direction}`
+    }
+
+    // Offset
+    if (options.hasOwnProperty('offset')) {
+        sql += ` offset ${literal(options.offset)}`
+    }
+
+    // Limit
+    if (options.hasOwnProperty('limit')) {
+        sql += ` limit ${literal(options.limit)}`
+    }
+
+    return sql
 }

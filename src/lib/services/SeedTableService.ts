@@ -11,6 +11,8 @@ import {
     FilterOp,
     ColumnDefaultsConfig,
     EnrichedLink,
+    SelectOptions,
+    OrderByDirection,
 } from '../types'
 import { reverseMap, getCombinations, unique, groupByKeys } from '../utils/formatters'
 import { areColumnsEmpty } from '../db/ops'
@@ -26,6 +28,7 @@ import { updateCursor } from '../db/spec'
 import LRU from 'lru-cache'
 import { applyDefaults } from '../defaults'
 import { withDeadlockProtection } from '../utils/db'
+import { decamelize } from 'humps'
 
 const valueSep = '__:__'
 
@@ -48,6 +51,8 @@ class SeedTableService {
     seedCount: number = 0
 
     inputBatchSeedCount: number = 0
+
+    fromScratchBatchResultSize: number = 0
 
     tableDataSources: TableDataSources
 
@@ -248,22 +253,42 @@ class SeedTableService {
         logger.info(chalk.cyanBright(`\nSeeding ${this.seedTablePath} from scratch...`))
 
         const inputArgs = this.valueFilters.map(vf => this._formatValueFilterGroupAsInputArgs(vf))
+        const limit = constants.FROM_SCRATCH_SEED_INPUT_BATCH_SIZE
+
+        const queryOptions: SelectOptions = { limit }
+        if (this.primaryTimestampProperty) {
+            queryOptions.orderBy = {
+                column: decamelize(this.primaryTimestampProperty),
+                direction: OrderByDirection.DESC,
+            }
+        }
 
         const sharedErrorContext = { error: null }
         const t0 = performance.now()
-        try {
-            await querySharedTable(
-                this.sharedTablePath,
-                inputArgs,
-                async (data) =>
-                    this._handleDataOnSeedFromScratch(data as StringKeyMap[]).catch((err) => {
-                        sharedErrorContext.error = err
-                    }),
-                sharedErrorContext
-            )
-        } catch (err) {
-            logger.error(err)
-            throw err
+        while (true) {
+            this.fromScratchBatchResultSize = 0
+            try {
+                await querySharedTable(
+                    this.sharedTablePath,
+                    inputArgs,
+                    async (data) =>
+                        this._handleDataOnSeedFromScratch(data as StringKeyMap[]).catch((err) => {
+                            sharedErrorContext.error = err
+                        }),
+                    sharedErrorContext,
+                    { offset: this.cursor, ...queryOptions },
+                )
+            } catch (err) {
+                logger.error(err)
+                throw err
+            }
+            if (sharedErrorContext.error) throw sharedErrorContext.error
+
+            this.cursor += this.fromScratchBatchResultSize
+
+            await updateCursor(this.seedCursorId, this.cursor)
+
+            if (this.fromScratchBatchResultSize < limit) break
         }
 
         const tf = performance.now()
@@ -569,13 +594,7 @@ class SeedTableService {
     }
 
     async _handleDataOnSeedFromScratch(batch: StringKeyMap[]) {
-        this.seedCount += batch.length
-        logger.info(
-            chalk.cyanBright(
-                `  ${this.seedCount.toLocaleString('en-US')} records -> ${this.seedTableName}`
-            )
-        )
-
+        this.fromScratchBatchResultSize += batch.length
         const tableDataSources = this.tableDataSources
         const insertRecords = []
 
@@ -603,6 +622,13 @@ class SeedTableService {
             defaultColumnValues: this.defaultColumnValues,
         }
 
+        this.seedCount += insertRecords.length
+        logger.info(
+            chalk.cyanBright(
+                `  ${this.seedCount.toLocaleString('en-US')} records -> ${this.seedTableName}`
+            )
+        )
+
         const op = async () => {
             try {
                 await db.transaction(async (tx) => {
@@ -624,14 +650,6 @@ class SeedTableService {
         nonSeedLinkedForeignTableData: StringKeyMap[]
     ) {
         this.inputBatchSeedCount += batch.length
-        this.seedCount += batch.length
-        logger.info(
-            chalk.cyanBright(
-                `  ${this.inputBatchSeedCount.toLocaleString('en-US')} records -> ${
-                    this.seedTableName
-                }`
-            )
-        )
 
         // Clone this so we can add to it with each batch independently.
         const otherLinkedForeignTables: StringKeyMap[] = [...nonSeedLinkedForeignTableData].map(
@@ -747,6 +765,15 @@ class SeedTableService {
                     }
                     if (!finalUpsertRecords.length) return
     
+                    this.seedCount += finalUpsertRecords.length
+                    logger.info(
+                        chalk.cyanBright(
+                            `  ${this.inputBatchSeedCount.toLocaleString('en-US')} records -> ${
+                                this.seedTableName
+                            }`
+                        )
+                    )
+
                     const upsertBatchOp = {
                         type: OpType.Insert,
                         schema: this.seedSchemaName,

@@ -1,4 +1,4 @@
-import { StringKeyMap } from '../types'
+import { SelectOptions, StringKeyMap } from '../types'
 import fetch, { Response } from 'node-fetch'
 import { JSONParser } from '@streamparser/json'
 import constants from '../constants'
@@ -21,9 +21,10 @@ export async function querySharedTable(
     payload: StringKeyMap | StringKeyMap[],
     onData: onDataCallbackType,
     sharedErrorContext: StringKeyMap,
+    options?: SelectOptions,
     hasRetried?: boolean
 ) {
-    const filters = buildQuery(tablePath, stringifyAnyDates(payload))
+    const filters = buildQuery(tablePath, stringifyAnyDates(payload), options)
     const abortController = new AbortController()
     const initialRequestTimer = setTimeout(() => abortController.abort(), 60000)
     const resp = await makeRequest(tablePath, filters, abortController)
@@ -40,7 +41,7 @@ export async function querySharedTable(
         const message = err.message || err || ''
         if (!hasRetried && message.toLowerCase().includes('user aborted')) {
             logger.warn('Retrying spec function request...')
-            await querySharedTable(tablePath, payload, onData, sharedErrorContext, true)
+            await querySharedTable(tablePath, payload, onData, sharedErrorContext, options, true)
         } else {
             throw err
         }

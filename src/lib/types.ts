@@ -322,3 +322,19 @@ export type SharedTablesQueryPayload = {
 }
 
 export type MissedEventsCallback = (event: SpecEvent[]) => void
+
+export enum OrderByDirection {
+    ASC = 'asc',
+    DESC = 'desc',
+}
+
+export type OrderBy = {
+    column: string
+    direction: OrderByDirection
+}
+
+export type SelectOptions = {
+    orderBy?: OrderBy
+    offset?: number
+    limit?: number
+}
