@@ -131,12 +131,17 @@ async function makeRequest(
     payload: StringKeyMap | StringKeyMap[],
     abortController: AbortController
 ): Promise<Response> {
+    const headers = { 'Content-Type': 'application/json' }
+    if (constants.PROJECT_API_KEY) {
+        headers[constants.SPEC_AUTH_HEADER_NAME] = constants.PROJECT_API_KEY
+    }
+
     let resp: Response
     try {
         resp = await fetch(queryUrl, {
             method: 'POST',
             body: JSON.stringify(payload),
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             signal: abortController.signal,
         })
     } catch (err) {

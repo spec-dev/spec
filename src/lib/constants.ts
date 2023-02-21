@@ -11,6 +11,7 @@ const constants: StringKeyMap = {
     PROJECT_ID: ev('PROJECT_ID'),
     PROJECT_API_KEY: ev('PROJECT_API_KEY'),
     PROJECT_ADMIN_KEY: ev('PROJECT_ADMIN_KEY'),
+    SPEC_AUTH_HEADER_NAME: 'Spec-Auth-Token',
 
     // TODO
     EVENTS_HOSTNAME: ev('EVENTS_HOSTNAME', 'events.spec.dev'),
