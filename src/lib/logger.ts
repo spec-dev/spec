@@ -53,6 +53,7 @@ export class Logger {
             message: this._formatArgsAsMessage(args),
             timestamp: new Date(new Date().toUTCString()).toISOString(),
             projectId: constants.PROJECT_ID,
+            env: constants.LOGS_ENV,
         }
     }
 
