@@ -40,6 +40,7 @@ const constants: StringKeyMap = {
     SAVE_EVENT_CURSORS_INTERVAL: Number(ev('SAVE_EVENT_CURSORS_INTERVAL', 1000)),
     ANALYZE_TABLES_INTERVAL: Number(ev('ANALYZE_TABLES_INTERVAL', 30000)),
     RETRY_SEED_CURSORS_INTERVAL: Number(ev('RETRY_SEED_CURSORS_INTERVAL', 5000)),
+    MAX_SEED_JOB_ATTEMPTS: Number(ev('MAX_SEED_JOB_ATTEMPTS', 10)),
 
     TABLE_SUB_FUNCTION_NAME: ev('TABLE_SUB_FUNCTION_NAME', 'spec_table_sub'),
     TABLE_SUB_CHANNEL: ev('TABLE_SUB_CHANNEL', 'spec_data_change'),
@@ -52,6 +53,7 @@ const constants: StringKeyMap = {
     LOGS_HOSTNAME: ev('LOGS_HOSTNAME', 'logs.spec.dev'),
     LOGS_PORT: Number(ev('LOGS_PORT', 443)),
     STREAM_LOGS: !['false', false].includes(ev('STREAM_LOGS')),
+    LOGS_ENV: ev('LOGS_ENV', 'prod'),
 
     SHARED_TABLES_ORIGIN: ev('SHARED_TABLES_ORIGIN', 'https://tables-ingress.spec.dev'),
 }

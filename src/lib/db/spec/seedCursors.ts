@@ -4,6 +4,8 @@ import { SPEC_SCHEMA_NAME, SEED_CURSORS_TABLE_NAME } from './names'
 import logger from '../../logger'
 import { unique } from '../../utils/formatters'
 import { camelizeKeys, decamelizeKeys } from 'humps'
+import constants from '../../constants'
+import chalk from 'chalk'
 
 export const seedCursors = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(SEED_CURSORS_TABLE_NAME)
 
@@ -23,15 +25,26 @@ export async function getSeedCursorsWithStatus(
 ): Promise<SeedCursor[]> {
     status = Array.isArray(status) ? status : [status]
     if (!status.length) return []
-    let records
+    let results
     try {
-        records = await seedCursors().select('*').whereIn('status', unique(status))
+        results = await seedCursors().select('*').whereIn('status', unique(status))
     } catch (err) {
         logger.error(`Error getting seed_cursors for status: ${status.join(', ')}: ${err}`)
         return []
     }
-
-    return camelizeKeys(records || []) as SeedCursor[]
+    const records = camelizeKeys(results || []) as SeedCursor[]
+    const finalRecords = []
+    for (const record of records) {
+        if (
+            record.status === SeedCursorStatus.Failed && 
+            !!record.metadata?.attempts &&
+            record.metadata.attempts > constants.MAX_SEED_JOB_ATTEMPTS
+        ) {
+            continue
+        }
+        finalRecords.push(record)
+    }
+    return finalRecords
 }
 
 export async function createSeedCursor(seedCursor: StringKeyMap) {
@@ -96,8 +109,34 @@ export async function processSeedCursorBatch(
     return true
 }
 
-export async function seedFailed(ids: string | string[]) {
-    await updateStatus(ids, SeedCursorStatus.Failed)
+export async function seedFailed(id: string) {
+    let results = []
+    try {
+        results = await seedCursors().select('metadata').where('id', id).limit(1)
+    } catch (err) {
+        logger.error(`Error getting metadata for seed_cursor (id=${id}): ${err}`)
+    }
+    const seedCursor = (results || [])[0] || {}
+    const metadata = seedCursor.metadata || {}
+    metadata.attempts = (metadata.attempts || 1) + 1
+
+    if (metadata.attempts > constants.MAX_SEED_JOB_ATTEMPTS) {
+        const tablePath = seedCursor.spec?.tablePath
+        logger.error(chalk.red(`Max attempts hit while seeding ${tablePath} (seed_cursor.id = ${id})`))
+    }
+
+    try {
+        await db.transaction(async (tx) => {
+            await seedCursors(tx)
+                .update('metadata', metadata)
+                .update('status', SeedCursorStatus.Failed)
+                .where('id', id)
+        })
+    } catch (err) {
+        logger.error(
+            `Error setting seed_cursor (id=${id}) to failed (attempts=${metadata.attempts}): ${err}`
+        )
+    }
 }
 
 // Just delete successful seed cursors.
@@ -142,7 +181,13 @@ export async function updateCursor(id: string, cursor: number) {
 }
 
 export async function failedSeedCursorsExist(): Promise<boolean> {
-    const result = await seedCursors().where('status', SeedCursorStatus.Failed).count()
-    const count = result ? Number((result[0] || {}).count || 0) : 0
-    return count > 0
+    try {
+        const failed = ((await seedCursors().where('status', SeedCursorStatus.Failed)) || []).filter(
+            r => !r.metadata?.attempts || r.metadata.attempts <= constants.MAX_SEED_JOB_ATTEMPTS
+        )
+        return failed.length > 0    
+    } catch (err) {
+        logger.error(`Error querying for failed seed jobs: ${err}`)
+        return false
+    }
 }

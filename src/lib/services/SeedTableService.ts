@@ -263,6 +263,8 @@ class SeedTableService {
             }
         }
 
+        throw 'yep'
+
         const sharedErrorContext = { error: null }
         const t0 = performance.now()
         while (true) {

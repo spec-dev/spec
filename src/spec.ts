@@ -505,7 +505,6 @@ class Spec {
             const numTablesUsingLiveObjectForSeed = tablePathsUsingLiveObjectIdForSeed[liveObjectId].size
             const waitOnLiveObjectEvents = numTablesUsingLiveObject === numTablesUsingLiveObjectForSeed
             waitOnLiveObjectEvents && this.liveObjectsToIgnoreEventsFrom.add(liveObjectId)
-            console.log(`ignoring events for ${liveObjectId}`)
         })
 
         // Create seed jobs and determine the seed strategies up-front for each.
@@ -654,8 +653,11 @@ class Spec {
         seedSpec: SeedSpec,
         metadata: StringKeyMap
     ) {
-        const { liveObjectId, tablePath } = seedSpec
+        const { tablePath } = seedSpec
         const foreignTablePath = metadata?.foreignTablePath
+        const attempt = metadata?.attempts || 1
+        const maxAttempts = constants.MAX_SEED_JOB_ATTEMPTS
+        const failLogPrefix = `[${attempt}/${maxAttempts}] Seed failed for table ${tablePath}`
 
         if (!!foreignTablePath) {
             const foreignPrimaryKeyData = metadata.foreignPrimaryKeyData || []
@@ -666,7 +668,7 @@ class Spec {
                 )
                 await seedTableService.seedWithForeignRecords(foreignTablePath, foreignRecords)
             } catch (err) {
-                logger.error(`Seed failed for table ${tablePath}: ${err}`)
+                logger.error(chalk.yellow(`${failLogPrefix}: ${err}`))
                 seedFailed(seedTableService.seedCursorId)
                 return
             }
@@ -674,7 +676,7 @@ class Spec {
             try {
                 await seedTableService.executeSeedStrategy()
             } catch (err) {
-                logger.error(`Seed failed for table ${tablePath}: ${err}`)
+                logger.error(chalk.yellow(`${failLogPrefix}: ${err}`))
                 seedFailed(seedTableService.seedCursorId)
                 return
             }
