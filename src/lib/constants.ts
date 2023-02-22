@@ -56,6 +56,9 @@ const constants: StringKeyMap = {
     LOGS_ENV: ev('LOGS_ENV', 'prod'),
 
     SHARED_TABLES_ORIGIN: ev('SHARED_TABLES_ORIGIN', 'https://tables-ingress.spec.dev'),
+    EXPO_BACKOFF_DELAY: 100,
+    EXPO_BACKOFF_MAX_ATTEMPTS: 10,
+    EXPO_BACKOFF_FACTOR: 1.5,
 }
 
 constants.PROJECT_CONFIG_PATH = path.join(

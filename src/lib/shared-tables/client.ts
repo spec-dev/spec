@@ -5,6 +5,7 @@ import constants from '../constants'
 import logger from '../logger'
 import { buildQuery } from './queryBuilder'
 import { camelizeKeys } from 'humps'
+import { sleep } from '../utils/time'
 
 type onDataCallbackType = (data: StringKeyMap | StringKeyMap[]) => Promise<void>
 
@@ -26,9 +27,7 @@ export async function querySharedTable(
 ) {
     const filters = buildQuery(tablePath, stringifyAnyDates(payload), options)
     const abortController = new AbortController()
-    const initialRequestTimer = setTimeout(() => abortController.abort(), 60000)
     const resp = await makeRequest(tablePath, filters, abortController)
-    clearTimeout(initialRequestTimer)
 
     if (!isStreamingResp(resp)) {
         await handleJSONResp(resp, tablePath, onData)
@@ -129,14 +128,17 @@ async function handleStreamingResp(
 async function makeRequest(
     tablePath: string,
     payload: StringKeyMap | StringKeyMap[],
-    abortController: AbortController
+    abortController: AbortController,
+    attempt: number = 1,
 ): Promise<Response> {
+    const initialRequestTimer = setTimeout(() => abortController.abort(), 60000)
+
     const headers = { 'Content-Type': 'application/json' }
     if (constants.PROJECT_API_KEY) {
         headers[constants.SPEC_AUTH_HEADER_NAME] = constants.PROJECT_API_KEY
     }
-
-    let resp: Response
+    
+    let resp, error
     try {
         resp = await fetch(queryUrl, {
             method: 'POST',
@@ -145,11 +147,25 @@ async function makeRequest(
             signal: abortController.signal,
         })
     } catch (err) {
-        throw `Unexpected error querying shared table ${tablePath}: ${err?.message || err}`
+        error = `Unexpected error querying shared table ${tablePath}: ${err?.message || err}`
     }
     if (resp?.status !== 200) {
-        throw `Querying shared table (${tablePath}) failed: got response code ${resp?.status}`
+        error = `Querying shared table (${tablePath}) failed: got response code ${resp?.status}`
     }
+    clearTimeout(initialRequestTimer)
+
+    if (error) {
+        logger.error(`Failed to make initial request while querying shared table ${tablePath}.`)
+        
+        if (attempt < constants.EXPO_BACKOFF_MAX_ATTEMPTS) {
+            logger.error(`Retrying with attempt ${attempt}/${constants.EXPO_BACKOFF_MAX_ATTEMPTS}...`)
+            await sleep((constants.EXPO_BACKOFF_FACTOR ** attempt) * constants.EXPO_BACKOFF_DELAY)
+            return makeRequest(tablePath, payload, abortController, attempt + 1)
+        } else {
+            throw error
+        }
+    }
+
     return resp
 }
 

@@ -55,7 +55,10 @@ class ApplyEventService {
         // implemented property keys included in the diff structure).
         this.linksToApplyDiffsTo = this._getLinksToApplyDiffTo()
         if (!this.linksToApplyDiffsTo.length) {
-            logger.info(`Live object diff didn't satisfy any configured links`)
+            logger.warn(
+                `Live object diff didn't satisfy any configured links`, 
+                JSON.stringify(this.event, null, 4)
+            )
             return
         }
 
