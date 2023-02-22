@@ -79,7 +79,10 @@ async function handleStreamingResp(
     let chunkTimer = null
     const renewTimer = () => {
         chunkTimer && clearTimeout(chunkTimer)
-        chunkTimer = setTimeout(() => abortController.abort(), 60000)
+        chunkTimer = setTimeout(
+            () => abortController.abort(), 
+            constants.SHARED_TABLES_READABLE_STREAM_TIMEOUT,
+        )
     }
     renewTimer()
 
@@ -131,11 +134,14 @@ async function makeRequest(
     abortController: AbortController,
     attempt: number = 1,
 ): Promise<Response> {
-    const initialRequestTimer = setTimeout(() => abortController.abort(), 60000)
+    const initialRequestTimer = setTimeout(
+        () => abortController.abort(),
+        constants.SHARED_TABLES_INITIAL_REQUEST_TIMEOUT,
+    )
 
     const headers = { 'Content-Type': 'application/json' }
     if (constants.PROJECT_API_KEY) {
-        headers[constants.SPEC_AUTH_HEADER_NAME] = constants.PROJECT_API_KEY
+        headers[constants.SHARED_TABLES_AUTH_HEADER_NAME] = constants.PROJECT_API_KEY
     }
     
     let resp, error
