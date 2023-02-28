@@ -1,6 +1,6 @@
 import logger from './lib/logger'
 import config from './lib/config'
-import constants from './lib/constants'
+import { constants } from './lib/constants'
 import { resolveLiveObjects } from './lib/rpcs/liveObjects'
 import messageClient from './lib/rpcs/messageClient'
 import {
@@ -196,8 +196,8 @@ class Spec {
                 await service.perform()
             } catch (err) {
                 logger.error(
-                    `Failed to apply event to live object - (event=${event.name}; ` + 
-                    `liveObject=${liveObjectId}): ${err?.message || err}`
+                    `Failed to apply event to live object - (event=${event.name}; ` +
+                        `liveObject=${liveObjectId}): ${err?.message || err}`
                 )
             }
         }
@@ -217,11 +217,9 @@ class Spec {
         // Subscribe to new events.
         for (const newEventName in liveObjectsByEvent) {
             if (this.eventSubs.hasOwnProperty(newEventName)) continue
-            
+
             // Register event callback.
-            messageClient.on(newEventName, (event: SpecEvent) =>
-                this._onEvent(event)
-            )
+            messageClient.on(newEventName, (event: SpecEvent) => this._onEvent(event))
 
             // Register sub.
             this.eventSubs[newEventName] = {
@@ -421,16 +419,18 @@ class Spec {
                 seedSpecsToRunNow.push(seedSpec)
             }
         }
-        seedSpecsOnNewLiveTables.sort((a, b) => (
-            config.getTableOrder(a.tablePath) - config.getTableOrder(b.tablePath)
-        ))
+        seedSpecsOnNewLiveTables.sort(
+            (a, b) => config.getTableOrder(a.tablePath) - config.getTableOrder(b.tablePath)
+        )
 
         if (seedSpecsOnNewLiveTables.length) {
-            logger.info(chalk.cyanBright(
-                `New live tables detected - will seed in series: ${
-                    seedSpecsOnNewLiveTables.map(seedSpec => seedSpec.tablePath).join(', ')
-                }`
-            ))
+            logger.info(
+                chalk.cyanBright(
+                    `New live tables detected - will seed in series: ${seedSpecsOnNewLiveTables
+                        .map((seedSpec) => seedSpec.tablePath)
+                        .join(', ')}`
+                )
+            )
         }
 
         let seedSpecsToWaitInLine = []
@@ -439,7 +439,7 @@ class Spec {
             seedSpecsToWaitInLine = seedSpecsOnNewLiveTables.slice(1)
         }
 
-        const seedCursorsToWaitInLine: StringKeyMap[] = seedSpecsToWaitInLine.map(seedSpec => ({
+        const seedCursorsToWaitInLine: StringKeyMap[] = seedSpecsToWaitInLine.map((seedSpec) => ({
             id: short.generate(),
             jobType: SeedCursorJobType.SeedTable,
             spec: seedSpec,
@@ -449,13 +449,13 @@ class Spec {
         for (let i = 0; i < seedCursorsToWaitInLine.length; i++) {
             if (i < seedCursorsToWaitInLine.length - 1) {
                 seedCursorsToWaitInLine[i].metadata = {
-                    nextId: seedCursorsToWaitInLine[i + 1].id
+                    nextId: seedCursorsToWaitInLine[i + 1].id,
                 }
             }
         }
 
         // Compile instructions for new seed cursors to create.
-        const createSeedCursors = [ ...seedCursorsToWaitInLine ]
+        const createSeedCursors = [...seedCursorsToWaitInLine]
         const seedSpecsWithCursors = []
         for (let i = 0; i < seedSpecsToRunNow.length; i++) {
             const seedSpec = seedSpecsToRunNow[i]
@@ -469,7 +469,7 @@ class Spec {
 
             if (i === seedSpecsToRunNow.length - 1 && seedCursorsToWaitInLine.length) {
                 seedCursor.metadata = {
-                    nextId: seedCursorsToWaitInLine[0].id
+                    nextId: seedCursorsToWaitInLine[0].id,
                 }
             }
 
@@ -492,7 +492,7 @@ class Spec {
         }
 
         // Ignore events from live objects exclusively tied to seeds to wait on.
-        seedSpecsToWaitInLine.forEach(seedSpec => {
+        seedSpecsToWaitInLine.forEach((seedSpec) => {
             const { liveObjectId } = seedSpec
             if (
                 !tablePathsUsingLiveObjectId.hasOwnProperty(liveObjectId) ||
@@ -500,10 +500,12 @@ class Spec {
             ) {
                 return
             }
- 
+
             const numTablesUsingLiveObject = tablePathsUsingLiveObjectId[liveObjectId].size
-            const numTablesUsingLiveObjectForSeed = tablePathsUsingLiveObjectIdForSeed[liveObjectId].size
-            const waitOnLiveObjectEvents = numTablesUsingLiveObject === numTablesUsingLiveObjectForSeed
+            const numTablesUsingLiveObjectForSeed =
+                tablePathsUsingLiveObjectIdForSeed[liveObjectId].size
+            const waitOnLiveObjectEvents =
+                numTablesUsingLiveObject === numTablesUsingLiveObjectForSeed
             waitOnLiveObjectEvents && this.liveObjectsToIgnoreEventsFrom.add(liveObjectId)
         })
 
@@ -602,7 +604,9 @@ class Spec {
     async _runSeedJobs(jobs: StringKeyMap) {
         // Run all resolve records jobs first.
         await Promise.all(
-            (jobs.resolveRecordsJobs || []).map(([service, spec]) => this._resolveRecords(service, spec))
+            (jobs.resolveRecordsJobs || []).map(([service, spec]) =>
+                this._resolveRecords(service, spec)
+            )
         )
 
         const normalSeedTableJobs = []
@@ -664,7 +668,7 @@ class Spec {
             try {
                 const foreignRecords = await getRecordsForPrimaryKeys(
                     foreignTablePath,
-                    foreignPrimaryKeyData,
+                    foreignPrimaryKeyData
                 )
                 await seedTableService.seedWithForeignRecords(foreignTablePath, foreignRecords)
             } catch (err) {
@@ -689,7 +693,7 @@ class Spec {
     }
 
     async _runNextSeedCursorInSeries(id: string) {
-        // Find the 'in-line' seed cursor by id. 
+        // Find the 'in-line' seed cursor by id.
         const seedCursor = await getSeedCursorWaitingInLine(id)
         if (!seedCursor) {
             logger.error(`Next seed cursor in series (id=${id}) was missing...`)
@@ -702,10 +706,13 @@ class Spec {
 
         const liveObject = this.liveObjects[liveObjectId]
         if (!liveObject) {
-            logger.error(`Live object ${liveObjectId} isn't registered anymore - skipping seed cursor in series.`)
+            logger.error(
+                `Live object ${liveObjectId} isn't registered anymore - skipping seed cursor in series.`
+            )
             // Register success anyway and go to next in series.
             await seedSucceeded(seedCursor.id)
-            seedCursor.metadata?.nextId && this._runNextSeedCursorInSeries(seedCursor.metadata?.nextId)
+            seedCursor.metadata?.nextId &&
+                this._runNextSeedCursorInSeries(seedCursor.metadata?.nextId)
             return
         }
 
@@ -715,7 +722,7 @@ class Spec {
                 seedSpec,
                 liveObject,
                 seedCursor.id,
-                seedCursor.cursor,
+                seedCursor.cursor
             )
 
             // Determine seed strategy up-front unless already determined
@@ -724,7 +731,9 @@ class Spec {
                 await seedTableService.determineSeedStrategy()
             }
         } catch (err) {
-            logger.error(`Creating seed table service for seed_cursor in series (id=${seedCursor.id}) failed: ${err}`)
+            logger.error(
+                `Creating seed table service for seed_cursor in series (id=${seedCursor.id}) failed: ${err}`
+            )
             return
         }
 
@@ -780,7 +789,7 @@ class Spec {
         let event
         while (this.eventSubs[eventName].buffer.length > 0) {
             event = this.eventSubs[eventName].buffer.shift()
-            await this._processEvent(event) 
+            await this._processEvent(event)
             await sleep(5)
         }
 
@@ -798,7 +807,7 @@ class Spec {
                 // Sort buffer by nonce (smallest none first).
                 const sortedBuffer = [...buffer].sort((a, b) => {
                     return (
-                        parseFloat(a.nonce.replace('-', '.')) - 
+                        parseFloat(a.nonce.replace('-', '.')) -
                         parseFloat(b.nonce.replace('-', '.'))
                     )
                 })

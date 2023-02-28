@@ -1,7 +1,7 @@
 import logger from '../logger'
 import { db } from './index'
 import { Trigger, TriggerEvent, StringKeyMap } from '../types'
-import constants from '../constants'
+import { constants } from '../constants'
 import { tablesMeta } from './tablesMeta'
 import { hash } from '../utils/hash'
 

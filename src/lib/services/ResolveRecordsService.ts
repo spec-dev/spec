@@ -17,7 +17,7 @@ import { querySharedTable } from '../shared-tables/client'
 import config from '../config'
 import { db } from '../db'
 import { QueryError } from '../errors'
-import constants from '../constants'
+import { constants } from '../constants'
 import logger from '../logger'
 import { tablesMeta, getRel } from '../db/tablesMeta'
 import chalk from 'chalk'
@@ -26,7 +26,6 @@ import { withDeadlockProtection } from '../utils/db'
 const valueSep = '__:__'
 
 class ResolveRecordsService {
-
     tablePath: string
 
     liveObject: LiveObject
@@ -124,13 +123,17 @@ class ResolveRecordsService {
         this.seedCursorId = seedCursorId
         this.cursor = cursor
         this.liveTableColumns = Object.keys(config.getTable(this.schemaName, this.tableName) || {})
-        this.tableDataSources = config.getLiveObjectTableDataSources(this.liveObject.id, this.tablePath)
+        this.tableDataSources = config.getLiveObjectTableDataSources(
+            this.liveObject.id,
+            this.tablePath
+        )
 
         this.enrichedLink = config.getEnrichedLink(this.liveObject.id, this.tablePath)
-        if (!this.enrichedLink) throw `No enriched link found for link ${this.liveObject.id} <> ${this.tablePath}`
+        if (!this.enrichedLink)
+            throw `No enriched link found for link ${this.liveObject.id} <> ${this.tablePath}`
 
         this.primaryTimestampColumn = this.primaryTimestampProperty
-            ? ((this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null)
+            ? (this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null
             : null
 
         this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.tablePath)
@@ -267,7 +270,9 @@ class ResolveRecordsService {
                 } else {
                     await db.transaction(async (tx) => {
                         await Promise.all(
-                            indivUpdateOps.map((updateOp) => new RunOpService(updateOp, tx).perform())
+                            indivUpdateOps.map((updateOp) =>
+                                new RunOpService(updateOp, tx).perform()
+                            )
                         )
                     })
                 }

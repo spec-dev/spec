@@ -1,5 +1,5 @@
 import knex from 'knex'
-import constants from '../constants'
+import { constants } from '../constants'
 import createSubscriber from 'pg-listen'
 import logger from '../logger'
 import { Pool } from 'pg'

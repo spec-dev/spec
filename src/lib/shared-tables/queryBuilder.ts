@@ -1,4 +1,10 @@
-import { SharedTablesQueryPayload, StringKeyMap, FilterOp, SelectOptions, OrderByDirection } from '../types'
+import {
+    SharedTablesQueryPayload,
+    StringKeyMap,
+    FilterOp,
+    SelectOptions,
+    OrderByDirection,
+} from '../types'
 import { decamelize } from 'humps'
 import { literal, ident } from 'pg-format'
 
@@ -48,9 +54,8 @@ export function buildQuery(
         }
     }
 
-    const suffix = orStatements.length > 1 
-        ? orStatements.map((s) => `(${s})`).join(' or ') 
-        : orStatements[0]
+    const suffix =
+        orStatements.length > 1 ? orStatements.map((s) => `(${s})`).join(' or ') : orStatements[0]
 
     let sql = `${select} where ${suffix}`
 

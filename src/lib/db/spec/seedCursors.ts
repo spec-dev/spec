@@ -4,7 +4,7 @@ import { SPEC_SCHEMA_NAME, SEED_CURSORS_TABLE_NAME } from './names'
 import logger from '../../logger'
 import { unique } from '../../utils/formatters'
 import { camelizeKeys, decamelizeKeys } from 'humps'
-import constants from '../../constants'
+import { constants } from '../../constants'
 import chalk from 'chalk'
 
 export const seedCursors = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(SEED_CURSORS_TABLE_NAME)
@@ -12,7 +12,10 @@ export const seedCursors = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(SEED_CURSO
 export async function getSeedCursorWaitingInLine(id: string): Promise<SeedCursor | null> {
     let records
     try {
-        records = await seedCursors().select('*').where({ id, status: SeedCursorStatus.InLine }).limit(1)
+        records = await seedCursors()
+            .select('*')
+            .where({ id, status: SeedCursorStatus.InLine })
+            .limit(1)
     } catch (err) {
         logger.error(`Error getting seed_cursor where id=${id}: ${err}`)
         return null
@@ -36,7 +39,7 @@ export async function getSeedCursorsWithStatus(
     const finalRecords = []
     for (const record of records) {
         if (
-            record.status === SeedCursorStatus.Failed && 
+            record.status === SeedCursorStatus.Failed &&
             !!record.metadata?.attempts &&
             record.metadata.attempts > constants.MAX_SEED_JOB_ATTEMPTS
         ) {
@@ -122,7 +125,9 @@ export async function seedFailed(id: string) {
 
     if (metadata.attempts > constants.MAX_SEED_JOB_ATTEMPTS) {
         const tablePath = seedCursor.spec?.tablePath
-        logger.error(chalk.red(`Max attempts hit while seeding ${tablePath} (seed_cursor.id = ${id})`))
+        logger.error(
+            chalk.red(`Max attempts hit while seeding ${tablePath} (seed_cursor.id = ${id})`)
+        )
     }
 
     try {
@@ -182,10 +187,12 @@ export async function updateCursor(id: string, cursor: number) {
 
 export async function failedSeedCursorsExist(): Promise<boolean> {
     try {
-        const failed = ((await seedCursors().where('status', SeedCursorStatus.Failed)) || []).filter(
-            r => !r.metadata?.attempts || r.metadata.attempts <= constants.MAX_SEED_JOB_ATTEMPTS
+        const failed = (
+            (await seedCursors().where('status', SeedCursorStatus.Failed)) || []
+        ).filter(
+            (r) => !r.metadata?.attempts || r.metadata.attempts <= constants.MAX_SEED_JOB_ATTEMPTS
         )
-        return failed.length > 0    
+        return failed.length > 0
     } catch (err) {
         logger.error(`Error querying for failed seed jobs: ${err}`)
         return false

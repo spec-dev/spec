@@ -1,9 +1,27 @@
 {
-    "name": "spec",
+    "name": "@spec.dev/spec",
     "description": "Spec",
     "version": "0.0.1",
-    "private": true,
-    "main": "dist/index.js",
+    "keywords": [
+        "javascript",
+        "typescript",
+        "spec"
+    ],
+    "homepage": "https://github.com/spec-dev/spec",
+    "bugs": "https://github.com/spec-dev/spec/issues",
+    "license": "MIT",
+    "author": "Spec",
+    "files": [
+        "dist",
+        "src"
+    ],
+    "main": "dist/main/index.js",
+    "types": "dist/main/index.d.ts",
+    "bin": {
+        "spec-client": "dist/index.js"
+    },
+    "sideEffects": false,
+    "repository": "spec-dev/spec",
     "scripts": {
         "start": "node dist/index.js",
         "dev": "ts-node ./src/index.ts",
@@ -18,6 +36,7 @@
         "@spec.dev/event-client": "^0.0.11",
         "@spec.dev/realtime-client": "^0.0.2",
         "@streamparser/json": "^0.0.8",
+        "argparse": "^2.0.1",
         "chalk": "4.1.0",
         "cross-fetch": "^3.1.5",
         "dayjs": "^1.11.7",
@@ -35,6 +54,7 @@
         "uuid4": "^2.0.2"
     },
     "devDependencies": {
+        "@types/argparse": "^2.0.10",
         "@types/lodash": "^4.14.184",
         "@types/lodash.debounce": "^4.0.7",
         "@types/node": "^18.0.3",

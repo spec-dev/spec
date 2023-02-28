@@ -21,7 +21,7 @@ import { querySharedTable } from '../shared-tables/client'
 import config from '../config'
 import { db } from '../db'
 import { QueryError } from '../errors'
-import constants from '../constants'
+import { constants } from '../constants'
 import { tablesMeta, getRel, isColTypeArray } from '../db/tablesMeta'
 import chalk from 'chalk'
 import { updateCursor } from '../db/spec'
@@ -33,7 +33,6 @@ import { decamelize } from 'humps'
 const valueSep = '__:__'
 
 class SeedTableService {
-
     seedSpec: SeedSpec
 
     liveObject: LiveObject
@@ -116,20 +115,21 @@ class SeedTableService {
         this.seedColNames = new Set<string>(this.seedSpec.seedColNames)
         this.tableDataSources = config.getLiveObjectTableDataSources(
             this.liveObject.id,
-            this.seedTablePath,
+            this.seedTablePath
         )
 
         this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.seedTablePath)
 
         this.enrichedLink = config.getEnrichedLink(this.liveObject.id, this.seedTablePath)
-        if (!this.enrichedLink) throw `No enriched link found for link ${this.liveObject.id} <> ${this.seedTablePath}`
+        if (!this.enrichedLink)
+            throw `No enriched link found for link ${this.liveObject.id} <> ${this.seedTablePath}`
 
         this.liveTableColumns = Object.keys(
             config.getTable(this.seedSchemaName, this.seedTableName) || {}
         )
 
         this.primaryTimestampColumn = this.primaryTimestampProperty
-            ? ((this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null)
+            ? (this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null
             : null
 
         this.seedStrategy = null
@@ -252,7 +252,7 @@ class SeedTableService {
     async _seedFromScratch() {
         logger.info(chalk.cyanBright(`\nSeeding ${this.seedTablePath} from scratch...`))
 
-        const inputArgs = this.valueFilters.map(vf => this._formatValueFilterGroupAsInputArgs(vf))
+        const inputArgs = this.valueFilters.map((vf) => this._formatValueFilterGroupAsInputArgs(vf))
         const limit = constants.FROM_SCRATCH_SEED_INPUT_BATCH_SIZE
 
         const queryOptions: SelectOptions = { limit }
@@ -276,7 +276,7 @@ class SeedTableService {
                             sharedErrorContext.error = err
                         }),
                     sharedErrorContext,
-                    { offset: this.cursor, ...queryOptions },
+                    { offset: this.cursor, ...queryOptions }
                 )
             } catch (err) {
                 logger.error(err)
@@ -319,9 +319,10 @@ class SeedTableService {
         )
 
         // If any of the input columns is of array type, shrink the seed input batch size to 1.
-        const seedInputBatchSize = queryConditions.arrayColumns.length || this.forceSeedInputBatchSizeToOne
-            ? 1
-            : constants.SEED_INPUT_BATCH_SIZE
+        const seedInputBatchSize =
+            queryConditions.arrayColumns.length || this.forceSeedInputBatchSizeToOne
+                ? 1
+                : constants.SEED_INPUT_BATCH_SIZE
 
         // Start seeding with batches of input records.
         const sharedErrorContext = { error: null }
@@ -431,7 +432,7 @@ class SeedTableService {
 
         // Get the live object property keys associated with each input column.
         const reverseLinkProperties = this.reverseLinkProperties
-        const inputPropertyKeys = inputColNames.map(colName => {
+        const inputPropertyKeys = inputColNames.map((colName) => {
             const foreignInputColPath = [foreignTablePath, colName].join('.')
             let property = reverseLinkProperties[foreignInputColPath]
             if (property) return property
@@ -462,7 +463,7 @@ class SeedTableService {
 
                 const [schema, table, colName] = colPath.split('.')
                 const tablePath = [schema, table].join('.')
-    
+
                 if (seen.has(tablePath)) continue
                 seen.add(tablePath)
 
@@ -479,9 +480,10 @@ class SeedTableService {
             }
         }
 
-        const seedInputBatchSize = (
+        const seedInputBatchSize =
             arrayInputColNames.length || this.forceSeedInputBatchSizeToOne
-        ) ? 1 : constants.FOREIGN_SEED_INPUT_BATCH_SIZE
+                ? 1
+                : constants.FOREIGN_SEED_INPUT_BATCH_SIZE
 
         const sharedErrorContext = { error: null }
         let t0 = null
@@ -548,7 +550,7 @@ class SeedTableService {
             // Transform the records into seed-function inputs.
             const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(
                 batchInputRecords,
-                foreignTablePath,
+                foreignTablePath
             )
 
             // Callback to use when a batch of response data is available.
@@ -636,7 +638,7 @@ class SeedTableService {
                 })
             } catch (err) {
                 throw new QueryError('insert', this.seedSchemaName, this.seedTableName, err)
-            }    
+            }
         }
 
         await withDeadlockProtection(op)
@@ -733,14 +735,14 @@ class SeedTableService {
                         resolvedDependentForeignTablesMap[resolvedDependentForeignTable.tablePath] =
                             resolvedDependentForeignTable
                     }
-    
+
                     const finalUpsertRecords = []
                     for (const upsertRecord of upsertRecords) {
                         if (!upsertRecord.hasOwnProperty('_otherForeignLookups')) {
                             finalUpsertRecords.push(upsertRecord)
                             continue
                         }
-    
+
                         let ignoreRecord = false
                         for (const foreignTablePath in upsertRecord._otherForeignLookups) {
                             const colValueUsedAtLookup =
@@ -750,21 +752,21 @@ class SeedTableService {
                             const referenceKeyValuesMap =
                                 resolvedDependentForeignTable.referenceKeyValuesMap || {}
                             const foreignKey = resolvedDependentForeignTable.foreignKey
-    
+
                             if (!referenceKeyValuesMap.hasOwnProperty(colValueUsedAtLookup)) {
                                 ignoreRecord = true
                                 break
                             }
-    
+
                             upsertRecord[foreignKey] = referenceKeyValuesMap[colValueUsedAtLookup]
                         }
                         if (ignoreRecord) continue
-    
+
                         delete upsertRecord._otherForeignLookups
                         finalUpsertRecords.push(upsertRecord)
                     }
                     if (!finalUpsertRecords.length) return
-    
+
                     this.seedCount += finalUpsertRecords.length
                     logger.info(
                         chalk.cyanBright(
@@ -784,12 +786,12 @@ class SeedTableService {
                         primaryTimestampColumn: this.primaryTimestampColumn,
                         defaultColumnValues: this.defaultColumnValues,
                     }
-    
+
                     await new RunOpService(upsertBatchOp, tx).perform()
                 })
             } catch (err) {
                 throw new QueryError('upsert', this.seedSchemaName, this.seedTableName, err)
-            }    
+            }
         }
 
         await withDeadlockProtection(op)
@@ -964,7 +966,10 @@ class SeedTableService {
         await withDeadlockProtection(op)
     }
 
-    _transformRecordsIntoFunctionInputs(records: StringKeyMap[], primaryTablePath: string): StringKeyMap | StringKeyMap[] {
+    _transformRecordsIntoFunctionInputs(
+        records: StringKeyMap[],
+        primaryTablePath: string
+    ): StringKeyMap | StringKeyMap[] {
         let inputGroups = []
         for (let i = 0; i < this.requiredArgColPaths.length; i++) {
             const requiredArgColPaths = this.requiredArgColPaths[i]
@@ -983,9 +988,9 @@ class SeedTableService {
 
                     for (const { property, op } of inputArgsWithOps) {
                         const recordColKey = colTablePath === primaryTablePath ? colName : colPath
-                        if (!record.hasOwnProperty(recordColKey)) continue 
+                        if (!record.hasOwnProperty(recordColKey)) continue
                         const value = record[recordColKey]
-                        input[property] = op === FilterOp.EqualTo ? value : { op, value } 
+                        input[property] = op === FilterOp.EqualTo ? value : { op, value }
                     }
                 }
 
@@ -998,7 +1003,7 @@ class SeedTableService {
             inputGroups.push(inputGroup)
         }
 
-        inputGroups = inputGroups.map(group => {
+        inputGroups = inputGroups.map((group) => {
             const onlyHasOneProperty = Object.keys(group[0] || {}).length === 1
             if (onlyHasOneProperty) {
                 return groupByKeys(group)
@@ -1155,7 +1160,6 @@ class SeedTableService {
                     }
 
                     if (filter.op !== FilterOp.EqualTo) {
-
                     }
 
                     colPathsToFunctionInputArgsEntry[filter.column].push({
@@ -1171,7 +1175,7 @@ class SeedTableService {
             colPathsToFunctionInputArgs.push(colPathsToFunctionInputArgsEntry)
             valueFilters.push(valueFiltersEntry)
         }
-        
+
         this.requiredArgColPaths = requiredArgColPaths
         this.colPathsToFunctionInputArgs = colPathsToFunctionInputArgs
         this.valueFilters = valueFilters

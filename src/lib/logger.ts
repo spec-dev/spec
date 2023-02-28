@@ -1,11 +1,16 @@
 import { createEventClient, SpecEventClient } from '@spec.dev/event-client'
 import { Log, LogLevel } from './types'
-import constants from './constants'
+import { constants } from './constants'
+import { fileExists, createDir } from './utils/file'
+import path from 'path'
+import fs from 'fs'
 
 enum RPC {
     Ping = 'ping',
     Log = 'log',
 }
+
+const writeToLocalLogs = constants.STREAM_LOGS === 'local'
 
 export class Logger {
     client: SpecEventClient | null
@@ -14,8 +19,10 @@ export class Logger {
 
     buffer: Log[] = []
 
+    localWriteStream: any = null
+
     constructor() {
-        this.client = constants.STREAM_LOGS
+        this.client = ['true', true].includes(constants.STREAM_LOGS)
             ? createEventClient({
                   hostname: constants.LOGS_HOSTNAME,
                   port: constants.LOGS_PORT,
@@ -27,24 +34,36 @@ export class Logger {
                   },
               })
             : null
+
+        if (writeToLocalLogs) {
+            const localLogPath = path.join(constants.SPEC_GLOBAL_DIR, `${constants.PROJECT_ID}.log`)
+            fileExists(constants.SPEC_GLOBAL_DIR) || createDir(constants.SPEC_GLOBAL_DIR)
+            fs.openSync(localLogPath, 'w')
+            this.localWriteStream = fs.createWriteStream(localLogPath, {
+                flags: 'a',
+            })
+        }
     }
 
     info(...args: any[]) {
         const log = this._newLog(args, LogLevel.Info)
         console.log(log.message)
         this.client && this._processLog(log)
+        this.localWriteStream?.write(`${log.message}\n`)
     }
 
     warn(...args: any[]) {
         const log = this._newLog(args, LogLevel.Warn)
         console.warn(log.message)
         this.client && this._processLog(log)
+        this.localWriteStream?.write(`${log.message}\n`)
     }
 
     error(...args: any[]) {
         const log = this._newLog(args, LogLevel.Error)
         console.error(log.message)
         this.client && this._processLog(log)
+        this.localWriteStream?.write(`${log.message}\n`)
     }
 
     _newLog(args: any[], level: LogLevel): Log {

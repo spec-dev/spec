@@ -13,10 +13,7 @@ export const columnFilterOps = new Set([
     FilterOp.LessThanOrEqualTo,
 ])
 
-export const multiValueFilterOps = new Set([
-    FilterOp.In,
-    FilterOp.NotIn,
-])
+export const multiValueFilterOps = new Set([FilterOp.In, FilterOp.NotIn])
 
 export const numericFilterOps = new Set([
     FilterOp.GreaterThan,
@@ -25,13 +22,14 @@ export const numericFilterOps = new Set([
     FilterOp.LessThanOrEqualTo,
 ])
 
-export const isColOperatorOp = (op: FilterOp): boolean => columnFilterOps.has(op) && op !== FilterOp.EqualTo
+export const isColOperatorOp = (op: FilterOp): boolean =>
+    columnFilterOps.has(op) && op !== FilterOp.EqualTo
 
 export function executeFilter(
-    testValue: any, 
-    op: FilterOp, 
-    filterValue: any, 
-    isDateTimeType: boolean = false,
+    testValue: any,
+    op: FilterOp,
+    filterValue: any,
+    isDateTimeType: boolean = false
 ): boolean {
     // Array type checks.
     if (multiValueFilterOps.has(op)) {
@@ -40,12 +38,9 @@ export function executeFilter(
         }
 
         // Check if the test value matches ANY of the filterValue[] entries.
-        const foundMatch = !!filterValue.find(filterValueEntry => executeSingleValueFilter(
-            testValue, 
-            FilterOp.EqualTo, 
-            filterValueEntry, 
-            isDateTimeType,
-        ))
+        const foundMatch = !!filterValue.find((filterValueEntry) =>
+            executeSingleValueFilter(testValue, FilterOp.EqualTo, filterValueEntry, isDateTimeType)
+        )
 
         return op === FilterOp.In ? foundMatch : !foundMatch
     }
@@ -54,10 +49,10 @@ export function executeFilter(
 }
 
 function executeSingleValueFilter(
-    testValue: any, 
-    op: FilterOp, 
-    filterValue: any, 
-    isDateTimeType: boolean = false,
+    testValue: any,
+    op: FilterOp,
+    filterValue: any,
+    isDateTimeType: boolean = false
 ): boolean {
     // Date-time check.
     if (isDateTimeType) {
@@ -97,7 +92,7 @@ function executeSingleValueFilter(
 
         case FilterOp.LessThanOrEqualTo:
             return testValue <= filterValue
-    
+
         default:
             return false
     }

@@ -20,7 +20,7 @@ import { filterObjectByKeys, keysWithNonEmptyValues, noop } from '../utils/forma
 import logger from '../logger'
 import SeedTableService from '../services/SeedTableService'
 import ResolveRecordsService from '../services/ResolveRecordsService'
-import constants from '../constants'
+import { constants } from '../constants'
 import { debounce } from 'lodash'
 import { getRecordsForPrimaryKeys } from './ops'
 import {
@@ -40,12 +40,11 @@ const initRealtimeClient = () => {
         channel: constants.TABLE_SUB_CHANNEL,
         bufferInterval: Math.max(constants.TABLE_SUB_BUFFER_INTERVAL, 10),
         maxBufferSize: constants.TABLE_SUB_BUFFER_MAX_SIZE,
-        onError: err => logger.error(`Realtime event error: ${err}`)
+        onError: (err) => logger.error(`Realtime event error: ${err}`),
     })
 }
 
 export class TableSubscriber {
-
     tableSubs: { [key: string]: TableSub } = {}
 
     // Set dynamically from the Spec class.
@@ -139,25 +138,28 @@ export class TableSubscriber {
         } catch (err) {
             logger.error(`Error connecting to table-subs notification channel: ${err}`)
         }
-        realtimeClient && await realtimeClient.listen()
+        realtimeClient && (await realtimeClient.listen())
     }
 
     _applyHooksToTable(hooks, schema, table) {
         for (const key in hooks) {
-            const parsedKey = this._parseHookEventKey(key) 
+            const parsedKey = this._parseHookEventKey(key)
             if (parsedKey.schema !== schema || parsedKey.table !== table) {
                 continue
             }
             const callback = hooks[key] || noop
-            realtimeClient.table(table, { schema }).on(parsedKey.event, events => {
-                callback && callback(events).catch(err => logger.error(
-                    `Hook error for ${parsedKey.event} event on ${schema}.${table}: ${err}`
-                ))
+            realtimeClient.table(table, { schema }).on(parsedKey.event, (events) => {
+                callback &&
+                    callback(events).catch((err) =>
+                        logger.error(
+                            `Hook error for ${parsedKey.event} event on ${schema}.${table}: ${err}`
+                        )
+                    )
             })
         }
     }
 
-    _parseHookEventKey(key: string): { schema: string, table: string, event: string } {
+    _parseHookEventKey(key: string): { schema: string; table: string; event: string } {
         const colonSplit = (key || '').split(':')
         if (colonSplit.length !== 2) {
             return { schema: '', table: '', event: '' }
@@ -168,7 +170,7 @@ export class TableSubscriber {
             return { schema: '', table: '', event: '' }
         }
         const [schema, table] = dotSplit
-        return { schema, table, event }        
+        return { schema, table, event }
     }
 
     _onTableDataChange(event: TableSubEvent) {

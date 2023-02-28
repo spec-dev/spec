@@ -1,4 +1,4 @@
-export const dynamicImport = async path => {
+export const dynamicImport = async (path) => {
     try {
         return await import(path)
     } catch (e) {

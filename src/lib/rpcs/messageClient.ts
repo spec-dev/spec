@@ -1,6 +1,12 @@
 import { createEventClient, SpecEventClient, EventCallback } from '@spec.dev/event-client'
-import { EventCursor, MessageClientOptions, ResolvedLiveObject, StringKeyMap, MissedEventsCallback } from '../types'
-import constants from '../constants'
+import {
+    EventCursor,
+    MessageClientOptions,
+    ResolvedLiveObject,
+    StringKeyMap,
+    MissedEventsCallback,
+} from '../types'
+import { constants } from '../constants'
 import { noop } from '../utils/formatters'
 import { RpcError } from '../errors'
 import RPC from './functionNames'

@@ -1,6 +1,6 @@
 import toml from '@ltd/j-toml'
 import fs from 'fs'
-import constants from './constants'
+import { constants } from './constants'
 import { ConfigError } from './errors'
 import { noop, toMap, fromNamespacedVersion, unique } from './utils/formatters'
 import { isNonEmptyString, couldBeColPath, couldBeNumber } from './utils/validators'
@@ -38,10 +38,7 @@ import {
 import { tableSubscriber } from './db/subscriber'
 
 class Config {
-
     config: ProjectConfig
-
-    prevConfig: ProjectConfig
 
     isValid: boolean
 
@@ -322,7 +319,7 @@ class Config {
 
             for (const link of obj.links || []) {
                 tablePaths.add(link.table)
-                
+
                 for (let filterGroup of link.filterBy || []) {
                     filterGroup = toMap(filterGroup)
 
@@ -388,12 +385,16 @@ class Config {
     watch() {
         // Watch config file for any changes.
         fs.watch(constants.PROJECT_CONFIG_PATH, () => {
-            // Ensure the file contents actually changed.
-            const newContents = fs.readFileSync(constants.PROJECT_CONFIG_PATH, 'utf-8').toString()
-            if (newContents === this.fileContents) return
-            this.fileContents = newContents
-            logger.info('New config file detected.')
-            this.onUpdate()
+            setTimeout(() => {
+                // Ensure the file contents actually changed.
+                const newContents = fs
+                    .readFileSync(constants.PROJECT_CONFIG_PATH, 'utf-8')
+                    .toString()
+                if (newContents === this.fileContents) return
+                this.fileContents = newContents
+                logger.info('New config file detected.')
+                this.onUpdate()
+            }, 50)
         })
 
         // Refresh table metadata on an interval to catch
@@ -474,7 +475,7 @@ class Config {
             }
         }
         if (!isValid) return false
-        
+
         this.enrichedLinks = enrichedLinks
         return true
     }
@@ -491,7 +492,10 @@ class Config {
             return null
         }
 
-        const liveObjectTableDataSources = this.getLiveObjectTableDataSources(liveObjectId, tablePath)
+        const liveObjectTableDataSources = this.getLiveObjectTableDataSources(
+            liveObjectId,
+            tablePath
+        )
         const uniqueByProperties = link.uniqueBy || []
         const filterBy = link.filterBy || []
         let uniqueByColNames = []
@@ -525,7 +529,9 @@ class Config {
                 }
             }
 
-            const liveColNamesUsingProperty = (liveObjectTableDataSources[property] || []).map(ds => ds.columnName)
+            const liveColNamesUsingProperty = (liveObjectTableDataSources[property] || []).map(
+                (ds) => ds.columnName
+            )
             if (liveColNamesUsingProperty.length > 1) {
                 logger.error(
                     `A "uniqueBy" property (${property}) shouldn't be mapped to multiple columns in the same table (${tablePath}).`
@@ -536,19 +542,19 @@ class Config {
             const liveColNameOnTargetTable = liveColNamesUsingProperty[0]
             if (liveColNameOnTargetTable) {
                 liveColName = liveColNameOnTargetTable
-                propertyColPathMappings[property] = (
-                    propertyColPathMappings[property] || [tablePath, liveColNameOnTargetTable].join('.')
-                )
+                propertyColPathMappings[property] =
+                    propertyColPathMappings[property] ||
+                    [tablePath, liveColNameOnTargetTable].join('.')
             }
 
             if (liveColName) {
                 uniqueByColNames.push(liveColName)
                 continue
             }
-            
+
             logger.error(
                 `[${liveObjectId} <> ${tablePath}] Failed to find valid column mappings for\n` +
-                `the "uniqueBy" property: ${property}`
+                    `the "uniqueBy" property: ${property}`
             )
             return null
         }
@@ -571,7 +577,7 @@ class Config {
         if (!uniqueConstraint) {
             logger.error(
                 `Failed to find a matching unique constraint for the following \n` +
-                `column group on table ${tablePath}: ${uniqueByColNames.join(', ')}`
+                    `column group on table ${tablePath}: ${uniqueByColNames.join(', ')}`
             )
             return null
         }
@@ -580,7 +586,7 @@ class Config {
             logger.error(`[${liveObjectId} <> ${tablePath}] Invalid filters.`)
             return null
         }
-        
+
         return {
             liveObjectId,
             tablePath,
@@ -606,7 +612,7 @@ class Config {
         }
 
         const colTablePaths = Array.from(colTablePathsSet)
-        const foreignTablePaths = colTablePaths.filter(tablePath => tablePath !== targetTablePath)
+        const foreignTablePaths = colTablePaths.filter((tablePath) => tablePath !== targetTablePath)
 
         // Only allow 1 foreign table to be referenced for now.
         if (foreignTablePaths.length > 1) {
@@ -621,13 +627,13 @@ class Config {
                 if (!getRel(targetTablePath, foreignTablePath)) {
                     logger.error(
                         `An explicit relationship must exist between ${targetTablePath} and ${foreignTablePath}\n` +
-                        'in order to use both as column filters in the same link.'
+                            'in order to use both as column filters in the same link.'
                     )
                     return false
                 }
             }
         }
-        
+
         return true
     }
 
@@ -671,7 +677,7 @@ class Config {
                     // Ensure table path is valid.
                     if (splitTablePath.length === 2) {
                         const [schema, table] = splitTablePath
-    
+
                         // Ensure table is included in config.
                         if (!this.getTable(schema, table)) {
                             logger.error(
@@ -715,7 +721,7 @@ class Config {
                     let groupHasColOperatorFilter = false
                     let groupHasEqualColumnFilter = false
 
-                    for (const property in (group || {})) {
+                    for (const property in group || {}) {
                         const filter = group[property]
                         const isColumnFilter = !!filter.column
                         const isColOperatorFilter = isColumnFilter && isColOperatorOp(filter.op)
@@ -727,7 +733,7 @@ class Config {
                             isValid = false
                         }
                     }
-                    
+
                     if (groupHasColOperatorFilter && !groupHasEqualColumnFilter) {
                         logger.error(
                             `Filter groups with column operator filters (>, <, etc.) must also contain an =column filter.`
@@ -771,14 +777,18 @@ class Config {
             logger.error(`${baseErrMessage} - invalid op for column filter: ${filter.op}`)
             return false
         }
-        
+
         if (hasValue && multiValueFilterOps.has(filter.op) && !Array.isArray(filter.value)) {
-            logger.error(`${baseErrMessage} - Invalid value for array-type filter operation (${filter.op}): ${filter.value}`)
+            logger.error(
+                `${baseErrMessage} - Invalid value for array-type filter operation (${filter.op}): ${filter.value}`
+            )
             return false
         }
 
         if (hasValue && numericFilterOps.has(filter.op) && !couldBeNumber(filter.value)) {
-            logger.error(`${baseErrMessage} - Invalid value for numeric-type filter operation (${filter.op}): ${filter.value}`)
+            logger.error(
+                `${baseErrMessage} - Invalid value for numeric-type filter operation (${filter.op}): ${filter.value}`
+            )
             return false
         }
 
@@ -832,9 +842,6 @@ class Config {
 
     _readAndParseFile() {
         try {
-            if (this.config) {
-                this.prevConfig = this.config
-            }
             const file = fs.readFileSync(constants.PROJECT_CONFIG_PATH, 'utf-8')
             this.config = toml.parse(file, { bigint: false }) as unknown as ProjectConfig
             this.fileContents = file.toString()

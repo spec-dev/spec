@@ -8,7 +8,6 @@ import config from '../config'
 import chalk from 'chalk'
 
 class ApplyEventService {
-    
     event: SpecEvent
 
     liveObject: LiveObject
@@ -51,12 +50,12 @@ class ApplyEventService {
         this.liveObjectDiffs = Array.isArray(data) ? data : [data]
         if (!this.liveObjectDiffs.length) return
 
-        // Get all links these diffs apply to (i.e. the links with all of their 
+        // Get all links these diffs apply to (i.e. the links with all of their
         // implemented property keys included in the diff structure).
         this.linksToApplyDiffsTo = this._getLinksToApplyDiffTo()
         if (!this.linksToApplyDiffsTo.length) {
             logger.warn(
-                `Live object diff didn't satisfy any configured links`, 
+                `Live object diff didn't satisfy any configured links`,
                 JSON.stringify(this.event, null, 4)
             )
             return
@@ -93,7 +92,11 @@ class ApplyEventService {
     async getOps(): Promise<Op[]> {
         let promises = []
         for (let enrichedLink of this.linksToApplyDiffsTo) {
-            const service = new ApplyDiffsService(this.liveObjectDiffs, enrichedLink, this.liveObject)
+            const service = new ApplyDiffsService(
+                this.liveObjectDiffs,
+                enrichedLink,
+                this.liveObject
+            )
             promises.push(service.getOps())
         }
         this.ops = (await Promise.all(promises)).flat()
@@ -114,7 +117,11 @@ class ApplyEventService {
 
         const allowUpdatesBackwardsInTime = this.wasSkipped || this.isReplay
         await db.transaction(async (tx) => {
-            await Promise.all(this.ops.map((op) => new RunOpService(op, tx, allowUpdatesBackwardsInTime).perform()))
+            await Promise.all(
+                this.ops.map((op) =>
+                    new RunOpService(op, tx, allowUpdatesBackwardsInTime).perform()
+                )
+            )
         })
     }
 }

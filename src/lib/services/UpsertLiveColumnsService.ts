@@ -75,7 +75,7 @@ class UpsertLiveColumnsService {
             if (isNewColPath || colDataSourceChanged) {
                 querySpecsToUpsert.push(querySpec)
             }
-            
+
             const [schema, table, _] = querySpec.columnPath.split('.')
             const colTablePath = [schema, table].join('.')
             if (!prevLiveTablePaths.has(colTablePath)) {

@@ -7,7 +7,7 @@ export type StringMap = { [key: string]: string }
 export type AnyMap = { [key: string | number]: any }
 
 export enum FilterOp {
-    EqualTo = '=', 
+    EqualTo = '=',
     NotEqualTo = '!=',
     GreaterThan = '>',
     GreaterThanOrEqualTo = '>=',
@@ -292,7 +292,7 @@ export interface TableLink {
 export interface TableLinkDataChanges {
     tableLink: TableLink
     events: TableSubEvent[]
-}   
+}
 
 export interface Log {
     message: string
@@ -313,7 +313,7 @@ export interface EnrichedLink {
     tablePath: string
     uniqueByProperties: string[]
     uniqueConstraint: string[]
-    linkOn: StringKeyMap,
+    linkOn: StringKeyMap
     filterBy: FilterGroup[]
 }
 

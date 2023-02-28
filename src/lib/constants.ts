@@ -1,14 +1,16 @@
 import path from 'path'
 import { ev } from './utils/env'
 import { StringKeyMap } from './types'
+import os from 'os'
 
 /**
  * Spec Environment Variables & Config.
  */
-const constants: StringKeyMap = {
+export const constants: StringKeyMap = {
     // Spec config file locations.
     SPEC_CONFIG_DIR: path.resolve(ev('SPEC_CONFIG_DIR', '.spec')),
     PROJECT_CONFIG_FILE_NAME: ev('PROJECT_CONFIG_FILE_NAME', 'project.toml'),
+    SPEC_GLOBAL_DIR: path.join(os.homedir(), '.spec'),
 
     // Main database connection.
     DB_HOST: ev('DB_HOST', 'localhost'),
@@ -25,8 +27,12 @@ const constants: StringKeyMap = {
 
     // Spec Tables API (for backfills).
     SHARED_TABLES_ORIGIN: ev('SHARED_TABLES_ORIGIN', 'https://tables-ingress.spec.dev'),
-    SHARED_TABLES_INITIAL_REQUEST_TIMEOUT: Number(ev('SHARED_TABLES_INITIAL_REQUEST_TIMEOUT', 60000)),
-    SHARED_TABLES_READABLE_STREAM_TIMEOUT: Number(ev('SHARED_TABLES_READABLE_STREAM_TIMEOUT', 60000)),
+    SHARED_TABLES_INITIAL_REQUEST_TIMEOUT: Number(
+        ev('SHARED_TABLES_INITIAL_REQUEST_TIMEOUT', 60000)
+    ),
+    SHARED_TABLES_READABLE_STREAM_TIMEOUT: Number(
+        ev('SHARED_TABLES_READABLE_STREAM_TIMEOUT', 60000)
+    ),
     SHARED_TABLES_AUTH_HEADER_NAME: 'Spec-Auth-Token',
 
     // Spec Events API (for updates and new data).
@@ -35,11 +41,11 @@ const constants: StringKeyMap = {
     SEEN_EVENTS_CACHE_SIZE: Number(ev('SEEN_EVENTS_CACHE_SIZE', 1000)),
     EVENTS_PING_INTERVAL: Number(ev('SEEN_EVENTS_CACHE_SIZE', 30000)),
 
-    // The number of records to use in a single input batch when 
+    // The number of records to use in a single input batch when
     // seeding live columns by an *adjacent column of the same table*.
     SEED_INPUT_BATCH_SIZE: Number(ev('SEED_INPUT_BATCH_SIZE', 1000)),
 
-    // The number of records to use in a single batch when seeding live 
+    // The number of records to use in a single batch when seeding live
     // columns with a *foreign table*.
     FOREIGN_SEED_INPUT_BATCH_SIZE: Number(ev('FOREIGN_SEED_INPUT_BATCH_SIZE', 100)),
 
@@ -60,7 +66,7 @@ const constants: StringKeyMap = {
     RETRY_SEED_CURSORS_INTERVAL: Number(ev('RETRY_SEED_CURSORS_INTERVAL', 5000)),
     MAX_SEED_JOB_ATTEMPTS: Number(ev('MAX_SEED_JOB_ATTEMPTS', 10)),
 
-    // The LISTEN/NOTIFY channel and function name associated with 
+    // The LISTEN/NOTIFY channel and function name associated with
     // the triggers Spec uses to listen to table activity.
     TABLE_SUB_FUNCTION_NAME: ev('TABLE_SUB_FUNCTION_NAME', 'spec_table_sub'),
     TABLE_SUB_CHANNEL: ev('TABLE_SUB_CHANNEL', 'spec_data_change'),
@@ -77,12 +83,12 @@ const constants: StringKeyMap = {
 
     // Whether to run in debug mode.
     DEBUG: ['true', true].includes(ev('DEBUG')),
-    
-    // Spec's log relay to stream logs into so that they 
+
+    // Spec's log relay to stream logs into so that they
     // can easily be tailed via the `$ spec logs` command.
     LOGS_HOSTNAME: ev('LOGS_HOSTNAME', 'logs.spec.dev'),
     LOGS_PORT: Number(ev('LOGS_PORT', 443)),
-    STREAM_LOGS: !['false', false].includes(ev('STREAM_LOGS')),
+    STREAM_LOGS: ev('STREAM_LOGS'),
     LOGS_ENV: ev('LOGS_ENV', 'prod'),
 
     // Exponential backoff config for certain retries.
@@ -95,5 +101,3 @@ constants.PROJECT_CONFIG_PATH = path.join(
     constants.SPEC_CONFIG_DIR,
     constants.PROJECT_CONFIG_FILE_NAME
 )
-
-export default constants

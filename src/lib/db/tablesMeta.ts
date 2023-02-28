@@ -67,7 +67,7 @@ export async function pullTableMeta(tablePath: string) {
     for (const colType of colTypes) {
         colTypesMap[colType.name] = colType.type
     }
-    
+
     // Register table with the global metadata holder.
     tablesMeta[tablePath] = {
         schema,

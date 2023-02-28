@@ -62,41 +62,35 @@ class RunOpService {
             const operationColumns = Object.keys(data[0])
 
             // Only merge live columns that are NOT included in the conflict target.
-            const mergeColNames = this.op.liveTableColumns.filter((colName) => (
-                !conflictTargets.includes(colName) && operationColumns.includes(colName)
-            ))
+            const mergeColNames = this.op.liveTableColumns.filter(
+                (colName) =>
+                    !conflictTargets.includes(colName) && operationColumns.includes(colName)
+            )
 
             // Insert or update.
             if (mergeColNames.length) {
-                insertQuery
-                    .insert(uniqueData)
-                    .onConflict(conflictTargets)
-                    .merge(mergeColNames)
+                insertQuery.insert(uniqueData).onConflict(conflictTargets).merge(mergeColNames)
 
-                // Restrict updates to only forwards-in-time if the live object's primaryTimestampProperty 
-                // is the source for one of the live columns, UNLESS this op came from an event that was 
+                // Restrict updates to only forwards-in-time if the live object's primaryTimestampProperty
+                // is the source for one of the live columns, UNLESS this op came from an event that was
                 // skipped or an event that's being replayed.
                 const timestampCol = this.op.primaryTimestampColumn
-                const onlyMergeForwardInTime = (
-                    timestampCol && 
-                    mergeColNames.includes(timestampCol) && 
+                const onlyMergeForwardInTime =
+                    timestampCol &&
+                    mergeColNames.includes(timestampCol) &&
                     !this.allowUpdatesBackwardsInTime
-                )
                 if (onlyMergeForwardInTime) {
                     insertQuery.whereRaw('??.??.?? <= excluded.??', [
-                        this.op.schema, 
-                        this.op.table, 
-                        timestampCol, 
+                        this.op.schema,
+                        this.op.table,
+                        timestampCol,
                         timestampCol,
                     ])
                 }
             }
             // Insert or ignore.
             else {
-                insertQuery
-                    .insert(uniqueData)
-                    .onConflict(conflictTargets)
-                    .ignore()
+                insertQuery.insert(uniqueData).onConflict(conflictTargets).ignore()
             }
         } else {
             insertQuery.insert(data)

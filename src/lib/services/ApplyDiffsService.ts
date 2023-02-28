@@ -26,7 +26,6 @@ import { isSpecTimestampFilterFormat } from '../utils/date'
 const valueSep = '__:__'
 
 class ApplyDiffsService {
-
     liveObjectDiffs: StringKeyMap[]
 
     enrichedLink: EnrichedLink
@@ -88,11 +87,16 @@ class ApplyDiffsService {
         this.filteredDiffs = diffs
         this.enrichedLink = enrichedLink
         this.liveObject = liveObject
-        this.liveTableColumns = Object.keys(config.getTable(this.linkSchemaName, this.linkTableName) || {})
+        this.liveTableColumns = Object.keys(
+            config.getTable(this.linkSchemaName, this.linkTableName) || {}
+        )
         this.defaultColumnValues = config.getDefaultColumnValuesForTable(this.linkTablePath)
-        this.tableDataSources = config.getLiveObjectTableDataSources(this.liveObject.id, this.linkTablePath)
+        this.tableDataSources = config.getLiveObjectTableDataSources(
+            this.liveObject.id,
+            this.linkTablePath
+        )
         this.primaryTimestampColumn = this.primaryTimestampProperty
-            ? ((this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null)
+            ? (this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null
             : null
     }
 
@@ -118,7 +122,7 @@ class ApplyDiffsService {
 
         // Convert diffs into upsert operations.
         this._createUpsertOps()
-        
+
         return this.ops
     }
 
@@ -128,7 +132,7 @@ class ApplyDiffsService {
         const op = async () => {
             await db.transaction(async (tx) => {
                 await Promise.all(this.ops.map((op) => new RunOpService(op, tx).perform()))
-            })    
+            })
         }
 
         await withDeadlockProtection(op)
@@ -157,7 +161,11 @@ class ApplyDiffsService {
                 if (passingDiffIndexes.has(i)) continue
 
                 // Apply value filters first to avoid lookups.
-                const passesValueFilters = this._executeValueFilters(filterGroup, valueFilters, diff)
+                const passesValueFilters = this._executeValueFilters(
+                    filterGroup,
+                    valueFilters,
+                    diff
+                )
                 if (!passesValueFilters) continue
 
                 // If no =column filters exist, the diff passes.
@@ -167,9 +175,10 @@ class ApplyDiffsService {
                 }
 
                 // Apply the =column filters by finding the diff's matching records.
-                const matchingRecords = matchingRecordsRegistry[
-                    lookupColFilterProperties.map(p => diff[p]).join(':')
-                ] || []
+                const matchingRecords =
+                    matchingRecordsRegistry[
+                        lookupColFilterProperties.map((p) => diff[p]).join(':')
+                    ] || []
                 if (!matchingRecords.length) continue
 
                 // If no other column filters exist (>, >=, <, <=), the diff passes.
@@ -183,24 +192,22 @@ class ApplyDiffsService {
                     filterGroup,
                     colOperatorFilters,
                     diff,
-                    matchingRecords,
+                    matchingRecords
                 )
                 if (!passesColumnOperatorFilters) continue
-                
+
                 // Diff passed all filters.
                 passingDiffIndexes.add(i)
             }
         }
 
-        this.filteredDiffs = Array.from(passingDiffIndexes).map(
-            i => this.liveObjectDiffs[i]
-        )
+        this.filteredDiffs = Array.from(passingDiffIndexes).map((i) => this.liveObjectDiffs[i])
     }
 
     _executeValueFilters(
-        filterGroup: FilterGroup, 
-        valueFilters: FilterGroup, 
-        diff: StringKeyMap,
+        filterGroup: FilterGroup,
+        valueFilters: FilterGroup,
+        diff: StringKeyMap
     ): boolean {
         for (const property in valueFilters) {
             const filter = filterGroup[property]
@@ -209,7 +216,12 @@ class ApplyDiffsService {
             // Use filter value format to check if date-time type.
             const isDateTimeColType = isSpecTimestampFilterFormat(filter.value)
 
-            const passesFilter = executeFilter(propertyValue, filter.op, filter.value, isDateTimeColType)
+            const passesFilter = executeFilter(
+                propertyValue,
+                filter.op,
+                filter.value,
+                isDateTimeColType
+            )
             if (!passesFilter) {
                 return false
             }
@@ -219,10 +231,10 @@ class ApplyDiffsService {
     }
 
     _executeColumnOperatorFilters(
-        filterGroup: FilterGroup, 
-        colOperatorFilters: FilterGroup, 
+        filterGroup: FilterGroup,
+        colOperatorFilters: FilterGroup,
         diff: StringKeyMap,
-        matchingRecords: StringKeyMap[],
+        matchingRecords: StringKeyMap[]
     ): boolean {
         for (const record of matchingRecords) {
             let recordPassesFilters = true
@@ -239,7 +251,12 @@ class ApplyDiffsService {
                 const colType = tablesMeta[colTablePath].colTypes[colName]
                 const isDateTimeColType = isTimestampColType(colType) || isDateColType(colType)
 
-                const passesFilter = executeFilter(propertyValue, filter.op, colValue, isDateTimeColType)
+                const passesFilter = executeFilter(
+                    propertyValue,
+                    filter.op,
+                    colValue,
+                    isDateTimeColType
+                )
                 if (!passesFilter) {
                     recordPassesFilters = false
                     break
@@ -257,7 +274,7 @@ class ApplyDiffsService {
         colOperatorFilters: FilterGroup
         valueFilters: FilterGroup
         lookupColFilterProperties: string[]
-    }> {            
+    }> {
         const properyColMappings = {}
         const lookupColFilterPaths = []
         const lookupColFilterProperties = []
@@ -269,7 +286,7 @@ class ApplyDiffsService {
 
         for (const property in filterGroup) {
             const filter = filterGroup[property]
-            
+
             if (filter.column) {
                 selectColumns.push(`${filter.column} as ${filter.column}`)
                 const [colSchema, colTable, _] = filter.column.split('.')
@@ -297,12 +314,12 @@ class ApplyDiffsService {
             }
         }
 
-        // If the link table path is referenced at all in this filter group, use it as the lookup table. 
-        // Otherwise, take the first column filter table, which will be foreign (we can make this assumption 
+        // If the link table path is referenced at all in this filter group, use it as the lookup table.
+        // Otherwise, take the first column filter table, which will be foreign (we can make this assumption
         // becuase only 1 foreign table can be referenced in a link's filters).
-        const lookupTablePath = colFilterTables.has(this.linkTablePath) 
-            ? this.linkTablePath 
-            : Array.from(colFilterTables)[0] as string
+        const lookupTablePath = colFilterTables.has(this.linkTablePath)
+            ? this.linkTablePath
+            : (Array.from(colFilterTables)[0] as string)
 
         const queryConditions = {
             select: selectColumns,
@@ -330,7 +347,7 @@ class ApplyDiffsService {
         // Use an inclusive-where query if more than one column filter exists in this group.
         // Otherwise, a where-in query will be used.
         const useInclusiveWhere = lookupColFilterPaths.length > 1
-        
+
         for (const diff of this.liveObjectDiffs) {
             // Where-in
             if (!useInclusiveWhere) {
@@ -376,7 +393,7 @@ class ApplyDiffsService {
 
         if (useInclusiveWhere) {
             const conditions = queryConditions.where
-            if (queryConditions.where.length) {    
+            if (queryConditions.where.length) {
                 query.where((builder) => {
                     for (let i = 0; i < conditions.length; i++) {
                         i === 0 ? builder.where(conditions[i]) : builder.orWhere(conditions[i])
@@ -398,7 +415,7 @@ class ApplyDiffsService {
 
         // Index matching records by their lookup column values.
         for (const record of matchingRecords) {
-            const registryKey = lookupColFilterPaths.map(colPath => record[colPath]).join(':')
+            const registryKey = lookupColFilterPaths.map((colPath) => record[colPath]).join(':')
             matchingRecordsRegistry[registryKey] = matchingRecordsRegistry[registryKey] || []
             matchingRecordsRegistry[registryKey].push(record)
         }
@@ -422,7 +439,11 @@ class ApplyDiffsService {
             filterGroup = toMap(filterGroup)
             for (const property in filterGroup) {
                 const filter = filterGroup[property]
-                if (filter.column && filter.op === FilterOp.EqualTo && !properties.hasOwnProperty(property)) {
+                if (
+                    filter.column &&
+                    filter.op === FilterOp.EqualTo &&
+                    !properties.hasOwnProperty(property)
+                ) {
                     properties[property] = filter.column
                 }
             }
@@ -535,7 +556,8 @@ class ApplyDiffsService {
             for (const foreignTablePath in foreignTableQueryConditions) {
                 const queryConditions = foreignTableQueryConditions[foreignTablePath]
                 const foreignRefKey = queryConditions.properties.map((p) => diff[p]).join(valueSep)
-                const foreignRefKeyValues = referenceKeyValues[foreignTablePath][foreignRefKey] || []
+                const foreignRefKeyValues =
+                    referenceKeyValues[foreignTablePath][foreignRefKey] || []
 
                 // If matching foreign record couldn't be found, ignore this diff.
                 const foreignRecordIsMissing = !foreignRefKeyValues?.length
@@ -573,7 +595,7 @@ class ApplyDiffsService {
                         primaryTimestampColumn: this.primaryTimestampColumn,
                         defaultColumnValues: this.defaultColumnValues,
                     }
-    
+
                     logger.info(
                         chalk.green(
                             `Upserting ${upsertRecords.length} records in ${this.linkSchemaName}.${this.linkTableName}...`
@@ -583,7 +605,7 @@ class ApplyDiffsService {
                 })
             } catch (err) {
                 throw new QueryError('upsert', this.linkSchemaName, this.linkTableName, err)
-            }    
+            }
         }
 
         await withDeadlockProtection(op)
