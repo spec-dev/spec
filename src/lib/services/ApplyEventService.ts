@@ -40,7 +40,9 @@ class ApplyEventService {
         const origin = this.event.origin
         const chainId = origin?.chainId
         const blockNumber = origin?.blockNumber
-        logger.info(`[${chainId}:${blockNumber}] Processing ${this.event.name} (${this.event.nonce})...`)
+        logger.info(
+            `[${chainId}:${blockNumber}] Processing ${this.event.name} (${this.event.nonce})...`
+        )
 
         // Format event data as an array of diffs.
         const data = this.event.data

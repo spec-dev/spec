@@ -220,7 +220,9 @@ class Spec {
                 const origin = event.origin
                 const chainId = origin?.chainId
                 const blockNumber = origin?.blockNumber
-                logger.info(`[${chainId}:${blockNumber}] Processing ${event.name} (${event.nonce})...`)
+                logger.info(
+                    `[${chainId}:${blockNumber}] Processing ${event.name} (${event.nonce})...`
+                )
             }
             try {
                 await customHandler(event, db, logger)
@@ -245,7 +247,9 @@ class Spec {
         for (const newEventName in liveObjectsByEvent) {
             // Update live object ids if something changed.
             if (this.eventSubs.hasOwnProperty(newEventName)) {
-                const existingLiveObjectIds = (this.eventSubs[newEventName].liveObjectIds || []).sort().join(':')
+                const existingLiveObjectIds = (this.eventSubs[newEventName].liveObjectIds || [])
+                    .sort()
+                    .join(':')
                 const newLiveObjectIds = (liveObjectsByEvent[newEventName] || []).sort().join(':')
                 if (newLiveObjectIds !== existingLiveObjectIds) {
                     this.eventSubs[newEventName].liveObjectIds = liveObjectsByEvent[newEventName]
@@ -925,10 +929,9 @@ class Spec {
 
     _removeUselessSubs(liveObjectsByEvent: { [key: string]: string[] }) {
         for (const oldEventName in this.eventSubs) {
-            const unused = (
-                !liveObjectsByEvent.hasOwnProperty(oldEventName) && 
+            const unused =
+                !liveObjectsByEvent.hasOwnProperty(oldEventName) &&
                 !this.customEventHandlers.hasOwnProperty(oldEventName)
-            )
             if (unused) {
                 messageClient.off(oldEventName)
                 const eventCursor = this.eventSubs[oldEventName].cursor

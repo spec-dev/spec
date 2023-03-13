@@ -275,7 +275,7 @@ class SeedTableService {
                         this._handleDataOnSeedFromScratch(data as StringKeyMap[]).catch((err) => {
                             sharedErrorContext.error = err
                         }),
-                    sharedErrorContext,
+                    sharedErrorContext
                     // { offset: this.cursor, ...queryOptions }
                 )
             } catch (err) {
