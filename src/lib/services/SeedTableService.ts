@@ -276,7 +276,7 @@ class SeedTableService {
                             sharedErrorContext.error = err
                         }),
                     sharedErrorContext,
-                    { offset: this.cursor, ...queryOptions }
+                    // { offset: this.cursor, ...queryOptions }
                 )
             } catch (err) {
                 logger.error(err)
@@ -284,11 +284,13 @@ class SeedTableService {
             }
             if (sharedErrorContext.error) throw sharedErrorContext.error
 
-            this.cursor += this.fromScratchBatchResultSize
+            // this.cursor += this.fromScratchBatchResultSize
 
-            await updateCursor(this.seedCursorId, this.cursor)
+            // await updateCursor(this.seedCursorId, this.cursor)
 
-            if (this.fromScratchBatchResultSize < limit) break
+            // if (this.fromScratchBatchResultSize < limit) break
+
+            break
         }
 
         const tf = performance.now()

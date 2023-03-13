@@ -35,12 +35,17 @@ import ResolveRecordsService from './lib/services/ResolveRecordsService'
 import { getRecordsForPrimaryKeys } from './lib/db/ops'
 import { importHooks } from './lib/hooks'
 import { sleep } from './lib/utils/time'
+import { unique } from './lib/utils/formatters'
 import chalk from 'chalk'
+import { db } from './lib/db'
+import { importHandlers, getHandlers, CUSTOM_EVENT_HANDLER_KEY } from './lib/handlers'
 
 class Spec {
     liveObjects: { [key: string]: LiveObject } = {}
 
     eventSubs: { [key: string]: EventSub } = {}
+
+    customEventHandlers: { [key: string]: any } = {}
 
     saveEventCursorsJob: any = null
 
@@ -59,7 +64,8 @@ class Spec {
     })
 
     async start() {
-        await importHooks()
+        await Promise.all([importHooks(), importHandlers()])
+        this.customEventHandlers = getHandlers()
 
         logger.info('Starting Spec...')
 
@@ -109,16 +115,15 @@ class Spec {
     async _onMessageClientConnected() {
         // Resolve all live objects for the versions listed in the config file.
         await this._getLiveObjectsInConfig()
-        if (this.liveObjects === null) {
-            this._doneProcessingNewConfig()
-            return
-        }
 
         // Upsert live columns listed in the config and start seeding with new ones.
-        await this._upsertAndSeedLiveColumns()
+        if (Object.keys(this.liveObjects).length) {
+            await this._upsertAndSeedLiveColumns()
+        }
 
-        // Subscribe to all events powering the live objects.
-        const newEventNames = this._subscribeToLiveObjectEvents()
+        // Subscribe to all events powering the live objects,
+        // as well as those used in custom event handlers.
+        const newEventNames = this._subscribeToEvents()
         if (!Object.keys(this.eventSubs).length) {
             this._doneProcessingNewConfig()
             return
@@ -149,20 +154,24 @@ class Spec {
             return
         }
 
-        // Ensure at least one live object will process this event.
+        const hasCustomEventHandler = this.customEventHandlers.hasOwnProperty(event.name)
+
+        // Ensure at least one live object (or custom handler) will process this event.
         const liveObjectIdsThatWillProcessEvent = (sub.liveObjectIds || []).filter(
             (liveObjectId) => !this.liveObjectsToIgnoreEventsFrom.has(liveObjectId)
         )
-        if (!liveObjectIdsThatWillProcessEvent.length) return
+        if (!liveObjectIdsThatWillProcessEvent.length && !hasCustomEventHandler) return
 
-        // Prevent duplicates.
-        if (
-            this._wasEventSeenByAllDependentLiveObjects(event.id, liveObjectIdsThatWillProcessEvent)
-        ) {
+        // Prevent the re-processing of duplicates.
+        const subjects = [...liveObjectIdsThatWillProcessEvent]
+        if (hasCustomEventHandler) {
+            subjects.push(CUSTOM_EVENT_HANDLER_KEY)
+        }
+        if (this._wasEventSeenByAll(event.id, subjects)) {
             logger.warn(`Duplicate event seen - ${event.id} - skipping.`)
             return
         }
-        this._registerEventAsSeen(event, liveObjectIdsThatWillProcessEvent)
+        this._registerEventAsSeen(event, subjects)
 
         // Buffer new event if still resolving previous missed events.
         if (sub.shouldBuffer || options?.forceToBuffer) {
@@ -185,12 +194,14 @@ class Spec {
         }
 
         // Apply the event to each live object that depends on it.
+        let processedEvent = false
         for (const liveObjectId of sub.liveObjectIds || []) {
             if (this.liveObjectsToIgnoreEventsFrom.has(liveObjectId)) continue
 
             const liveObject = this.liveObjects[liveObjectId]
             if (!liveObject) continue
 
+            processedEvent = true
             try {
                 const service = new ApplyEventService(event, liveObject)
                 await service.perform()
@@ -199,6 +210,22 @@ class Spec {
                     `Failed to apply event to live object - (event=${event.name}; ` +
                         `liveObject=${liveObjectId}): ${err?.message || err}`
                 )
+            }
+        }
+
+        // Run custom event handler (if exists).
+        const customHandler = this.customEventHandlers[event.name]
+        if (customHandler) {
+            if (!processedEvent) {
+                const origin = event.origin
+                const chainId = origin?.chainId
+                const blockNumber = origin?.blockNumber
+                logger.info(`[${chainId}:${blockNumber}] Processing ${event.name} (${event.nonce})...`)
+            }
+            try {
+                await customHandler(event, db, logger)
+            } catch (err) {
+                logger.error(`Custom handler for ${event.name} failed: ${err?.message || err}`)
             }
         }
     }
@@ -210,15 +237,23 @@ class Spec {
         }
     }
 
-    _subscribeToLiveObjectEvents(): string[] {
+    _subscribeToEvents(): string[] {
         const liveObjectsByEvent = this._mapLiveObjectsByEvent()
         const newEventNames = []
 
-        // Subscribe to new events.
+        // Subscribe to live object events.
         for (const newEventName in liveObjectsByEvent) {
-            if (this.eventSubs.hasOwnProperty(newEventName)) continue
+            // Update live object ids if something changed.
+            if (this.eventSubs.hasOwnProperty(newEventName)) {
+                const existingLiveObjectIds = (this.eventSubs[newEventName].liveObjectIds || []).sort().join(':')
+                const newLiveObjectIds = (liveObjectsByEvent[newEventName] || []).sort().join(':')
+                if (newLiveObjectIds !== existingLiveObjectIds) {
+                    this.eventSubs[newEventName].liveObjectIds = liveObjectsByEvent[newEventName]
+                }
+                continue
+            }
 
-            // Register event callback.
+            // Subscribe to event.
             messageClient.on(newEventName, (event: SpecEvent) => this._onEvent(event))
 
             // Register sub.
@@ -230,13 +265,32 @@ class Spec {
                 shouldBuffer: true,
                 buffer: [],
             }
+
             newEventNames.push(newEventName)
         }
 
         // Unsubscribe from events that aren't needed anymore.
         this._removeUselessSubs(liveObjectsByEvent)
 
-        return newEventNames
+        // Subscribe to events for custom handlers.
+        for (const eventName in this.customEventHandlers) {
+            if (this.eventSubs.hasOwnProperty(eventName)) continue
+            messageClient.on(eventName, (event: SpecEvent) => this._onEvent(event))
+
+            // Register sub with no live object ids.
+            this.eventSubs[eventName] = {
+                name: eventName,
+                liveObjectIds: [],
+                cursor: null,
+                cursorChanged: false,
+                shouldBuffer: true,
+                buffer: [],
+            }
+
+            newEventNames.push(eventName)
+        }
+
+        return unique(newEventNames)
     }
 
     async _loadEventCursors(eventNamesFilter?: string[]) {
@@ -753,7 +807,7 @@ class Spec {
             this.liveObjectsToIgnoreEventsFrom.delete(liveObjectId)
         })
 
-        const newEventNames = this._subscribeToLiveObjectEvents() || []
+        const newEventNames = this._subscribeToEvents() || []
         if (!newEventNames.length) return
 
         // Load the event cursors for these new events.
@@ -871,7 +925,11 @@ class Spec {
 
     _removeUselessSubs(liveObjectsByEvent: { [key: string]: string[] }) {
         for (const oldEventName in this.eventSubs) {
-            if (!liveObjectsByEvent.hasOwnProperty(oldEventName)) {
+            const unused = (
+                !liveObjectsByEvent.hasOwnProperty(oldEventName) && 
+                !this.customEventHandlers.hasOwnProperty(oldEventName)
+            )
+            if (unused) {
                 messageClient.off(oldEventName)
                 const eventCursor = this.eventSubs[oldEventName].cursor
                 saveEventCursors([eventCursor])
@@ -897,15 +955,15 @@ class Spec {
         return subs
     }
 
-    _registerEventAsSeen(event: SpecEvent, liveObjectIds: string[]) {
-        liveObjectIds.forEach((liveObjectId) => {
-            this.seenEvents.set(`${event.id}:${liveObjectId}`, true)
+    _registerEventAsSeen(event: SpecEvent, subjects: string[]) {
+        subjects.forEach((subject) => {
+            this.seenEvents.set(`${event.id}:${subject}`, true)
         })
     }
 
-    _wasEventSeenByAllDependentLiveObjects(eventId: string, liveObjectIds: string[]): boolean {
-        for (let liveObjectId of liveObjectIds) {
-            if (!this.seenEvents.has(`${eventId}:${liveObjectId}`)) {
+    _wasEventSeenByAll(eventId: string, subjects: string[]): boolean {
+        for (let subject of subjects) {
+            if (!this.seenEvents.has(`${eventId}:${subject}`)) {
                 return false
             }
         }

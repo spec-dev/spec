@@ -159,7 +159,9 @@ async function makeRequest(
     clearTimeout(initialRequestTimer)
 
     if (error) {
-        logger.error(`Failed to make initial request while querying shared table ${tablePath}: ${error}.`)
+        logger.error(
+            `Failed to make initial request while querying shared table ${tablePath}: ${error}.`
+        )
 
         if (attempt < constants.EXPO_BACKOFF_MAX_ATTEMPTS) {
             logger.error(
