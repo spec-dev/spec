@@ -275,8 +275,8 @@ class SeedTableService {
                         this._handleDataOnSeedFromScratch(data as StringKeyMap[]).catch((err) => {
                             sharedErrorContext.error = err
                         }),
-                    sharedErrorContext
-                    // { offset: this.cursor, ...queryOptions }
+                    sharedErrorContext,
+                    { offset: this.cursor, ...queryOptions }
                 )
             } catch (err) {
                 logger.error(err)
@@ -284,13 +284,11 @@ class SeedTableService {
             }
             if (sharedErrorContext.error) throw sharedErrorContext.error
 
-            // this.cursor += this.fromScratchBatchResultSize
+            this.cursor += this.fromScratchBatchResultSize
 
-            // await updateCursor(this.seedCursorId, this.cursor)
+            await updateCursor(this.seedCursorId, this.cursor)
 
-            // if (this.fromScratchBatchResultSize < limit) break
-
-            break
+            if (this.fromScratchBatchResultSize < limit) break
         }
 
         const tf = performance.now()
