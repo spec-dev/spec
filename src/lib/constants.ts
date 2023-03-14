@@ -16,7 +16,7 @@ export const constants: StringKeyMap = {
     DB_HOST: ev('DB_HOST', 'localhost'),
     DB_PORT: Number(ev('DB_PORT', 5432)),
     DB_USER: ev('DB_USER', 'spec'),
-    DB_PASSWORD: ev('DB_PASSWORD'),
+    DB_PASSWORD: ev('DB_PASSWORD', ''),
     DB_NAME: ev('DB_NAME'),
     MAX_POOL_SIZE: Number(ev('MAX_POOL_SIZE', 100)),
 
