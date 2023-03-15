@@ -18,6 +18,7 @@ export const constants: StringKeyMap = {
     DB_USER: ev('DB_USER', 'spec'),
     DB_PASSWORD: ev('DB_PASSWORD', ''),
     DB_NAME: ev('DB_NAME'),
+    DB_SSL: [true, 'true'].includes(ev('DB_SSL')),
     MAX_POOL_SIZE: Number(ev('MAX_POOL_SIZE', 100)),
 
     // Spec project credentials.

@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: spec-{{PROJECT_ID}}
+  name: spec-{{PROJECT_ID}}-{{PROJECT_ENV}}
   labels:
-    app: spec-{{PROJECT_ID}}
+    app: spec-{{PROJECT_ID}}-{{PROJECT_ENV}}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: spec-{{PROJECT_ID}}
+      app: spec-{{PROJECT_ID}}-{{PROJECT_ENV}}
   template:
     metadata:
       labels:
-        app: spec-{{PROJECT_ID}}
+        app: spec-{{PROJECT_ID}}-{{PROJECT_ENV}}
     spec:
       containers:
-      - name: spec-{{PROJECT_ID}}
+      - name: spec-{{PROJECT_ID}}-{{PROJECT_ENV}}
         image: {{IMAGE}}
         env:
         - name: NODE_ENV
@@ -32,6 +32,8 @@ spec:
           value: {{DB_USER}}
         - name: DB_PASSWORD
           value: {{DB_PASSWORD}}
+        - name: DB_SSL
+          value: "true"
         - name: PROJECT_ID
           value: {{PROJECT_ID}}
         - name: PROJECT_API_KEY
@@ -45,6 +47,8 @@ spec:
         - name: SPEC_CONFIG_DIR
           value: /usr/app/.spec
         - name: STREAM_LOGS
-          value: "false"
+          value: "true"
+        - name: LOGS_ENV
+          value: {{PROJECT_ENV}}
         - name: FLIP
           value: heads

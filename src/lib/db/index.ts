@@ -3,13 +3,17 @@ import { constants } from '../constants'
 import createSubscriber from 'pg-listen'
 import logger from '../logger'
 import { Pool } from 'pg'
+import { StringKeyMap } from '../types'
 
-export const connectionConfig = {
+export const connectionConfig: StringKeyMap = {
     host: constants.DB_HOST,
     port: constants.DB_PORT,
     user: constants.DB_USER,
     password: constants.DB_PASSWORD,
     database: constants.DB_NAME,
+}
+if (constants.DB_SSL) {
+    connectionConfig.ssl = true
 }
 
 export const db = knex({

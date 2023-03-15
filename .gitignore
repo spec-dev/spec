@@ -14,7 +14,7 @@ in/
 envs/
 scrap.ts
 *.rdb
-docker-compose.yaml
+*_k8s.yaml
 
 # Runtime data
 pids
