@@ -24,11 +24,11 @@ import { QueryError } from '../errors'
 import { constants } from '../constants'
 import { tablesMeta, getRel, isColTypeArray } from '../db/tablesMeta'
 import chalk from 'chalk'
-import { updateCursor } from '../db/spec'
+import { updateCursor, updateMetadata } from '../db/spec'
 import LRU from 'lru-cache'
 import { applyDefaults } from '../defaults'
 import { withDeadlockProtection } from '../utils/db'
-import { decamelize } from 'humps'
+import { isContractNamespace } from '../utils/chains'
 
 const valueSep = '__:__'
 
@@ -40,6 +40,8 @@ class SeedTableService {
     seedCursorId: string
 
     cursor: number
+
+    metadata: StringKeyMap
 
     seedColNames: Set<string>
 
@@ -68,6 +70,8 @@ class SeedTableService {
     valueFilters: { [key: string]: Filter }[]
 
     seedStrategy: () => void | null
+
+    liveObjectIsContractEvent: boolean
 
     forceSeedInputBatchSizeToOne: boolean = false
 
@@ -107,11 +111,18 @@ class SeedTableService {
         return this.liveObject.config.table
     }
 
-    constructor(seedSpec: SeedSpec, liveObject: LiveObject, seedCursorId: string, cursor: number) {
+    constructor(
+        seedSpec: SeedSpec, 
+        liveObject: LiveObject, 
+        seedCursorId: string, 
+        cursor: number, 
+        metadata?: StringKeyMap | null,
+    ) {
         this.seedSpec = seedSpec
         this.liveObject = liveObject
         this.seedCursorId = seedCursorId
         this.cursor = cursor || 0
+        this.metadata = metadata || {}
         this.seedColNames = new Set<string>(this.seedSpec.seedColNames)
         this.tableDataSources = config.getLiveObjectTableDataSources(
             this.liveObject.id,
@@ -131,6 +142,8 @@ class SeedTableService {
         this.primaryTimestampColumn = this.primaryTimestampProperty
             ? (this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null
             : null
+
+        this.liveObjectIsContractEvent = isContractNamespace(this.liveObject.id)
 
         this.seedStrategy = null
     }
@@ -253,30 +266,63 @@ class SeedTableService {
         logger.info(chalk.cyanBright(`\nSeeding ${this.seedTablePath} from scratch...`))
 
         const inputArgs = this.valueFilters.map((vf) => this._formatValueFilterGroupAsInputArgs(vf))
+        
         const limit = constants.FROM_SCRATCH_SEED_INPUT_BATCH_SIZE
-
         const queryOptions: SelectOptions = { limit }
-        if (this.primaryTimestampProperty) {
+        const contractEventCursor = this.metadata.contractEventCursor || {
+            blockNumber: null, 
+            logIndex: null,
+        }
+    
+        if (this.liveObjectIsContractEvent) {
             queryOptions.orderBy = {
-                column: decamelize(this.primaryTimestampProperty),
-                direction: OrderByDirection.DESC,
+                column: ['blockNumber', 'logIndex'],
+                direction: OrderByDirection.ASC,
+            }
+        } else if (this.primaryTimestampProperty) {
+            queryOptions.orderBy = {
+                column: this.primaryTimestampProperty,
+                direction: OrderByDirection.ASC,
             }
         }
 
+        const useContractEventSeekMethod = this.liveObjectIsContractEvent && 
+            !inputArgs.find(obj => obj.hasOwnProperty('blockNumber') || obj.hasOwnProperty('logIndex'))
+
         const sharedErrorContext = { error: null }
         const t0 = performance.now()
+
         while (true) {
             this.fromScratchBatchResultSize = 0
+            const options = { ...queryOptions }
+
+            if (useContractEventSeekMethod) {
+                const { blockNumber, logIndex } = contractEventCursor
+                if (blockNumber !== null && logIndex !== null) {
+                    inputArgs.push({
+                        'blockNumber,logIndex': {
+                            op: FilterOp.GreaterThan,
+                            value: [blockNumber, logIndex]
+                        }
+                    })
+                }
+            } else {
+                options.offset = this.cursor
+            }
+
+            let lastRecordInBatch = null
             try {
                 await querySharedTable(
                     this.sharedTablePath,
                     inputArgs,
-                    async (data) =>
-                        this._handleDataOnSeedFromScratch(data as StringKeyMap[]).catch((err) => {
+                    async (data) => {
+                        lastRecordInBatch = (data || [])[data.length - 1] || {}
+                        return this._handleDataOnSeedFromScratch(data as StringKeyMap[]).catch((err) => {
                             sharedErrorContext.error = err
-                        }),
+                        })
+                    },
                     sharedErrorContext,
-                    { offset: this.cursor, ...queryOptions }
+                    options,
                 )
             } catch (err) {
                 logger.error(err)
@@ -286,7 +332,16 @@ class SeedTableService {
 
             this.cursor += this.fromScratchBatchResultSize
 
-            await updateCursor(this.seedCursorId, this.cursor)
+            if (useContractEventSeekMethod) {
+                contractEventCursor.blockNumber = lastRecordInBatch?.blockNumber
+                contractEventCursor.logIndex = lastRecordInBatch?.logIndex
+                await updateMetadata(this.seedCursorId, {
+                    ...this.metadata,
+                    contractEventCursor,
+                })
+            } else {
+                await updateCursor(this.seedCursorId, this.cursor)
+            }
 
             if (this.fromScratchBatchResultSize < limit) break
         }
@@ -306,9 +361,6 @@ class SeedTableService {
 
     async _seedWithAdjacentCols() {
         logger.info(chalk.cyanBright(`\nSeeding ${this.seedTablePath} from adjacent columns...`))
-
-        // TODO: Re-implement this.
-        return
 
         const queryConditions = this._buildQueryForSeedWithAdjacentCols()
 
@@ -625,6 +677,7 @@ class SeedTableService {
         }
 
         this.seedCount += insertRecords.length
+
         logger.info(
             chalk.cyanBright(
                 `  ${this.seedCount.toLocaleString('en-US')} records -> ${this.seedTableName}`
@@ -1160,6 +1213,7 @@ class SeedTableService {
                     }
 
                     if (filter.op !== FilterOp.EqualTo) {
+                        // TODO
                     }
 
                     colPathsToFunctionInputArgsEntry[filter.column].push({

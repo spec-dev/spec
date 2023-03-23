@@ -330,7 +330,7 @@ export enum OrderByDirection {
 }
 
 export type OrderBy = {
-    column: string
+    column: string | string[]
     direction: OrderByDirection
 }
 

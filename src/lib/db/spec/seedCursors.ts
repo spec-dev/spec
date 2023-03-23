@@ -185,6 +185,18 @@ export async function updateCursor(id: string, cursor: number) {
     }
 }
 
+export async function updateMetadata(id: string, metadata: StringKeyMap) {
+    try {
+        await db.transaction(async (tx) => {
+            await seedCursors(tx).update('metadata', metadata).where('id', id)
+        })
+    } catch (err) {
+        logger.error(
+            `Error updating seed_cursor (id=${id}) metadata ${JSON.stringify(metadata)}: ${err}`
+        )
+    }
+}
+
 export async function failedSeedCursorsExist(): Promise<boolean> {
     try {
         const failed = (

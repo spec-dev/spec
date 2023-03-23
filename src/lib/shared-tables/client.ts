@@ -4,7 +4,6 @@ import { JSONParser } from '@streamparser/json'
 import { constants } from '../constants'
 import logger from '../logger'
 import { stringify } from '../utils/formatters'
-import { buildQuery } from './queryBuilder'
 import { camelizeKeys } from 'humps'
 import { sleep } from '../utils/time'
 
@@ -27,9 +26,13 @@ export async function querySharedTable(
     options?: SelectOptions,
     hasRetried?: boolean
 ) {
-    const filters = buildQuery(tablePath, stringifyAnyDates(payload), options)
+    const queryPayload = {
+        table: tablePath,
+        filters: stringifyAnyDates(payload),
+        options,
+    }
     const abortController = new AbortController()
-    const resp = await makeRequest(tablePath, filters, abortController)
+    const resp = await makeRequest(tablePath, queryPayload, abortController)
 
     if (!isStreamingResp(resp)) {
         await handleJSONResp(resp, tablePath, onData)
