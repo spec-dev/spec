@@ -122,11 +122,8 @@ export async function getTableConstraints(
                 ON n.oid = c.connamespace 
             WHERE contype IN ('p', 'f', 'u')
             AND n.nspname = ?
-            AND (
-                conrelid::regclass::text = ? OR
-                conrelid::regclass::text = ?
-            )`,
-            [schema, table, `"${table}"`]
+            AND conrelid::regclass::text IN (?, ?, ?, ?, ?)`,
+            [schema, table, `"${table}"`, tablePath, `"${schema}"."${table}"`, `${schema}."${table}"`]
         )
 
         const { rows } = await query
