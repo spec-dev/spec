@@ -123,7 +123,14 @@ export async function getTableConstraints(
             WHERE contype IN ('p', 'f', 'u')
             AND n.nspname = ?
             AND conrelid::regclass::text IN (?, ?, ?, ?, ?)`,
-            [schema, table, `"${table}"`, tablePath, `"${schema}"."${table}"`, `${schema}."${table}"`]
+            [
+                schema,
+                table,
+                `"${table}"`,
+                tablePath,
+                `"${schema}"."${table}"`,
+                `${schema}."${table}"`,
+            ]
         )
 
         const { rows } = await query

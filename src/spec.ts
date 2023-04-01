@@ -580,7 +580,7 @@ class Spec {
                     liveObject,
                     seedCursor.id,
                     seedCursor.cursor,
-                    seedCursor.metadata,
+                    seedCursor.metadata
                 )
 
                 // Determine seed strategy up-front unless already determined
@@ -782,7 +782,7 @@ class Spec {
                 liveObject,
                 seedCursor.id,
                 seedCursor.cursor,
-                seedCursor.metadata,
+                seedCursor.metadata
             )
 
             // Determine seed strategy up-front unless already determined

@@ -112,11 +112,11 @@ class SeedTableService {
     }
 
     constructor(
-        seedSpec: SeedSpec, 
-        liveObject: LiveObject, 
-        seedCursorId: string, 
-        cursor: number, 
-        metadata?: StringKeyMap | null,
+        seedSpec: SeedSpec,
+        liveObject: LiveObject,
+        seedCursorId: string,
+        cursor: number,
+        metadata?: StringKeyMap | null
     ) {
         this.seedSpec = seedSpec
         this.liveObject = liveObject
@@ -266,14 +266,14 @@ class SeedTableService {
         logger.info(chalk.cyanBright(`\nSeeding ${this.seedTablePath} from scratch...`))
 
         const inputArgs = this.valueFilters.map((vf) => this._formatValueFilterGroupAsInputArgs(vf))
-        
+
         const limit = constants.FROM_SCRATCH_SEED_INPUT_BATCH_SIZE
         const queryOptions: SelectOptions = { limit }
         const contractEventCursor = this.metadata.contractEventCursor || {
-            blockNumber: null, 
+            blockNumber: null,
             logIndex: null,
         }
-    
+
         if (this.liveObjectIsContractEvent) {
             queryOptions.orderBy = {
                 column: ['blockNumber', 'logIndex'],
@@ -286,8 +286,11 @@ class SeedTableService {
             }
         }
 
-        const useContractEventSeekMethod = this.liveObjectIsContractEvent && 
-            !inputArgs.find(obj => obj.hasOwnProperty('blockNumber') || obj.hasOwnProperty('logIndex'))
+        const useContractEventSeekMethod =
+            this.liveObjectIsContractEvent &&
+            !inputArgs.find(
+                (obj) => obj.hasOwnProperty('blockNumber') || obj.hasOwnProperty('logIndex')
+            )
 
         const sharedErrorContext = { error: null }
         const t0 = performance.now()
@@ -302,8 +305,8 @@ class SeedTableService {
                     inputArgs.push({
                         'blockNumber,logIndex': {
                             op: FilterOp.GreaterThan,
-                            value: [blockNumber, logIndex]
-                        }
+                            value: [blockNumber, logIndex],
+                        },
                     })
                 }
             } else {
@@ -317,12 +320,14 @@ class SeedTableService {
                     inputArgs,
                     async (data) => {
                         lastRecordInBatch = (data || [])[data.length - 1] || {}
-                        return this._handleDataOnSeedFromScratch(data as StringKeyMap[]).catch((err) => {
-                            sharedErrorContext.error = err
-                        })
+                        return this._handleDataOnSeedFromScratch(data as StringKeyMap[]).catch(
+                            (err) => {
+                                sharedErrorContext.error = err
+                            }
+                        )
                     },
                     sharedErrorContext,
-                    options,
+                    options
                 )
             } catch (err) {
                 logger.error(err)
