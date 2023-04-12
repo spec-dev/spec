@@ -31,6 +31,7 @@ export async function querySharedTable(
         filters: stringifyAnyDates(payload),
         options,
     }
+
     const abortController = new AbortController()
     const resp = await makeRequest(tablePath, queryPayload, abortController)
 

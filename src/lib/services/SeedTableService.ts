@@ -1069,7 +1069,7 @@ class SeedTableService {
             return group
         })
 
-        return inputGroups.length > 1 ? inputGroups : inputGroups[0]
+        return inputGroups.length > 1 ? inputGroups.flat() : inputGroups[0]
     }
 
     _formatValueFilterGroupAsInputArgs(valueFilters: { [key: string]: Filter }): StringKeyMap {
