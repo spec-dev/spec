@@ -239,7 +239,7 @@ export async function getRelationshipBetweenTables(
 
     let rel = rels[0]
     if (rels.length > 1) {
-        const relsWithIdRefKey = rels.filter((rel) => rel.referenceKey === 'id')
+        const relsWithIdRefKey = rels.filter((rel) => rel.referenceKey.includes('id'))
         rel = relsWithIdRefKey[0] || rel
     }
 
@@ -314,11 +314,11 @@ export function parseForeignKeyConstraint(
     fallbackSchema: string
 ): StringKeyMap | null {
     const matches = raw.match(
-        /FOREIGN KEY \(([-a-zA-Z0-9_]+)\) REFERENCES ([-a-zA-Z0-9_."]+)\(([-a-zA-Z0-9_]+)\)/i
+        /FOREIGN KEY \(([-a-zA-Z0-9_", ]+)\) REFERENCES ([-a-zA-Z0-9_."]+)\(([-a-zA-Z0-9_", ]+)\)/i
     )
     if (!matches || matches.length !== 4) return null
 
-    const [_, foreignKey, foreignTableOrPath, referenceKey] = matches
+    let [_, foreignKey, foreignTableOrPath, referenceKey] = matches
 
     let foreignSchema = null
     let foreignTable = foreignTableOrPath
@@ -328,20 +328,22 @@ export function parseForeignKeyConstraint(
         ;[foreignSchema, foreignTable] = foreignTablePath
     }
 
+    const foreignKeyCols = foreignKey.split(',').map(v => v.trim().replace(/"/gi, ''))
+    const referenceKeyCols = referenceKey.split(',').map(v => v.trim().replace(/"/gi, ''))
     return {
         foreignSchema: foreignSchema || fallbackSchema,
         foreignTable: foreignTable.replace(/"/gi, ''),
-        foreignKey,
-        referenceKey,
+        foreignKey: foreignKeyCols,
+        referenceKey: referenceKeyCols,
     }
 }
 
 export function parseColNamesFromConstraint(raw: string): StringKeyMap | null {
-    const matches = raw.match(/\(([-a-zA-Z0-9_, ]+)\)/i)
+    const matches = raw.match(/\(([-a-zA-Z0-9_", ]+)\)/i)
     if (!matches || matches.length !== 2) return null
     const colNames = matches[1]
         .split(',')
-        .map((col) => col.trim())
+        .map((col) => col.trim().replace(/"/gi, ''))
         .sort()
     return { colNames }
 }

@@ -275,7 +275,7 @@ class ApplyDiffsService {
         valueFilters: FilterGroup
         lookupColFilterProperties: string[]
     }> {
-        const properyColMappings = {}
+        const propertyColMappings = {}
         const lookupColFilterPaths = []
         const lookupColFilterProperties = []
         const colOperatorFilters = {}
@@ -293,7 +293,7 @@ class ApplyDiffsService {
                 colFilterTables.add([colSchema, colTable].join('.'))
 
                 if (filter.op === FilterOp.EqualTo) {
-                    properyColMappings[property] = filter.column
+                    propertyColMappings[property] = filter.column
                     lookupColFilterPaths.push(filter.column)
                     lookupColFilterProperties.push(property)
                 } else {
@@ -338,8 +338,8 @@ class ApplyDiffsService {
 
                 queryConditions.join.push([
                     colTableName,
-                    `${colTablePath}.${rel.referenceKey}`,
-                    `${lookupTablePath}.${rel.foreignKey}`,
+                    rel.referenceKey.map(cn => `${colTablePath}.${cn}`),
+                    rel.foreignKey.map(cn => `${lookupTablePath}.${cn}`),
                 ])
             }
         }
@@ -382,11 +382,19 @@ class ApplyDiffsService {
             }
         }
 
+        // Start building query.
         let query = db.from(lookupTablePath)
 
+        // JOIN foreign tables.
         for (let join of queryConditions.join) {
             const [joinTable, joinRefKey, joinForeignKey] = join
-            query.innerJoin(joinTable, joinRefKey, joinForeignKey)
+            query.innerJoin(joinTable, (builder) => {
+                for (let i = 0; i < joinRefKey.length; i++) {
+                    i === 0 
+                        ? builder.on(joinRefKey[i], joinForeignKey[i]) 
+                        : builder.andOn(joinRefKey[i], joinForeignKey[i])
+                }
+            })
         }
 
         query.select(queryConditions.select)
@@ -434,98 +442,107 @@ class ApplyDiffsService {
 
         let diffs = this.filteredDiffs
 
-        const properties = { ...this.linkProperties }
+        const colFilterGroups = []
         for (let filterGroup of this.linkFilters) {
             filterGroup = toMap(filterGroup)
+            const colFilterGroup = {}
             for (const property in filterGroup) {
                 const filter = filterGroup[property]
-                if (
-                    filter.column &&
-                    filter.op === FilterOp.EqualTo &&
-                    !properties.hasOwnProperty(property)
-                ) {
-                    properties[property] = filter.column
+                if (filter.column && filter.op === FilterOp.EqualTo && !filter.column.startsWith(tablePath)) {
+                    colFilterGroup[property] = filter.column
                 }
             }
+            Object.keys(colFilterGroup).length && colFilterGroups.push(colFilterGroup)
         }
 
         // Get query conditions for the linked foreign tables with relationships.
         const foreignTableQueryConditions = {}
-        for (const property in properties) {
-            const colPath = properties[property]
-            const [colSchemaName, colTableName, colName] = colPath.split('.')
-            const colTablePath = `${colSchemaName}.${colTableName}`
-            if (colTablePath === tablePath) continue
+        const referenceKeyValues = {}
+        for (const colFilterGroup of colFilterGroups) {
+            // Reset each loop.
+            for (const foreignTablePath in foreignTableQueryConditions) {
+                foreignTableQueryConditions[foreignTablePath].whereIn = []
+                foreignTableQueryConditions[foreignTablePath].whereRaw = []
+                foreignTableQueryConditions[foreignTablePath].properties = []
+                foreignTableQueryConditions[foreignTablePath].colNames = []
+            }
 
-            const rel = getRel(tablePath, colTablePath)
-            if (!rel) continue
+            for (const property in colFilterGroup) {
+                const colPath = colFilterGroup[property]
+                const [colSchemaName, colTableName, colName] = colPath.split('.')
+                const colTablePath = `${colSchemaName}.${colTableName}`
+                const rel = getRel(tablePath, colTablePath)
+                if (!rel) continue
 
-            if (!foreignTableQueryConditions.hasOwnProperty(colTablePath)) {
-                foreignTableQueryConditions[colTablePath] = {
+                foreignTableQueryConditions[colTablePath] = foreignTableQueryConditions[colTablePath] || {
                     rel,
                     tablePath: colTablePath,
                     whereIn: [],
                     whereRaw: [],
                     properties: [],
                     colNames: [],
+                    propertyGroups: [],
+                    colNameGroups: [],
+                }
+
+                foreignTableQueryConditions[colTablePath].properties.push(property)
+                foreignTableQueryConditions[colTablePath].colNames.push(colName)
+
+                const values = unique(this.liveObjectDiffs.map((diff) => diff[property]).flat())
+
+                if (isColTypeArray(colPath)) {
+                    foreignTableQueryConditions[colTablePath].whereRaw.push([
+                        `${colName} && ARRAY[${values.map(() => '?').join(',')}]`,
+                        values,
+                    ])
+                } else {
+                    foreignTableQueryConditions[colTablePath].whereIn.push([colName, values])
                 }
             }
 
-            foreignTableQueryConditions[colTablePath].properties.push(property)
-            foreignTableQueryConditions[colTablePath].colNames.push(colName)
+            for (const foreignTablePath in foreignTableQueryConditions) {
+                const queryConditions = foreignTableQueryConditions[foreignTablePath]
+                if (!queryConditions.properties.length) continue
 
-            const values = unique(this.liveObjectDiffs.map((diff) => diff[property]).flat())
+                foreignTableQueryConditions[foreignTablePath].propertyGroups.push(queryConditions.properties)
+                foreignTableQueryConditions[foreignTablePath].colNameGroups.push(queryConditions.colNames)
 
-            if (isColTypeArray(colPath)) {
-                foreignTableQueryConditions[colTablePath].whereRaw.push([
-                    `${colName} && ARRAY[${values.map(() => '?').join(',')}]`,
-                    values,
-                ])
-            } else {
-                foreignTableQueryConditions[colTablePath].whereIn.push([colName, values])
-            }
-        }
+                let query = db.from(foreignTablePath)
 
-        // Find any foreign table records needed for their reference key values.
-        const referenceKeyValues = {}
-        for (const foreignTablePath in foreignTableQueryConditions) {
-            const queryConditions = foreignTableQueryConditions[foreignTablePath]
-            let query = db.from(foreignTablePath)
+                for (let i = 0; i < queryConditions.whereIn.length; i++) {
+                    const [col, vals] = queryConditions.whereIn[i]
+                    query.whereIn(col, vals)
+                }
 
-            for (let i = 0; i < queryConditions.whereIn.length; i++) {
-                const [col, vals] = queryConditions.whereIn[i]
-                query.whereIn(col, vals)
-            }
+                for (let j = 0; j < queryConditions.whereRaw.length; j++) {
+                    const [sql, bindings] = queryConditions.whereRaw[j]
+                    query.whereRaw(sql, bindings)
+                }
 
-            for (let j = 0; j < queryConditions.whereRaw.length; j++) {
-                const [sql, bindings] = queryConditions.whereRaw[j]
-                query.whereRaw(sql, bindings)
-            }
+                let records
+                try {
+                    records = await query
+                } catch (err) {
+                    const [foreignSchema, foreignTable] = foreignTablePath.split('.')
+                    throw new QueryError('select', foreignSchema, foreignTable, err)
+                }
+                records = records || []
+                if (records.length === 0) {
+                    return
+                }
 
-            let records
-            try {
-                records = await query
-            } catch (err) {
-                const [foreignSchema, foreignTable] = foreignTablePath.split('.')
-                throw new QueryError('select', foreignSchema, foreignTable, err)
-            }
-            records = records || []
-            if (records.length === 0) {
-                return
-            }
+                referenceKeyValues[foreignTablePath] = referenceKeyValues[foreignTablePath] || {}
+                for (const record of records) {
+                    const colValues = queryConditions.colNames.map((colName) => record[colName])
+                    const colValueOptions = getCombinations(colValues)
 
-            referenceKeyValues[foreignTablePath] = {}
-            for (const record of records) {
-                const colValues = queryConditions.colNames.map((colName) => record[colName])
-                const colValueOptions = getCombinations(colValues)
-
-                for (const valueOptions of colValueOptions) {
-                    const key = valueOptions.join(valueSep)
-                    referenceKeyValues[foreignTablePath][key] =
-                        referenceKeyValues[foreignTablePath][key] || []
-                    referenceKeyValues[foreignTablePath][key].push(
-                        record[queryConditions.rel.referenceKey]
-                    )
+                    for (const valueOptions of colValueOptions) {
+                        const key = valueOptions.join(valueSep)
+                        referenceKeyValues[foreignTablePath][key] = referenceKeyValues[foreignTablePath][key] || []
+                        referenceKeyValues[foreignTablePath][key].push(
+                            queryConditions.rel.referenceKey.map(c => record[c]).join(valueSep)
+                        )
+                    }
                 }
             }
         }
@@ -555,27 +572,39 @@ class ApplyDiffsService {
             const foreignKeyColNames = []
             for (const foreignTablePath in foreignTableQueryConditions) {
                 const queryConditions = foreignTableQueryConditions[foreignTablePath]
-                const foreignRefKey = queryConditions.properties.map((p) => diff[p]).join(valueSep)
-                const foreignRefKeyValues =
-                    referenceKeyValues[foreignTablePath][foreignRefKey] || []
+                const foreignRecordKeyOptions = queryConditions.propertyGroups.map(group => (
+                    group.map(k => diff[k]).join(valueSep))
+                ).flat()
+    
+                let foreignRecordReferenceKeyValues = null
+                for (const key of foreignRecordKeyOptions) {
+                    if (referenceKeyValues[foreignTablePath].hasOwnProperty(key)) {
+                        foreignRecordReferenceKeyValues = unique(referenceKeyValues[foreignTablePath][key] || [])
+                        break
+                    }
+                }
 
                 // If matching foreign record couldn't be found, ignore this diff.
-                const foreignRecordIsMissing = !foreignRefKeyValues?.length
-                if (foreignRecordIsMissing) {
+                if (!foreignRecordReferenceKeyValues) {
                     ignoreDiff = true
                     break
                 }
 
-                groupedForeignKeyValues.push(foreignRefKeyValues)
+                groupedForeignKeyValues.push(foreignRecordReferenceKeyValues)
                 foreignKeyColNames.push(queryConditions.rel.foreignKey)
             }
             if (ignoreDiff) continue
 
             const uniqueForeignKeyCombinations = getCombinations(groupedForeignKeyValues)
+
             for (const foreignKeyValues of uniqueForeignKeyCombinations) {
                 const record = { ...upsertRecord }
                 for (let i = 0; i < foreignKeyValues.length; i++) {
-                    record[foreignKeyColNames[i]] = foreignKeyValues[i]
+                    const fkColNames = foreignKeyColNames[i]
+                    const refKeyColValues = foreignKeyValues[i].split(valueSep)
+                    for (let j = 0; j < refKeyColValues.length; j++) {
+                        record[fkColNames[j]] = refKeyColValues[j]
+                    }
                 }
                 upsertRecords.push(record)
             }

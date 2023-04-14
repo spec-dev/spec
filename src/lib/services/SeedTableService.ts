@@ -474,6 +474,8 @@ class SeedTableService {
     ) {
         if (Array.isArray(inputRecords) && !inputRecords.length) return
 
+        console.log('inputColNames', inputColNames)
+
         const foreignTableName = foreignTablePath.split('.')[1]
         logger.info(
             chalk.cyanBright(
@@ -494,17 +496,24 @@ class SeedTableService {
             let property = reverseLinkProperties[foreignInputColPath]
             if (property) return property
 
+            const propertySet = new Set()
             for (const filterGroup of this.enrichedLink.filterBy) {
                 for (const property in filterGroup) {
                     const filter = filterGroup[property]
                     const colPath = filter.column
                     if (colPath === foreignInputColPath && filter.op === FilterOp.EqualTo) {
-                        return property
+                        propertySet.add(property)
                     }
                 }
             }
-            return null // really should just throw
+            const propertyArray = Array.from(propertySet)
+            if (!propertyArray.length) {
+                throw `Couldn't find input property associated with input foreign column ${foreignInputColPath}`
+            }
+            return propertyArray.length > 1 ? propertyArray : propertyArray[0]
         })
+
+        console.log('inputPropertyKeys', inputPropertyKeys)
 
         const arrayInputColNames = inputColNames.filter((colName) =>
             isColTypeArray([foreignTablePath, colName].join('.'))
@@ -588,18 +597,17 @@ class SeedTableService {
             this.cursor += batchInputRecords.length
             const isLastBatch = batchInputRecords.length < seedInputBatchSize
 
-            // Map the input records to their reference key values so that records being added
-            // to the seed table (later) can easily find/assign their foreign keys.
+            // Map the input records to their reference key values so that records added
+            // to the seed table can easily find/assign their associated foreign keys.
             const referenceKeyValues = {}
             if (rel) {
                 for (const record of batchInputRecords) {
                     const colValues = inputColNames.map((colName) => record[colName])
                     const colValueOptions = getCombinations(colValues)
-
                     for (const valueOptions of colValueOptions) {
                         const key = valueOptions.join(valueSep)
                         referenceKeyValues[key] = referenceKeyValues[key] || []
-                        referenceKeyValues[key].push(record[rel.referenceKey])
+                        referenceKeyValues[key].push(rel.referenceKey.map(c => record[c]).join(valueSep))
                     }
                 }
             }
@@ -705,11 +713,12 @@ class SeedTableService {
     async _handleDataOnForeignTableSeed(
         batch: StringKeyMap[],
         rel: ForeignKeyConstraint,
-        inputPropertyKeys: string[],
+        inputPropertyKeys: any,
         referenceKeyValues: StringKeyMap,
         nonSeedLinkedForeignTableData: StringKeyMap[]
     ) {
         this.inputBatchSeedCount += batch.length
+        const inputPropertyKeyOptions = getCombinations(inputPropertyKeys)
 
         // Clone this so we can add to it with each batch independently.
         const otherLinkedForeignTables: StringKeyMap[] = [...nonSeedLinkedForeignTableData].map(
@@ -741,40 +750,51 @@ class SeedTableService {
             }
             if (ignoreData) continue
 
-            const otherForeignLookups = {}
-            for (let i = 0; i < otherLinkedForeignTables.length; i++) {
-                const otherLinkedForeignTableEntry = otherLinkedForeignTables[i]
-                const { tablePath, colName, property, foreignKey } = otherLinkedForeignTableEntry
-                if (!foreignKey) continue
-                const foreignColValue = liveObjectData[property]
-                const foreignMappingKey = [tablePath, colName, property, foreignColValue].join('.')
+            /**
+             * TODO: Bring back once you finalize new multi-col FK strategy
+             */
+            // const otherForeignLookups = {}
+            // for (let i = 0; i < otherLinkedForeignTables.length; i++) {
+            //     const otherLinkedForeignTableEntry = otherLinkedForeignTables[i]
+            //     const { tablePath, colName, property, foreignKey } = otherLinkedForeignTableEntry
+            //     if (!foreignKey) continue
+            //     const foreignColValue = liveObjectData[property]
+            //     const foreignMappingKey = [tablePath, colName, property, foreignColValue].join('.')
 
-                if (this.foreignKeyMappings.has(foreignMappingKey)) {
-                    upsertRecord[foreignKey] = this.foreignKeyMappings.get(foreignMappingKey)
-                } else {
-                    otherLinkedForeignTables[i].colValues.push(foreignColValue)
-                    otherForeignLookups[tablePath] = foreignColValue
-                }
-            }
-            if (Object.keys(otherForeignLookups).length > 0) {
-                upsertRecord._otherForeignLookups = otherForeignLookups
-            }
+            //     if (this.foreignKeyMappings.has(foreignMappingKey)) {
+            //         upsertRecord[foreignKey] = this.foreignKeyMappings.get(foreignMappingKey)
+            //     } else {
+            //         otherLinkedForeignTables[i].colValues.push(foreignColValue)
+            //         otherForeignLookups[tablePath] = foreignColValue
+            //     }
+            // }
+            // if (Object.keys(otherForeignLookups).length > 0) {
+            //     upsertRecord._otherForeignLookups = otherForeignLookups
+            // }
             if (!rel) {
                 upsertRecords.push(upsertRecord)
                 continue
             }
 
-            const foreignInputRecordKey = inputPropertyKeys
-                .map((k) => liveObjectData[k])
-                .join(valueSep)
+            const foreignInputRecordKeyOptions = inputPropertyKeyOptions.map(group => (
+                group.map(k => liveObjectData[k]).join(valueSep))
+            ).flat()
 
-            if (!referenceKeyValues.hasOwnProperty(foreignInputRecordKey)) continue
+            let foreignInputRecordReferenceKeyValues = null
+            for (const key of foreignInputRecordKeyOptions) {
+                if (referenceKeyValues.hasOwnProperty(key)) {
+                    foreignInputRecordReferenceKeyValues = referenceKeyValues[key] || []
+                    break
+                }
+            }
+            if (!foreignInputRecordReferenceKeyValues) continue
 
-            const foreignInputRecordReferenceKeyValues =
-                referenceKeyValues[foreignInputRecordKey] || []
             for (const referenceKeyValue of foreignInputRecordReferenceKeyValues) {
                 const record = { ...upsertRecord }
-                record[rel.foreignKey] = referenceKeyValue
+                const refKeyColValues = referenceKeyValue.split(valueSep)
+                for (let i = 0; i < refKeyColValues.length; i++) {
+                    record[rel.foreignKey[i]] = refKeyColValues[i]
+                }
                 upsertRecords.push(record)
             }
         }
@@ -801,27 +821,30 @@ class SeedTableService {
                             continue
                         }
 
-                        let ignoreRecord = false
-                        for (const foreignTablePath in upsertRecord._otherForeignLookups) {
-                            const colValueUsedAtLookup =
-                                upsertRecord._otherForeignLookups[foreignTablePath]
-                            const resolvedDependentForeignTable =
-                                resolvedDependentForeignTablesMap[foreignTablePath] || {}
-                            const referenceKeyValuesMap =
-                                resolvedDependentForeignTable.referenceKeyValuesMap || {}
-                            const foreignKey = resolvedDependentForeignTable.foreignKey
+                        /**
+                         * TODO: Bring back once you finalize new multi-col FK strategy
+                        */
+                        // let ignoreRecord = false
+                        // for (const foreignTablePath in upsertRecord._otherForeignLookups) {
+                        //     const colValueUsedAtLookup =
+                        //         upsertRecord._otherForeignLookups[foreignTablePath]
+                        //     const resolvedDependentForeignTable =
+                        //         resolvedDependentForeignTablesMap[foreignTablePath] || {}
+                        //     const referenceKeyValuesMap =
+                        //         resolvedDependentForeignTable.referenceKeyValuesMap || {}
+                        //     const foreignKey = resolvedDependentForeignTable.foreignKey
 
-                            if (!referenceKeyValuesMap.hasOwnProperty(colValueUsedAtLookup)) {
-                                ignoreRecord = true
-                                break
-                            }
+                        //     if (!referenceKeyValuesMap.hasOwnProperty(colValueUsedAtLookup)) {
+                        //         ignoreRecord = true
+                        //         break
+                        //     }
 
-                            upsertRecord[foreignKey] = referenceKeyValuesMap[colValueUsedAtLookup]
-                        }
-                        if (ignoreRecord) continue
+                        //     upsertRecord[foreignKey] = referenceKeyValuesMap[colValueUsedAtLookup]
+                        // }
+                        // if (ignoreRecord) continue
 
-                        delete upsertRecord._otherForeignLookups
-                        finalUpsertRecords.push(upsertRecord)
+                        // delete upsertRecord._otherForeignLookups
+                        // finalUpsertRecords.push(upsertRecord)
                     }
                     if (!finalUpsertRecords.length) return
 

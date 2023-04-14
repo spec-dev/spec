@@ -1,12 +1,9 @@
 import {
     OpType,
     LiveObject,
-    LiveObjectLink,
     StringKeyMap,
     TableDataSources,
-    EdgeFunction,
     StringMap,
-    LiveObjectFunctionRole,
     ResolveRecordsSpec,
     ColumnDefaultsConfig,
     EnrichedLink,
@@ -331,7 +328,13 @@ class ResolveRecordsService {
         // Add JOIN conditions.
         for (let join of queryConditions.join) {
             const [joinTable, joinRefKey, joinForeignKey] = join
-            query.innerJoin(joinTable, joinRefKey, joinForeignKey)
+            query.innerJoin(joinTable, (builder) => {
+                for (let i = 0; i < joinRefKey.length; i++) {
+                    i === 0 
+                        ? builder.on(joinRefKey[i], joinForeignKey[i]) 
+                        : builder.andOn(joinRefKey[i], joinForeignKey[i])
+                }
+            })
         }
 
         // Add SELECT conditions.
@@ -371,8 +374,8 @@ class ResolveRecordsService {
 
                 queryConditions.join.push([
                     colTableName,
-                    `${colTablePath}.${rel.referenceKey}`,
-                    `${this.tablePath}.${rel.foreignKey}`,
+                    rel.referenceKey.map(cn => `${colTablePath}.${cn}`),
+                    rel.foreignKey.map(cn => `${this.tablePath}.${cn}`),
                 ])
 
                 queryConditions.select.push(`${colPath} as ${colPath}`)

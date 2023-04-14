@@ -589,9 +589,10 @@ export class TableSubscriber {
                     let resolvedColName = colName
 
                     if (colTablePath !== tablePath) {
-                        const foreignRel = getRel(tablePath, colTablePath)
-                        if (!foreignRel) continue
-                        resolvedColName = foreignRel.foreignKey
+                        const rel = getRel(tablePath, colTablePath)
+                        if (!rel) continue
+                        resolvedColName = rel.foreignKey[rel.referenceKey.indexOf(colName)]
+                        if (!rel) continue
                     }
 
                     resolvedLinkColNames.push(resolvedColName)

@@ -249,8 +249,8 @@ export interface ForeignKeyConstraint {
     table: string
     foreignSchema: string
     foreignTable: string
-    foreignKey: string
-    referenceKey: string
+    foreignKey: string[]
+    referenceKey: string[]
 }
 
 export enum TriggerEvent {

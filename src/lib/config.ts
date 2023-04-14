@@ -517,14 +517,14 @@ class Config {
 
                 if (colTablePath === tablePath) {
                     propertyColPathMappings[property] = colPath
-                    liveColName = colName
+                    liveColName = [colName]
                     break
                 }
 
                 const rel = getRel(tablePath, colTablePath)
-                if (rel) {
+                if (rel) {                    
                     propertyColPathMappings[property] = colPath
-                    liveColName = rel.foreignKey
+                    liveColName = rel.foreignKey[rel.referenceKey.indexOf(colName)]
                     break
                 }
             }
