@@ -1,4 +1,5 @@
 import { AnyMap, StringKeyMap } from '../types'
+import { ident } from 'pg-format'
 
 export const noop = () => {}
 
@@ -161,3 +162,9 @@ export const attemptToParseNumber = (originalValue: any): any => {
         return originalValue
     }
 }
+
+export const identPath = (value: string): string =>
+    value
+        .split('.')
+        .map((v) => ident(v))
+        .join('.')

@@ -22,6 +22,9 @@ import { withDeadlockProtection } from '../utils/db'
 import { isDateColType, isTimestampColType } from '../utils/colTypes'
 import { executeFilter } from '../utils/filters'
 import { isSpecTimestampFilterFormat } from '../utils/date'
+import { identPath } from '../utils/formatters'
+import { ident } from 'pg-format'
+import { invert } from 'lodash'
 
 const valueSep = '__:__'
 
@@ -303,6 +306,7 @@ class ApplyDiffsService {
                 valueFilters[property] = filter
             }
         }
+        const colPropertyMappings = invert(propertyColMappings)
 
         // Return early if no =column filters exist.
         if (!lookupColFilterProperties.length) {
@@ -351,7 +355,8 @@ class ApplyDiffsService {
         for (const diff of this.liveObjectDiffs) {
             // Where-in
             if (!useInclusiveWhere) {
-                const diffValue = diff[lookupColFilterProperties[0]]
+                const property = lookupColFilterProperties[0]
+                const diffValue = diff[property]
                 if (diffValue === null) continue
                 queryConditions.whereIn.push(diffValue)
                 continue
@@ -401,16 +406,41 @@ class ApplyDiffsService {
 
         if (useInclusiveWhere) {
             const conditions = queryConditions.where
-            if (queryConditions.where.length) {
-                query.where((builder) => {
-                    for (let i = 0; i < conditions.length; i++) {
-                        i === 0 ? builder.where(conditions[i]) : builder.orWhere(conditions[i])
+            if (conditions.length) {
+                for (let i = 0; i < conditions.length; i++) {
+                    const andConditions = conditions[i]
+                    const andClauses = builder => {
+                        let j = 0
+                        for (const colPath in andConditions) {
+                            const property = colPropertyMappings[colPath]
+                            const value = andConditions[colPath]
+                            const fuzzyMatch = !!property?.match(/address/i)
+                            if (j === 0) {
+                                fuzzyMatch 
+                                    ? builder.whereRaw(`${identPath(colPath)} ~* ?`, [value])
+                                    : builder.where(colPath, value)
+                            } else {
+                                fuzzyMatch 
+                                    ? builder.andWhereRaw(`${identPath(colPath)} ~* ?`, [value])
+                                    : builder.andWhere(colPath, value)
+                            }
+                            j++
+                        }                  
                     }
-                })
+                    i === 0 ? query.where(andClauses) : query.orWhere(andClauses)
+                }
             }
         } else {
             const whereInColValues = unique(queryConditions.whereIn)
-            whereInColValues && query.whereIn(lookupColFilterPaths[0], whereInColValues)
+            const filterColPath = lookupColFilterPaths[0]
+            const filterProperty = lookupColFilterProperties[0]
+
+            // Fuzzy-match on address properties.
+            if (whereInColValues.length && !!filterProperty.match(/address/i)) {
+                query.whereRaw(`${identPath(filterColPath)} ~* ?`, [whereInColValues.join('|')])
+            } else {
+                whereInColValues.length && query.whereIn(filterColPath, whereInColValues)
+            }
         }
 
         let matchingRecords = []
@@ -423,7 +453,19 @@ class ApplyDiffsService {
 
         // Index matching records by their lookup column values.
         for (const record of matchingRecords) {
-            const registryKey = lookupColFilterPaths.map((colPath) => record[colPath]).join(':')
+            const registryKey = lookupColFilterPaths.map((colPath, i) => {
+                let value = record[colPath]
+                const property = lookupColFilterProperties[i]
+                // Auto-lowercase addresses.
+                if (value && !!property.match(/address/i)) {
+                    value = value.toLowerCase()
+                }
+                // Auto-stringify chain ids.
+                else if (value && !!property.match(/(chainId|chain_id|chainid)/i)) {
+                    value = value.toString()
+                }
+                return value
+            }).join(':')
             matchingRecordsRegistry[registryKey] = matchingRecordsRegistry[registryKey] || []
             matchingRecordsRegistry[registryKey].push(record)
         }
@@ -492,8 +534,13 @@ class ApplyDiffsService {
 
                 if (isColTypeArray(colPath)) {
                     foreignTableQueryConditions[colTablePath].whereRaw.push([
-                        `${colName} && ARRAY[${values.map(() => '?').join(',')}]`,
+                        `${ident(colName)} && ARRAY[${values.map(() => '?').join(',')}]`,
                         values,
+                    ])
+                } else if (!!property.match(/address/i)) {
+                    foreignTableQueryConditions[colTablePath].whereRaw.push([
+                        `${ident(colName)} ~* ?`, 
+                        [values.join('|')]
                     ])
                 } else {
                     foreignTableQueryConditions[colTablePath].whereIn.push([colName, values])
@@ -533,7 +580,19 @@ class ApplyDiffsService {
 
                 referenceKeyValues[foreignTablePath] = referenceKeyValues[foreignTablePath] || {}
                 for (const record of records) {
-                    const colValues = queryConditions.colNames.map((colName) => record[colName])
+                    const colValues = queryConditions.colNames.map((colName, i) => {
+                        let value = record[colName]
+                        const property = queryConditions.properties[i]
+                        // Auto-lowercase addresses.
+                        if (value && !!property.match(/address/i)) {
+                            value = value.toLowerCase()
+                        }
+                        // Auto-stringify chain ids.
+                        else if (value && !!property.match(/(chainId|chain_id|chainid)/i)) {
+                            value = value.toString()
+                        }
+                        return value
+                    })
                     const colValueOptions = getCombinations(colValues)
 
                     for (const valueOptions of colValueOptions) {

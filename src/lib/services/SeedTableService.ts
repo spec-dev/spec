@@ -609,7 +609,7 @@ class SeedTableService {
             }
 
             // Transform the records into seed-function inputs.
-            const batchFunctionInputs = this._transformRecordsIntoFunctionInputs(
+            const { batchFunctionInputs, typeConversionMap } = this._transformRecordsIntoFunctionInputs(
                 batchInputRecords,
                 foreignTablePath
             )
@@ -621,7 +621,8 @@ class SeedTableService {
                     rel,
                     inputPropertyKeys,
                     referenceKeyValues,
-                    nonSeedLinkedForeignTableData
+                    nonSeedLinkedForeignTableData,
+                    typeConversionMap,
                 ).catch((err) => {
                     sharedErrorContext.error = err
                 })
@@ -711,7 +712,8 @@ class SeedTableService {
         rel: ForeignKeyConstraint,
         inputPropertyKeys: any,
         referenceKeyValues: StringKeyMap,
-        nonSeedLinkedForeignTableData: StringKeyMap[]
+        nonSeedLinkedForeignTableData: StringKeyMap[],
+        typeConversionMap: StringKeyMap,
     ) {
         this.inputBatchSeedCount += batch.length
         const inputPropertyKeyOptions = getCombinations(inputPropertyKeys)
@@ -726,6 +728,14 @@ class SeedTableService {
         const upsertRecords = []
 
         for (const liveObjectData of batch) {
+            for (const property in liveObjectData) {
+                let value = liveObjectData[property]
+                if (typeConversionMap.hasOwnProperty(property) && 
+                    typeConversionMap[property].hasOwnProperty(value)) {
+                    liveObjectData[property] = typeConversionMap[property][value]
+                }
+            }
+
             // Format a seed table record for this live object data.
             const upsertRecord: StringKeyMap = {}
             for (const property in liveObjectData) {
@@ -1046,7 +1056,8 @@ class SeedTableService {
     _transformRecordsIntoFunctionInputs(
         records: StringKeyMap[],
         primaryTablePath: string
-    ): StringKeyMap | StringKeyMap[] {
+    ): StringKeyMap {
+        const typeConversionMap = {}
         let inputGroups = []
         for (let i = 0; i < this.requiredArgColPaths.length; i++) {
             const requiredArgColPaths = this.requiredArgColPaths[i]
@@ -1054,6 +1065,7 @@ class SeedTableService {
             const valueFilters = this.valueFilters[i]
             const recordAgnosticFilters = this._formatValueFilterGroupAsInputArgs(valueFilters)
             const inputGroup = []
+
             for (const record of records) {
                 const input = {}
 
@@ -1063,11 +1075,24 @@ class SeedTableService {
                     const colTablePath = [colSchemaName, colTableName].join('.')
                     const inputArgsWithOps = colPathsToFunctionInputArgs[colPath] || []
 
+                    const recordColKey = colTablePath === primaryTablePath ? colName : colPath
+                    if (!record.hasOwnProperty(recordColKey)) continue
+
                     for (const { property, op } of inputArgsWithOps) {
-                        const recordColKey = colTablePath === primaryTablePath ? colName : colPath
-                        if (!record.hasOwnProperty(recordColKey)) continue
-                        const value = record[recordColKey]
-                        input[property] = op === FilterOp.EqualTo ? value : { op, value }
+                        const originalValue = record[recordColKey]
+                        let castedValue = originalValue
+                            
+                        // Auto-lowercase addresses.
+                        if (originalValue && !!property.match(/address/i)) {
+                            castedValue = originalValue.toLowerCase()
+                        }
+                        // Auto-stringify chain ids.
+                        else if (originalValue && !!property.match(/(chainId|chain_id|chainid)/i)) {
+                            castedValue = originalValue.toString()
+                        }
+                        typeConversionMap[property] = typeConversionMap[property] || {}
+                        typeConversionMap[property][castedValue] = originalValue
+                        input[property] = op === FilterOp.EqualTo ? castedValue : { op, value: castedValue }
                     }
                 }
 
@@ -1088,7 +1113,10 @@ class SeedTableService {
             return group
         })
 
-        return inputGroups.length > 1 ? inputGroups.flat() : inputGroups[0]
+        return {
+            batchFunctionInputs: inputGroups.length > 1 ? inputGroups.flat() : inputGroups[0],
+            typeConversionMap,
+        }
     }
 
     _formatValueFilterGroupAsInputArgs(valueFilters: { [key: string]: Filter }): StringKeyMap {
