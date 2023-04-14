@@ -15,6 +15,7 @@ envs/
 scrap.ts
 *.rdb
 *_k8s.yaml
+build/
 
 # Runtime data
 pids
