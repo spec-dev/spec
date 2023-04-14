@@ -474,8 +474,6 @@ class SeedTableService {
     ) {
         if (Array.isArray(inputRecords) && !inputRecords.length) return
 
-        console.log('inputColNames', inputColNames)
-
         const foreignTableName = foreignTablePath.split('.')[1]
         logger.info(
             chalk.cyanBright(
@@ -512,8 +510,6 @@ class SeedTableService {
             }
             return propertyArray.length > 1 ? propertyArray : propertyArray[0]
         })
-
-        console.log('inputPropertyKeys', inputPropertyKeys)
 
         const arrayInputColNames = inputColNames.filter((colName) =>
             isColTypeArray([foreignTablePath, colName].join('.'))
