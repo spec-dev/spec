@@ -149,8 +149,8 @@ export class TableSubscriber {
             }
             const callback = hooks[key] || noop
             realtimeClient.table(table, { schema }).on(parsedKey.event, (events) => {
-                callback &&
-                    callback(events).catch((err) =>
+                callback && events?.length &&
+                    callback(events, db, logger).catch((err) =>
                         logger.error(
                             `Hook error for ${parsedKey.event} event on ${schema}.${table}: ${err}`
                         )
