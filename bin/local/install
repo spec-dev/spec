@@ -1,5 +1,0 @@
-#!/bin/bash
-
-npm run build
-npm install -g --force .
-chmod u+x /usr/local/bin/spec-client
