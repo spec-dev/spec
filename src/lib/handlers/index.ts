@@ -1,5 +1,8 @@
 import { dynamicImport } from '../utils/imports'
 import { chainNamespaces } from '../utils/chains'
+import { constants } from '../constants'
+import path from 'path'
+import { fileExists } from '../utils/file'
 
 let handlers = {}
 
@@ -8,10 +11,16 @@ export const CUSTOM_EVENT_HANDLER_KEY = 'ceh'
 
 export async function importHandlers() {
     try {
+        const handlersDir = path.join(constants.SPEC_CONFIG_DIR, 'handlers')
+        if (!fileExists(handlersDir)) {
+            handlers = {}
+            return
+        }
+
         // Import the default exported event handlers.
-        const givenHandlers = (await dynamicImport('@spec.custom/handlers')).default || {}
+        const givenHandlers = (await dynamicImport(handlersDir)).default || {}
         if (!Object.keys(givenHandlers).length) {
-            handlers = givenHandlers
+            handlers = {}
             return
         }
 
