@@ -38,7 +38,7 @@ export class Logger {
         if (writeToLocalLogs) {
             const localLogPath = path.join(constants.SPEC_GLOBAL_DIR, `${constants.PROJECT_ID}.log`)
             fileExists(constants.SPEC_GLOBAL_DIR) || createDir(constants.SPEC_GLOBAL_DIR)
-            fs.openSync(localLogPath, 'w')
+            fileExists(localLogPath) || fs.openSync(localLogPath, 'w')
             this.localWriteStream = fs.createWriteStream(localLogPath, {
                 flags: 'a',
             })
