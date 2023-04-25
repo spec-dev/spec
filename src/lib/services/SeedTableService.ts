@@ -270,8 +270,8 @@ class SeedTableService {
         const limit = constants.FROM_SCRATCH_SEED_INPUT_BATCH_SIZE
         const queryOptions: SelectOptions = { limit }
         const contractEventCursor = this.metadata.contractEventCursor || {
-            blockNumber: null,
-            logIndex: null,
+            blockNumber: 0,
+            logIndex: 0,
         }
 
         if (this.liveObjectIsContractEvent) {
@@ -295,6 +295,8 @@ class SeedTableService {
         const sharedErrorContext = { error: null }
         const t0 = performance.now()
 
+        const originalInputArgsLength = inputArgs.length
+
         while (true) {
             this.fromScratchBatchResultSize = 0
             const options = { ...queryOptions }
@@ -302,12 +304,12 @@ class SeedTableService {
             if (useContractEventSeekMethod) {
                 const { blockNumber, logIndex } = contractEventCursor
                 if (blockNumber !== null && logIndex !== null) {
-                    inputArgs.push({
+                    inputArgs[originalInputArgsLength] = {
                         'blockNumber,logIndex': {
                             op: FilterOp.GreaterThan,
                             value: [blockNumber, logIndex],
                         },
-                    })
+                    }
                 }
             } else {
                 options.offset = this.cursor
@@ -603,16 +605,16 @@ class SeedTableService {
                     for (const valueOptions of colValueOptions) {
                         const key = valueOptions.join(valueSep)
                         referenceKeyValues[key] = referenceKeyValues[key] || []
-                        referenceKeyValues[key].push(rel.referenceKey.map(c => record[c]).join(valueSep))
+                        referenceKeyValues[key].push(
+                            rel.referenceKey.map((c) => record[c]).join(valueSep)
+                        )
                     }
                 }
             }
 
             // Transform the records into seed-function inputs.
-            const { batchFunctionInputs, typeConversionMap } = this._transformRecordsIntoFunctionInputs(
-                batchInputRecords,
-                foreignTablePath
-            )
+            const { batchFunctionInputs, typeConversionMap } =
+                this._transformRecordsIntoFunctionInputs(batchInputRecords, foreignTablePath)
 
             // Callback to use when a batch of response data is available.
             const onFunctionRespData = async (data) =>
@@ -622,7 +624,7 @@ class SeedTableService {
                     inputPropertyKeys,
                     referenceKeyValues,
                     nonSeedLinkedForeignTableData,
-                    typeConversionMap,
+                    typeConversionMap
                 ).catch((err) => {
                     sharedErrorContext.error = err
                 })
@@ -713,7 +715,7 @@ class SeedTableService {
         inputPropertyKeys: any,
         referenceKeyValues: StringKeyMap,
         nonSeedLinkedForeignTableData: StringKeyMap[],
-        typeConversionMap: StringKeyMap,
+        typeConversionMap: StringKeyMap
     ) {
         this.inputBatchSeedCount += batch.length
         const inputPropertyKeyOptions = getCombinations(inputPropertyKeys)
@@ -730,8 +732,10 @@ class SeedTableService {
         for (const liveObjectData of batch) {
             for (const property in liveObjectData) {
                 let value = liveObjectData[property]
-                if (typeConversionMap.hasOwnProperty(property) && 
-                    typeConversionMap[property].hasOwnProperty(value)) {
+                if (
+                    typeConversionMap.hasOwnProperty(property) &&
+                    typeConversionMap[property].hasOwnProperty(value)
+                ) {
                     liveObjectData[property] = typeConversionMap[property][value]
                 }
             }
@@ -782,9 +786,9 @@ class SeedTableService {
                 continue
             }
 
-            const foreignInputRecordKeyOptions = inputPropertyKeyOptions.map(group => (
-                group.map(k => liveObjectData[k]).join(valueSep))
-            ).flat()
+            const foreignInputRecordKeyOptions = inputPropertyKeyOptions
+                .map((group) => group.map((k) => liveObjectData[k]).join(valueSep))
+                .flat()
 
             let foreignInputRecordReferenceKeyValues = null
             for (const key of foreignInputRecordKeyOptions) {
@@ -829,7 +833,7 @@ class SeedTableService {
 
                         /**
                          * TODO: Bring back once you finalize new multi-col FK strategy
-                        */
+                         */
                         // let ignoreRecord = false
                         // for (const foreignTablePath in upsertRecord._otherForeignLookups) {
                         //     const colValueUsedAtLookup =
@@ -1081,7 +1085,7 @@ class SeedTableService {
                     for (const { property, op } of inputArgsWithOps) {
                         const originalValue = record[recordColKey]
                         let castedValue = originalValue
-                            
+
                         // Auto-lowercase addresses.
                         if (originalValue && !!property.match(/address/i)) {
                             castedValue = originalValue.toLowerCase()
@@ -1092,7 +1096,8 @@ class SeedTableService {
                         }
                         typeConversionMap[property] = typeConversionMap[property] || {}
                         typeConversionMap[property][castedValue] = originalValue
-                        input[property] = op === FilterOp.EqualTo ? castedValue : { op, value: castedValue }
+                        input[property] =
+                            op === FilterOp.EqualTo ? castedValue : { op, value: castedValue }
                     }
                 }
 

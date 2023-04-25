@@ -330,8 +330,8 @@ class ResolveRecordsService {
             const [joinTable, joinRefKey, joinForeignKey] = join
             query.innerJoin(joinTable, (builder) => {
                 for (let i = 0; i < joinRefKey.length; i++) {
-                    i === 0 
-                        ? builder.on(joinRefKey[i], joinForeignKey[i]) 
+                    i === 0
+                        ? builder.on(joinRefKey[i], joinForeignKey[i])
                         : builder.andOn(joinRefKey[i], joinForeignKey[i])
                 }
             })
@@ -374,8 +374,8 @@ class ResolveRecordsService {
 
                 queryConditions.join.push([
                     colTableName,
-                    rel.referenceKey.map(cn => `${colTablePath}.${cn}`),
-                    rel.foreignKey.map(cn => `${this.tablePath}.${cn}`),
+                    rel.referenceKey.map((cn) => `${colTablePath}.${cn}`),
+                    rel.foreignKey.map((cn) => `${this.tablePath}.${cn}`),
                 ])
 
                 queryConditions.select.push(`${colPath} as ${colPath}`)

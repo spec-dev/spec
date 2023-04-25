@@ -342,8 +342,8 @@ class ApplyDiffsService {
 
                 queryConditions.join.push([
                     colTableName,
-                    rel.referenceKey.map(cn => `${colTablePath}.${cn}`),
-                    rel.foreignKey.map(cn => `${lookupTablePath}.${cn}`),
+                    rel.referenceKey.map((cn) => `${colTablePath}.${cn}`),
+                    rel.foreignKey.map((cn) => `${lookupTablePath}.${cn}`),
                 ])
             }
         }
@@ -395,8 +395,8 @@ class ApplyDiffsService {
             const [joinTable, joinRefKey, joinForeignKey] = join
             query.innerJoin(joinTable, (builder) => {
                 for (let i = 0; i < joinRefKey.length; i++) {
-                    i === 0 
-                        ? builder.on(joinRefKey[i], joinForeignKey[i]) 
+                    i === 0
+                        ? builder.on(joinRefKey[i], joinForeignKey[i])
                         : builder.andOn(joinRefKey[i], joinForeignKey[i])
                 }
             })
@@ -409,23 +409,23 @@ class ApplyDiffsService {
             if (conditions.length) {
                 for (let i = 0; i < conditions.length; i++) {
                     const andConditions = conditions[i]
-                    const andClauses = builder => {
+                    const andClauses = (builder) => {
                         let j = 0
                         for (const colPath in andConditions) {
                             const property = colPropertyMappings[colPath]
                             const value = andConditions[colPath]
                             const fuzzyMatch = !!property?.match(/address/i)
                             if (j === 0) {
-                                fuzzyMatch 
+                                fuzzyMatch
                                     ? builder.whereRaw(`${identPath(colPath)} ~* ?`, [value])
                                     : builder.where(colPath, value)
                             } else {
-                                fuzzyMatch 
+                                fuzzyMatch
                                     ? builder.andWhereRaw(`${identPath(colPath)} ~* ?`, [value])
                                     : builder.andWhere(colPath, value)
                             }
                             j++
-                        }                  
+                        }
                     }
                     i === 0 ? query.where(andClauses) : query.orWhere(andClauses)
                 }
@@ -453,19 +453,21 @@ class ApplyDiffsService {
 
         // Index matching records by their lookup column values.
         for (const record of matchingRecords) {
-            const registryKey = lookupColFilterPaths.map((colPath, i) => {
-                let value = record[colPath]
-                const property = lookupColFilterProperties[i]
-                // Auto-lowercase addresses.
-                if (value && !!property.match(/address/i)) {
-                    value = value.toLowerCase()
-                }
-                // Auto-stringify chain ids.
-                else if (value && !!property.match(/(chainId|chain_id|chainid)/i)) {
-                    value = value.toString()
-                }
-                return value
-            }).join(':')
+            const registryKey = lookupColFilterPaths
+                .map((colPath, i) => {
+                    let value = record[colPath]
+                    const property = lookupColFilterProperties[i]
+                    // Auto-lowercase addresses.
+                    if (value && !!property.match(/address/i)) {
+                        value = value.toLowerCase()
+                    }
+                    // Auto-stringify chain ids.
+                    else if (value && !!property.match(/(chainId|chain_id|chainid)/i)) {
+                        value = value.toString()
+                    }
+                    return value
+                })
+                .join(':')
             matchingRecordsRegistry[registryKey] = matchingRecordsRegistry[registryKey] || []
             matchingRecordsRegistry[registryKey].push(record)
         }
@@ -490,7 +492,11 @@ class ApplyDiffsService {
             const colFilterGroup = {}
             for (const property in filterGroup) {
                 const filter = filterGroup[property]
-                if (filter.column && filter.op === FilterOp.EqualTo && !filter.column.startsWith(tablePath)) {
+                if (
+                    filter.column &&
+                    filter.op === FilterOp.EqualTo &&
+                    !filter.column.startsWith(tablePath)
+                ) {
                     colFilterGroup[property] = filter.column
                 }
             }
@@ -516,7 +522,9 @@ class ApplyDiffsService {
                 const rel = getRel(tablePath, colTablePath)
                 if (!rel) continue
 
-                foreignTableQueryConditions[colTablePath] = foreignTableQueryConditions[colTablePath] || {
+                foreignTableQueryConditions[colTablePath] = foreignTableQueryConditions[
+                    colTablePath
+                ] || {
                     rel,
                     tablePath: colTablePath,
                     whereIn: [],
@@ -539,8 +547,8 @@ class ApplyDiffsService {
                     ])
                 } else if (!!property.match(/address/i)) {
                     foreignTableQueryConditions[colTablePath].whereRaw.push([
-                        `${ident(colName)} ~* ?`, 
-                        [values.join('|')]
+                        `${ident(colName)} ~* ?`,
+                        [values.join('|')],
                     ])
                 } else {
                     foreignTableQueryConditions[colTablePath].whereIn.push([colName, values])
@@ -551,8 +559,12 @@ class ApplyDiffsService {
                 const queryConditions = foreignTableQueryConditions[foreignTablePath]
                 if (!queryConditions.properties.length) continue
 
-                foreignTableQueryConditions[foreignTablePath].propertyGroups.push(queryConditions.properties)
-                foreignTableQueryConditions[foreignTablePath].colNameGroups.push(queryConditions.colNames)
+                foreignTableQueryConditions[foreignTablePath].propertyGroups.push(
+                    queryConditions.properties
+                )
+                foreignTableQueryConditions[foreignTablePath].colNameGroups.push(
+                    queryConditions.colNames
+                )
 
                 let query = db.from(foreignTablePath)
 
@@ -597,9 +609,10 @@ class ApplyDiffsService {
 
                     for (const valueOptions of colValueOptions) {
                         const key = valueOptions.join(valueSep)
-                        referenceKeyValues[foreignTablePath][key] = referenceKeyValues[foreignTablePath][key] || []
+                        referenceKeyValues[foreignTablePath][key] =
+                            referenceKeyValues[foreignTablePath][key] || []
                         referenceKeyValues[foreignTablePath][key].push(
-                            queryConditions.rel.referenceKey.map(c => record[c]).join(valueSep)
+                            queryConditions.rel.referenceKey.map((c) => record[c]).join(valueSep)
                         )
                     }
                 }
@@ -631,14 +644,16 @@ class ApplyDiffsService {
             const foreignKeyColNames = []
             for (const foreignTablePath in foreignTableQueryConditions) {
                 const queryConditions = foreignTableQueryConditions[foreignTablePath]
-                const foreignRecordKeyOptions = queryConditions.propertyGroups.map(group => (
-                    group.map(k => diff[k]).join(valueSep))
-                ).flat()
-    
+                const foreignRecordKeyOptions = queryConditions.propertyGroups
+                    .map((group) => group.map((k) => diff[k]).join(valueSep))
+                    .flat()
+
                 let foreignRecordReferenceKeyValues = null
                 for (const key of foreignRecordKeyOptions) {
                     if (referenceKeyValues[foreignTablePath].hasOwnProperty(key)) {
-                        foreignRecordReferenceKeyValues = unique(referenceKeyValues[foreignTablePath][key] || [])
+                        foreignRecordReferenceKeyValues = unique(
+                            referenceKeyValues[foreignTablePath][key] || []
+                        )
                         break
                     }
                 }
