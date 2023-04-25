@@ -522,7 +522,7 @@ class Config {
                 }
 
                 const rel = getRel(tablePath, colTablePath)
-                if (rel) {                    
+                if (rel) {
                     propertyColPathMappings[property] = colPath
                     liveColName = rel.foreignKey[rel.referenceKey.indexOf(colName)]
                     break

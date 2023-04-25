@@ -328,8 +328,8 @@ export function parseForeignKeyConstraint(
         ;[foreignSchema, foreignTable] = foreignTablePath
     }
 
-    const foreignKeyCols = foreignKey.split(',').map(v => v.trim().replace(/"/gi, ''))
-    const referenceKeyCols = referenceKey.split(',').map(v => v.trim().replace(/"/gi, ''))
+    const foreignKeyCols = foreignKey.split(',').map((v) => v.trim().replace(/"/gi, ''))
+    const referenceKeyCols = referenceKey.split(',').map((v) => v.trim().replace(/"/gi, ''))
     return {
         foreignSchema: foreignSchema || fallbackSchema,
         foreignTable: foreignTable.replace(/"/gi, ''),
