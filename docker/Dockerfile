@@ -7,6 +7,7 @@ RUN mkdir -p /usr/app
 WORKDIR /usr/app
 
 COPY package.json ./
+COPY package-lock.json ./
 COPY tsconfig.json ./
 COPY src ./src
 
