@@ -8,6 +8,9 @@ import { pool, db } from '../db'
 import { mergeByKeys, stringify } from '../utils/formatters'
 import { applyDefaults } from '../defaults'
 import { isJSONColType } from '../utils/colTypes'
+import { constants } from '../constants'
+import { sleep } from '../utils/time'
+import { randomIntegerInRange } from '../utils/math' 
 
 class RunOpService {
     op: Op
@@ -92,11 +95,29 @@ class RunOpService {
             insertQuery.insert(data)
         }
 
-        // Perform the query, inserting the record(s).
-        try {
-            await insertQuery
-        } catch (err) {
-            throw new QueryError('insert', this.op.schema, this.op.table, err)
+        // Run insert/upsert with deadlock protection.
+        let attempt = 1
+        while (attempt <= constants.MAX_DEADLOCK_RETRIES) {
+            try {
+                await insertQuery
+                break
+            } catch (err) {
+                attempt++
+                const message = err.message || err.toString() || ''
+            
+                // Wait and try again if deadlocked.
+                if (message.toLowerCase().includes('deadlock')) {
+                    logger.error(
+                        `Upsert on ${this.tablePath} got deadlock on attempt ${attempt}/${constants.MAX_DEADLOCK_RETRIES}.`
+                    )
+                    await sleep(randomIntegerInRange(50, 500))
+                    continue
+                }
+
+                const queryError = new QueryError('insert', this.op.schema, this.op.table, err)
+                logger.error(queryError.message)
+                throw queryError
+            }
         }
     }
 
