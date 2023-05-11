@@ -83,7 +83,7 @@ export const constants: StringKeyMap = {
     TRACK_OPS_FUNCTION_NAME: 'spec_track_ops',
 
     // Event name prefix for chain reorgs.
-    REORG_EVENT_NAME_PREFIX: 'chain.reorg',
+    REORG_EVENT_NAME_PREFIX: 'chain.reorgs',
 
     // Batch size to use when rolling back records to a previous state.
     ROLLBACK_BATCH_SIZE: Number(ev('ROLLBACK_BATCH_SIZE', 2000)),
