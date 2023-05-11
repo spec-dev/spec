@@ -433,25 +433,38 @@ class Spec {
     async _fetchMissedEvents(newEventNames: string[]) {
         // Get the previous cursors for the new events.
         const cursors = []
+        const eventNamesToBuffer = []
         for (let newEventName of newEventNames) {
             const cursor = this.eventSubs[newEventName].cursor
-            cursor && cursors.push(cursor)
+            if (!cursor) continue
+            cursors.push(cursor)
+            eventNamesToBuffer.push(newEventName)
         }
         if (!cursors.length) return
+
+        eventNamesToBuffer.forEach(eventName => {
+            this.eventSubs[eventName].shouldBuffer = true
+        })
 
         logger.info('Fetching any missed events...')
 
         return new Promise(async (res, _) => {
             // Fetch any events that came after the following cursors.
             try {
-                await messageClient.fetchMissedEvents(
-                    cursors,
-                    (events: SpecEvent[]) => {
-                        logger.info(chalk.cyanBright(`Fetched ${events.length} missed events.`))
-                        events.forEach((event) => this._onEvent(event, { forceToBuffer: true }))
+                const promises = []
+                await messageClient.fetchMissedEvents(cursors,
+                    async (events: SpecEvent[]) => {
+                        const handleEvents = async () => {
+                            logger.info(chalk.cyanBright(`Fetched ${events.length} missed events.`))
+                            for (const event of events) {
+                                await this._onEvent(event, { forceToBuffer: true })
+                            }    
+                        }
+                        promises.push(handleEvents())
                     },
-                    () => {
-                        logger.info(chalk.cyanBright('Events in-sync.'))
+                    async () => {
+                        await Promise.all(promises)
+                        logger.info(chalk.cyanBright(`Events in sync.`))
                         res(null)
                     }
                 )
@@ -686,6 +699,18 @@ class Spec {
             const { liveObjectId, tablePath } = seedSpec
             const liveObject = this.liveObjects[liveObjectId]
             if (!liveObject) continue
+            const tableChainInfo = config.getChainInfoForTable(tablePath, this.liveObjects)
+            if (!tableChainInfo) continue
+            const { liveObjectChainIds } = tableChainInfo
+
+            const isReorgActivelyProcessing = () => {
+                for (const chainId of liveObjectChainIds) {
+                    if (this.reorgSubs[chainId]?.isProcessing) {
+                        return true
+                    }
+                }
+                return false
+            }
 
             try {
                 const seedTableService = new SeedTableService(
@@ -693,7 +718,10 @@ class Spec {
                     liveObject,
                     seedCursor.id,
                     seedCursor.cursor,
-                    seedCursor.metadata
+                    seedCursor.metadata,
+                    true, // updateOpTrackingFloorAsSeedProgresses
+                    liveObjectChainIds,
+                    isReorgActivelyProcessing,
                 )
 
                 // Determine seed strategy up-front unless already determined
@@ -874,18 +902,42 @@ class Spec {
 
         // Make sure the live object is still being used.
         const seedSpec = seedCursor.spec as SeedSpec
-        const { liveObjectId } = seedSpec
+        const { liveObjectId, tablePath } = seedSpec
 
         const liveObject = this.liveObjects[liveObjectId]
         if (!liveObject) {
             logger.error(
-                `Live object ${liveObjectId} isn't registered anymore - skipping seed cursor in series.`
+                `Live object ${liveObjectId} isn't registered anymore - skipping seed cursor in series.`,
+                seedCursor,
             )
             // Register success anyway and go to next in series.
             await seedSucceeded(seedCursor.id)
             seedCursor.metadata?.nextId &&
                 this._runNextSeedCursorInSeries(seedCursor.metadata?.nextId)
             return
+        }
+
+        const tableChainInfo = config.getChainInfoForTable(tablePath, this.liveObjects)
+        if (!tableChainInfo) {
+            logger.error(
+                `Live object chain info not found - skipping seed cursor in series.`,
+                seedCursor,
+            )
+            // Register success anyway and go to next in series.
+            await seedSucceeded(seedCursor.id)
+            seedCursor.metadata?.nextId &&
+                this._runNextSeedCursorInSeries(seedCursor.metadata?.nextId)
+            return
+
+        }
+        const { liveObjectChainIds } = tableChainInfo
+        const isReorgActivelyProcessing = () => {
+            for (const chainId of liveObjectChainIds) {
+                if (this.reorgSubs[chainId]?.isProcessing) {
+                    return true
+                }
+            }
+            return false
         }
 
         let seedTableService: SeedTableService
@@ -895,7 +947,10 @@ class Spec {
                 liveObject,
                 seedCursor.id,
                 seedCursor.cursor,
-                seedCursor.metadata
+                seedCursor.metadata,
+                true, // updateOpTrackingFloorAsSeedProgresses
+                liveObjectChainIds,
+                isReorgActivelyProcessing,
             )
 
             // Determine seed strategy up-front unless already determined

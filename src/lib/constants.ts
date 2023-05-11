@@ -62,6 +62,9 @@ export const constants: StringKeyMap = {
     // How often to poll the database schema for any changes.
     ANALYZE_TABLES_INTERVAL: Number(ev('ANALYZE_TABLES_INTERVAL', 30000)),
 
+    // Batch size to upsert with once a new batch of streaming query request data is available.
+    POLL_HEADS_DURING_LONG_RUNNING_SEEDS_INTERVAL: Number(ev('POLL_HEADS_DURING_LONG_RUNNING_SEEDS_INTERVAL', 10000)),
+
     // When a seed/backfill fails, the interval to wait before retrying
     // and the max number of times to retry.
     RETRY_SEED_CURSORS_INTERVAL: Number(ev('RETRY_SEED_CURSORS_INTERVAL', 5000)),
