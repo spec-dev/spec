@@ -253,6 +253,11 @@ export interface ForeignKeyConstraint {
     referenceKey: string[]
 }
 
+export enum TriggerProcedure {
+    TableSub,
+    TrackOps,
+}
+
 export enum TriggerEvent {
     INSERT = 'INSERT',
     UPDATE = 'UPDATE',

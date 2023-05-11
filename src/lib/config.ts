@@ -27,6 +27,7 @@ import {
     EnrichedLink,
     FilterGroup,
     FilterOp,
+    LiveObject,
 } from './types'
 import {
     filterOps,
@@ -347,6 +348,54 @@ class Config {
 
             return isTimestampColType(updatedAtColType)
         })
+    }
+
+    getChainInfoForTable(tablePath: string, liveObjects: { [key: string]: LiveObject }): StringKeyMap | null {
+        const [schema, table] = tablePath.split('.')
+        const liveColumns = config.getDataSourcesForTable(schema, table)
+
+        let blockNumberColName, chainIdColName, liveObjectId, liveObject, blockNumberProperty
+        for (const key in liveColumns) {
+            const [id, property] = key.split(':')
+            liveObjectId = liveObjectId || id
+            liveObject = liveObject || liveObjects[liveObjectId]
+            blockNumberProperty = liveObject?.config?.blockNumberProperty || constants.BLOCK_NUMBER_PROPERTY
+
+            if (!blockNumberColName && property === blockNumberProperty) {
+                blockNumberColName = liveColumns[key][0]?.columnName
+            }
+            else if (!chainIdColName && property === constants.CHAIN_ID_PROPERTY) {
+                chainIdColName = liveColumns[key][0]?.columnName
+            }
+        }
+
+        if (!blockNumberColName) {
+            logger.error('No live column is mapped to the "blockNumber" property.')
+            return null
+        }
+
+        const liveObjectChainIds = Object.keys(liveObject?.config?.chains || {})
+
+        let defaultChainId = null
+        if (!chainIdColName) {
+            if (liveObjectChainIds.length > 1) {
+                logger.error('No live column is mapped to the "chainId" property.')
+                return null
+            }
+
+            defaultChainId = liveObjectChainIds[0]
+            if (!defaultChainId) {
+                logger.error(`No chain id associated with Live Object: ${liveObjectId}`)
+                return null
+            }
+        }
+
+        return {
+            chainIdColName,
+            blockNumberColName,
+            defaultChainId,
+            liveObjectChainIds,
+        }
     }
 
     load(): boolean {

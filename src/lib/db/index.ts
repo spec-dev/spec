@@ -30,7 +30,7 @@ export const db = knex({
 export const pool = new Pool({
     ...connectionConfig,
     min: 0,
-    max: 10, // leave
+    max: 10,
 })
 pool.on('error', (err) => logger.error('pg client error', err))
 

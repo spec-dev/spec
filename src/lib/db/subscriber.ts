@@ -1,5 +1,5 @@
 import { pgListener, db, connectionConfig } from '.'
-import { getSpecTriggers, formatTriggerName, dropTrigger, createTrigger } from './triggers'
+import { getSpecTriggers, maybeDropTrigger, createTrigger } from './triggers'
 import {
     TableSub,
     TableSubStatus,
@@ -13,6 +13,7 @@ import {
     ResolveRecordsSpec,
     SeedCursorJobType,
     SeedCursorStatus,
+    TriggerProcedure,
 } from '../types'
 import { tablesMeta, getRel } from './tablesMeta'
 import config from '../config'
@@ -85,12 +86,12 @@ export class TableSubscriber {
     }
 
     async upsertTableSubsWithTriggers(tableSubs: TableSub[]) {
-        // Get all existing spec triggers.
+        // Get all existing spec table-sub triggers.
         let triggers
         try {
-            triggers = await getSpecTriggers()
+            triggers = await getSpecTriggers(TriggerProcedure.TableSub)
         } catch (err) {
-            logger.error(`Failed to fetch spec triggers: ${err}`)
+            logger.error(`Failed to fetch table-sub spec triggers: ${err}`)
             return
         }
 
@@ -175,9 +176,7 @@ export class TableSubscriber {
     }
 
     _onTableDataChange(event: TableSubEvent) {
-        if (!event || event.schema === 'spec' || event?.operation === TriggerEvent.DELETE) {
-            return
-        }
+        if (!event || event.schema === 'spec') return
 
         // Strip quotes just in case.
         event.table = event.table.replace(/"/g, '')
@@ -681,44 +680,35 @@ export class TableSubscriber {
         // Get the current spec triggers for this table.
         const insertTriggerKey = [schema, table, TriggerEvent.INSERT].join(':')
         const updateTriggerKey = [schema, table, TriggerEvent.UPDATE].join(':')
-        const deleteTriggerKey = [schema, table, TriggerEvent.DELETE].join(':')
         const insertTrigger = existingTriggersMap[insertTriggerKey]
         const updateTrigger = existingTriggersMap[updateTriggerKey]
-        const deleteTrigger = existingTriggersMap[deleteTriggerKey]
 
         // Should create new triggers if they don't exist.
         let createInsertTrigger = !insertTrigger
         let createUpdateTrigger = !updateTrigger
-        let createDeleteTrigger = !deleteTrigger
 
         // If any of the triggers already exist, ensure the primary keys haven't changed.
         if (insertTrigger) {
-            createInsertTrigger = await this._maybeDropTrigger(
+            createInsertTrigger = await maybeDropTrigger(
                 insertTrigger,
                 schema,
                 table,
+                TriggerProcedure.TableSub,
                 currentPrimaryKeys
             )
         }
         if (updateTrigger) {
-            createUpdateTrigger = await this._maybeDropTrigger(
+            createUpdateTrigger = await maybeDropTrigger(
                 updateTrigger,
                 schema,
                 table,
-                currentPrimaryKeys
-            )
-        }
-        if (deleteTrigger) {
-            createDeleteTrigger = await this._maybeDropTrigger(
-                deleteTrigger,
-                schema,
-                table,
+                TriggerProcedure.TableSub,
                 currentPrimaryKeys
             )
         }
 
         // Jump to subscribing status and end early if already created all triggers.
-        if (!createInsertTrigger && !createUpdateTrigger && !createDeleteTrigger) {
+        if (!createInsertTrigger && !createUpdateTrigger) {
             this.tableSubs[tablePath].status = TableSubStatus.Subscribing
             return
         }
@@ -727,9 +717,8 @@ export class TableSubscriber {
 
         // Create the missing triggers.
         const promises = []
-        createInsertTrigger && promises.push(createTrigger(schema, table, TriggerEvent.INSERT))
-        createUpdateTrigger && promises.push(createTrigger(schema, table, TriggerEvent.UPDATE))
-        createUpdateTrigger && promises.push(createTrigger(schema, table, TriggerEvent.DELETE))
+        createInsertTrigger && promises.push(createTrigger(schema, table, TriggerEvent.INSERT, TriggerProcedure.TableSub))
+        createUpdateTrigger && promises.push(createTrigger(schema, table, TriggerEvent.UPDATE, TriggerProcedure.TableSub))
         try {
             await Promise.all(promises)
         } catch (err) {
@@ -738,36 +727,6 @@ export class TableSubscriber {
         }
 
         this.tableSubs[tablePath].status = TableSubStatus.Subscribing
-    }
-
-    async _maybeDropTrigger(
-        trigger: Trigger,
-        schema: string,
-        table: string,
-        primaryKeyColumnNames: string[]
-    ): Promise<boolean> {
-        let shouldCreateNewTrigger = false
-
-        // If the trigger name is different, it means the table's primary keys must have changed,
-        // so drop the existing trigger and we'll recreate it (+ upsert the function).
-        const expectedTriggerName = formatTriggerName(
-            schema,
-            table,
-            trigger.event,
-            primaryKeyColumnNames
-        )
-        if (expectedTriggerName && trigger.name !== expectedTriggerName) {
-            try {
-                // May fail unless spec is given enhanced permissions.
-                await dropTrigger(trigger)
-                shouldCreateNewTrigger = true
-            } catch (err) {
-                logger.error(`Error dropping trigger: ${trigger.name}`)
-                shouldCreateNewTrigger = false
-            }
-        }
-
-        return shouldCreateNewTrigger
     }
 
     _populateTableSubsFromConfig() {

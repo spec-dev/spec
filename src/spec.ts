@@ -11,6 +11,9 @@ import {
     SeedCursorStatus,
     SeedCursorJobType,
     ResolveRecordsSpec,
+    Trigger,
+    TriggerEvent,
+    TriggerProcedure,
 } from './lib/types'
 import {
     ensureSpecSchemaIsReady,
@@ -23,6 +26,7 @@ import {
     failedSeedCursorsExist,
     updateStatus,
     getSeedCursorWaitingInLine,
+    upsertOpTrackingEntries,
 } from './lib/db/spec'
 import { SpecEvent } from '@spec.dev/event-client'
 import LRU from 'lru-cache'
@@ -37,7 +41,9 @@ import { importHooks } from './lib/hooks'
 import { sleep } from './lib/utils/time'
 import { unique } from './lib/utils/formatters'
 import chalk from 'chalk'
+import { tablesMeta } from './lib/db/tablesMeta'
 import { db } from './lib/db'
+import { getSpecTriggers, createTrigger, maybeDropTrigger } from './lib/db/triggers'
 import { importHandlers, getHandlers, CUSTOM_EVENT_HANDLER_KEY } from './lib/handlers'
 
 class Spec {
@@ -105,7 +111,7 @@ class Spec {
 
         // Upsert table subscriptions (listen to data changes).
         tableSubscriber.getLiveObject = (id) => this.liveObjects[id]
-        tableSubscriber.upsertTableSubs()
+        await tableSubscriber.upsertTableSubs()
 
         // Connect to event/rpc message client.
         // Force run the onConnect handler if already connected.
@@ -116,6 +122,12 @@ class Spec {
         // Resolve all live objects for the versions listed in the config file.
         await this._getLiveObjectsInConfig()
 
+        // Kick start op-tracking.
+        await Promise.all([
+            this._upsertOpTrackingTriggers(),
+            this._upsertOpTrackingEntries(),
+        ])
+        
         // Upsert live columns listed in the config and start seeding with new ones.
         if (Object.keys(this.liveObjects).length) {
             await this._upsertAndSeedLiveColumns()
@@ -872,8 +884,7 @@ class Spec {
                     )
                 })
 
-                // If some new event was buffered (race condition) during ^this sort,
-                // try again.
+                // Try again if some new event was buffered (race condition) during ^this sort.
                 if (sortedBuffer.length !== this.eventSubs[eventName].buffer.length) {
                     continue
                 }
@@ -900,6 +911,110 @@ class Spec {
         }
 
         cursorsToSave.length && (await saveEventCursors(cursorsToSave))
+    }
+
+    async _upsertOpTrackingTriggers() {
+        const tablePaths = config.getAllReferencedTablePaths()
+
+        // Get all existing spec op-tracking triggers.
+        let triggers
+        try {
+            triggers = await getSpecTriggers(TriggerProcedure.TrackOps)
+        } catch (err) {
+            logger.error(`Failed to fetch op-tracking spec triggers: ${err}`)
+            return
+        }
+
+        // Map existing triggers by <schema>:<table>:<event>
+        const existingTriggersMap = {}
+        for (const trigger of triggers) {
+            const { schema, table, event } = trigger
+            const key = [schema, table, event].join(':')
+            existingTriggersMap[key] = trigger
+        }
+
+        // Upsert triggers for each table referenced in the project config.
+        await Promise.all(tablePaths.map((tablePath) => (
+            this._upsertOpTrackingTrigger(tablePath, existingTriggersMap)
+        )))
+    }
+    
+    async _upsertOpTrackingTrigger(tablePath: string, existingTriggersMap: { [key: string]: Trigger }) {
+        const [schema, table] = tablePath.split('.')
+        const currentPrimaryKeyCols = tablesMeta[tablePath].primaryKey
+        const currentPrimaryKeys = currentPrimaryKeyCols.map((pk) => pk.name)
+
+        // Get the current spec triggers for this table.
+        const insertTriggerKey = [schema, table, TriggerEvent.INSERT].join(':')
+        const updateTriggerKey = [schema, table, TriggerEvent.UPDATE].join(':')
+        const insertTrigger = existingTriggersMap[insertTriggerKey]
+        const updateTrigger = existingTriggersMap[updateTriggerKey]
+
+        // Should create new triggers if they don't exist.
+        let createInsertTrigger = !insertTrigger
+        let createUpdateTrigger = !updateTrigger
+
+        // If any of the triggers already exist, ensure the primary keys haven't changed.
+        if (insertTrigger) {
+            createInsertTrigger = await maybeDropTrigger(
+                insertTrigger,
+                schema,
+                table,
+                TriggerProcedure.TrackOps,
+                currentPrimaryKeys
+            )
+        }
+        if (updateTrigger) {
+            createUpdateTrigger = await maybeDropTrigger(
+                updateTrigger,
+                schema,
+                table,
+                TriggerProcedure.TrackOps,
+                currentPrimaryKeys
+            )
+        }
+        if (!createInsertTrigger && !createUpdateTrigger) return true
+
+        // Create the missing triggers.
+        const promises = []
+        createInsertTrigger && promises.push(createTrigger(
+            schema, 
+            table, 
+            TriggerEvent.INSERT, 
+            TriggerProcedure.TrackOps,
+            this.liveObjects,
+        ))
+        createUpdateTrigger && promises.push(createTrigger(
+            schema, 
+            table,
+            TriggerEvent.UPDATE,
+            TriggerProcedure.TrackOps,
+            this.liveObjects,
+        ))
+        try {
+            await Promise.all(promises)
+        } catch (err) {
+            logger.error(`Error creating op-tracking triggers for ${tablePath}: ${err}`)
+            return false
+        }
+
+        return true
+    }
+
+    async _upsertOpTrackingEntries() {
+        const opTrackingEntries = []
+        for (const tablePath of config.getAllReferencedTablePaths()) {
+            const tableChainInfo = config.getChainInfoForTable(tablePath, this.liveObjects)
+            if (!tableChainInfo) return false
+            for (const chainId of tableChainInfo.liveObjectChainIds) {
+                opTrackingEntries.push({ 
+                    tablePath, 
+                    chainId,
+                    isEnabledAbove: 0,
+                })
+            }
+        }
+        await upsertOpTrackingEntries(opTrackingEntries, false)
     }
 
     _doneProcessingNewConfig() {

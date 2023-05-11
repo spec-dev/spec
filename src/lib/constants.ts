@@ -69,8 +69,8 @@ export const constants: StringKeyMap = {
 
     // The LISTEN/NOTIFY channel and function name associated with
     // the triggers Spec uses to listen to table activity.
-    TABLE_SUB_FUNCTION_NAME: ev('TABLE_SUB_FUNCTION_NAME', 'spec_table_sub'),
-    TABLE_SUB_CHANNEL: ev('TABLE_SUB_CHANNEL', 'spec_data_change'),
+    TABLE_SUB_FUNCTION_NAME: 'spec_table_sub',
+    TABLE_SUB_CHANNEL: 'spec_data_change',
 
     // Buffer config to use when debouncing table subscription events from postgres triggers.
     TABLE_SUB_BUFFER_INTERVAL: Number(ev('TABLE_SUB_BUFFER_INTERVAL', 100)),
@@ -78,6 +78,9 @@ export const constants: StringKeyMap = {
 
     // The column name to use to track the last time any table was updated (if it exists).
     TABLE_SUB_UPDATED_AT_COL_NAME: ev('TABLE_SUB_UPDATED_AT_COL_NAME', 'updated_at'),
+
+    // Postgres trigger function name for tracking record operations. 
+    TRACK_OPS_FUNCTION_NAME: 'spec_track_ops',
 
     // Threshold required to switch from individual update operations to a bulk update operation.
     MAX_UPDATES_BEFORE_BULK_UPDATE_USED: Number(ev('MAX_UPDATES_BEFORE_BULK_UPDATE_USED', 10)),
@@ -96,6 +99,10 @@ export const constants: StringKeyMap = {
     EXPO_BACKOFF_DELAY: 100,
     EXPO_BACKOFF_MAX_ATTEMPTS: 10,
     EXPO_BACKOFF_FACTOR: 1.5,
+
+    // Special live object properties.
+    CHAIN_ID_PROPERTY: 'chainId',
+    BLOCK_NUMBER_PROPERTY: 'blockNumber', 
 }
 
 constants.PROJECT_CONFIG_PATH = path.join(

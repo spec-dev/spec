@@ -10,6 +10,7 @@ import { applyDefaults } from '../defaults'
 import { isJSONColType } from '../utils/colTypes'
 
 class RunOpService {
+    
     op: Op
 
     tx: Knex.Transaction

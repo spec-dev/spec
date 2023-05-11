@@ -6,6 +6,7 @@ export * from './liveColumns'
 export * from './tableSubCursors'
 export * from './seedCursors'
 export * from './names'
+export * from './opTracking'
 
 const NOT_READY_DELAY = 30000 // ms
 
