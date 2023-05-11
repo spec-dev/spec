@@ -32,6 +32,8 @@ class RollbackService {
     }
 
     async perform() {
+        logger.info(chalk.magenta(`[${this.chainId}] Rolling back to block ${this.blockNumber}...`))
+
         // Get snapshots of records that need to be rolled back, indexed by table path.
         await this._getTargetRecordSnapshotOps()
 
@@ -49,8 +51,9 @@ class RollbackService {
             throw `[${this.chainId}] Failed to set new op tracking floor during rollback to ${this.blockNumber}`
         }
 
-        // Reset records to their previous states before the target block number.
+        // Roll records back to their previous states prior to the target block number.
         await this._rollbackRecords()
+        logger.info(chalk.green(`[${this.chainId}] Rollback complete.`))
     }
 
     async _getTargetRecordSnapshotOps() {
@@ -293,13 +296,13 @@ class RollbackService {
             stats.push([tablePath, recordsAffected.length])
         }
         if (!stats.length) {
-            logger.info(chalk.magenta(`[${this.chainId}] No records to roll back.`))
+            logger.info(chalk.green(`[${this.chainId}] No records to roll back.`))
             return false 
         }
-        logger.info(chalk.magenta(
-            `[${this.chainId}] Rolling back ${total} records across ${stats.length} tables:\n` + 
+        logger.info(
+            `[${this.chainId}] Rolling back ${total} records across ${stats.length} table(s):\n` + 
             `${stats.map(([tablePath, numRecords]) => `- ${tablePath}: ${numRecords}`).join('\n')}`
-        ))
+        )
         return true
     }
 }
