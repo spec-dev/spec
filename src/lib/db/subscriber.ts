@@ -23,7 +23,7 @@ import SeedTableService from '../services/SeedTableService'
 import ResolveRecordsService from '../services/ResolveRecordsService'
 import { constants } from '../constants'
 import { debounce } from 'lodash'
-import { getRecordsForPrimaryKeys } from './ops'
+import { getRecordsForPrimaryKeys } from '.'
 import {
     getTableSubCursorsForPaths,
     upsertTableSubCursor,

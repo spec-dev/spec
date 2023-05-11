@@ -282,7 +282,7 @@ alter table spec.op_tracking owner to spec;
 create table spec.frozen_tables (
     id serial primary key,
     table_path varchar not null,
-    chain_id varchar not null,
+    chain_id varchar not null
 );
 comment on table spec.frozen_tables is 'Spec: Live tables actively ignoring new updates.';
 create unique index idx_frozen_table_chain on spec.frozen_tables(table_path, chain_id); 

@@ -10,16 +10,17 @@ const CONFLICT_COLUMNS = [
     'chain_id',
 ]
 
-export async function freezeTableForChainId(tablePath: string, chainId: string) {
-    logger.error(chalk.red(`Freezing table "${tablePath}" for chain id ${chainId}...`))
+export async function freezeTableForChainId(tablePath: string | string[], chainId: string) {
+    const tablePaths = Array.isArray(tablePath) ? tablePath : [tablePath]
+    logger.error(chalk.red(`Freezing table(s) ${tablePaths.join(', ')} for chain id ${chainId}...`))
     try {
         await frozenTables()
-            .insert({ table_path: tablePath, chain_id: chainId })
+            .insert(tablePaths.map(tablePath => ({ table_path: tablePath, chain_id: chainId })))
             .onConflict(CONFLICT_COLUMNS)
             .ignore()
     } catch (err) {
         logger.error(
-            `Error saving frozen_table (tablePath=${tablePath}, chainId=${chainId}): ${err}`
+            `Error saving frozen_table(s) for chain id ${chainId}): ${err}`
         )
     }
 }
