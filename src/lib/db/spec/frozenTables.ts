@@ -10,8 +10,8 @@ const CONFLICT_COLUMNS = [
     'chain_id',
 ]
 
-export async function freezeTableForChainId(tablePath: string | string[], chainId: string) {
-    const tablePaths = Array.isArray(tablePath) ? tablePath : [tablePath]
+export async function freezeTablesForChainId(tablePaths: string | string[], chainId: string) {
+    tablePaths = Array.isArray(tablePaths) ? tablePaths : [tablePaths]
     logger.error(chalk.red(`Freezing table(s) ${tablePaths.join(', ')} for chain id ${chainId}...`))
     try {
         await frozenTables()

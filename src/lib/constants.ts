@@ -82,6 +82,9 @@ export const constants: StringKeyMap = {
     // Postgres trigger function name for tracking record operations. 
     TRACK_OPS_FUNCTION_NAME: 'spec_track_ops',
 
+    // Event name prefix for chain reorgs.
+    REORG_EVENT_NAME_PREFIX: 'chain.reorg',
+
     // Batch size to use when rolling back records to a previous state.
     ROLLBACK_BATCH_SIZE: Number(ev('ROLLBACK_BATCH_SIZE', 2000)),
 

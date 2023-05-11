@@ -5,6 +5,7 @@ import {
     ResolvedLiveObject,
     StringKeyMap,
     MissedEventsCallback,
+    ReorgEvent,
 } from '../types'
 import { constants } from '../constants'
 import { noop } from '../utils/formatters'
@@ -94,6 +95,10 @@ export class MessageClient {
             logger.error(error)
             throw error
         }
+    }
+
+    async validateReorg(event: ReorgEvent): Promise<boolean> {
+        return true
     }
 
     async call(functionName: RPC, payload?: any): Promise<{ data: any; error: RpcError }> {

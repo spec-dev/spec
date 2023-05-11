@@ -137,6 +137,19 @@ export interface EventSub {
     buffer: SpecEvent[]
 }
 
+export interface ReorgEvent {
+    id: string
+    chainId: string
+    blockNumber: number
+    eventTimestamp: string
+}
+
+export interface ReorgSub {
+    chainId: string
+    isProcessing: boolean
+    buffer: ReorgEvent[]
+}
+
 export enum TableSubStatus {
     Pending,
     Creating,

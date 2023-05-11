@@ -14,6 +14,8 @@ import {
     Trigger,
     TriggerEvent,
     TriggerProcedure,
+    ReorgSub,
+    ReorgEvent,
 } from './lib/types'
 import {
     ensureSpecSchemaIsReady,
@@ -27,19 +29,21 @@ import {
     updateStatus,
     getSeedCursorWaitingInLine,
     upsertOpTrackingEntries,
+    freezeTablesForChainId,
 } from './lib/db/spec'
 import { SpecEvent } from '@spec.dev/event-client'
 import LRU from 'lru-cache'
 import ApplyEventService from './lib/services/ApplyEventService'
 import UpsertLiveColumnsService from './lib/services/UpsertLiveColumnsService'
 import SeedTableService from './lib/services/SeedTableService'
+import RollbackService from './lib/services/RollbackService'
 import { tableSubscriber } from './lib/db/subscriber'
 import short from 'short-uuid'
 import ResolveRecordsService from './lib/services/ResolveRecordsService'
 import { getRecordsForPrimaryKeys } from './lib/db'
 import { importHooks } from './lib/hooks'
 import { sleep } from './lib/utils/time'
-import { unique } from './lib/utils/formatters'
+import { unique, stringify } from './lib/utils/formatters'
 import chalk from 'chalk'
 import { tablesMeta } from './lib/db/tablesMeta'
 import { db } from './lib/db'
@@ -50,6 +54,8 @@ class Spec {
     liveObjects: { [key: string]: LiveObject } = {}
 
     eventSubs: { [key: string]: EventSub } = {}
+
+    reorgSubs: { [key: string]: ReorgSub } = {}
 
     customEventHandlers: { [key: string]: any } = {}
 
@@ -128,10 +134,13 @@ class Spec {
             this._upsertOpTrackingEntries(),
         ])
         
-        // Upsert live columns listed in the config and start seeding with new ones.
+        // Upsert live columns listed in the config and start seeding new ones.
         if (Object.keys(this.liveObjects).length) {
             await this._upsertAndSeedLiveColumns()
         }
+
+        // Subscribe to reorg events for the chains needed.
+        await this._subscribeToReorgs()
 
         // Subscribe to all events powering the live objects,
         // as well as those used in custom event handlers.
@@ -191,7 +200,7 @@ class Spec {
             return
         }
 
-        this._processEvent(event)
+        await this._processEvent(event)
         this._updateEventCursor(event)
     }
 
@@ -244,10 +253,102 @@ class Spec {
         }
     }
 
+    async _onReorg(event: ReorgEvent) {
+        // Ensure we're actually subscribed to chain's reorgs.
+        if (!this.reorgSubs[event.chainId]) {
+            logger.error(`Got reorg event for chain ${event.chainId} without subscription...something's wrong.`)
+            return
+        }
+        this.reorgSubs[event.chainId].buffer.push(event)
+        
+        // Confirm this reorg actually occurred.
+        const isValid = await messageClient.validateReorg(event)
+        if (!isValid) {
+            this.reorgSubs[event.chainId].buffer = this.reorgSubs[event.chainId].buffer.filter(e => 
+                e.id !== event.id
+            )
+            return
+        }
+
+        // Force all live object events to buffer 
+        // so they don't interfere with the reorg.
+        this._bufferAllLiveObjectEvents()
+        await sleep(100)
+
+        // Remove any events in the event buffer that are associated 
+        // with block numbers >= the reorg rollback target.
+        this._applyReorgToEventBuffer(event)
+
+        // Process the reorg events for this chain in order.
+        if (!this.reorgSubs[event.chainId].isProcessing) {
+            this.reorgSubs[event.chainId].isProcessing = true
+            await this._processReorg(event.chainId)
+        }
+    }
+
+    async _processReorg(chainId: string) {
+        const reorgEvent = this.reorgSubs[chainId].buffer.shift()
+        const rollbackToBlockNumber = Number(reorgEvent.blockNumber)
+        const rollbackEventTsDate = new Date(reorgEvent.eventTimestamp)
+
+        // Process any events still in the buffer that came before the reorg event.
+        for (const eventName in this.eventSubs) {
+            await this._sortEventBuffer(eventName)
+            let event
+            while (this.eventSubs[eventName].buffer.length) {
+                const eventTsDate = new Date(this.eventSubs[eventName].buffer[0].origin.eventTimestamp)
+                if (eventTsDate > rollbackEventTsDate) break
+                event = this.eventSubs[eventName].buffer.shift()
+                await this._processEvent(event)
+            }
+            event && this._updateEventCursor(event)
+        }
+
+        // Roll records back to their latest valid snapshot.
+        const service = new RollbackService(rollbackToBlockNumber, chainId)
+        try {
+            await service.perform()
+        } catch (err) {
+            logger.error(chalk.redBright(`[${chainId}:${rollbackToBlockNumber}] Reorg failed: ${stringify(err)}`))
+            await freezeTablesForChainId(service.tablePaths, chainId)
+        }
+
+        // Keep pulling from the buffer until all reorgs are complete.
+        if (this.reorgSubs[chainId].buffer.length) {
+            await this._processReorg(chainId)
+            return
+        }
+
+        // Mark as done and process any new events 
+        // received while the reorg was running.
+        this.reorgSubs[chainId].isProcessing = false
+        await this._processAllBufferedEvents()
+    }
+
     async _getLiveObjectsInConfig() {
         const liveObjects = await resolveLiveObjects(config.liveObjectIds, this.liveObjects)
         for (const liveObject of liveObjects) {
             this.liveObjects[liveObject.id] = liveObject
+        }
+    }
+
+    async _subscribeToReorgs() {
+        const chainIds = this._getCurrentlyUsedChainIds()
+        if (!chainIds.length) return
+
+        for (const chainId of chainIds) {
+            if (this.reorgSubs.hasOwnProperty(chainId)) continue
+
+            this.reorgSubs[chainId] = { 
+                chainId, 
+                isProcessing: false,
+                buffer: [],
+            }
+
+            messageClient.on(
+                this._formatReorgEventName(chainId), 
+                (event) => this._onReorg(event as unknown as ReorgEvent),
+            )
         }
     }
 
@@ -346,11 +447,11 @@ class Spec {
                 await messageClient.fetchMissedEvents(
                     cursors,
                     (events: SpecEvent[]) => {
-                        logger.info(`Fetched ${events.length} missed events.`)
+                        logger.info(chalk.cyanBright(`Fetched ${events.length} missed events.`))
                         events.forEach((event) => this._onEvent(event, { forceToBuffer: true }))
                     },
                     () => {
-                        logger.info('Events in-sync.')
+                        logger.info(chalk.cyanBright('Events in-sync.'))
                         res(null)
                     }
                 )
@@ -859,7 +960,7 @@ class Spec {
 
         // Process each event.
         let event
-        while (this.eventSubs[eventName].buffer.length > 0) {
+        while (this.eventSubs[eventName].buffer.length) {
             event = this.eventSubs[eventName].buffer.shift()
             await this._processEvent(event)
             await sleep(5)
@@ -870,13 +971,36 @@ class Spec {
         event && this._updateEventCursor(event)
     }
 
+    _applyReorgToEventBuffer(reorgEvent: ReorgEvent) {
+        const rollbackToBlockNumber = Number(reorgEvent.blockNumber)
+        const rollbackEventTsDate = new Date(reorgEvent.eventTimestamp)
+
+        // Remove any events from the live object event buffer that are:
+        // 1) >= rollback block number (assuming chain id is equivalent)
+        // 2) were sent before the rollback event
+        for (const eventName in this.eventSubs) {
+            const invalidEventIds = new Set<string>()
+            for (const event of this.eventSubs[eventName].buffer) {
+                if (event.origin.chainId !== reorgEvent.chainId) continue
+                const eventBlockNumber = Number(event.origin.blockNumber)
+                const eventTsDate = new Date(event.origin.eventTimestamp)
+                if (eventBlockNumber >= rollbackToBlockNumber && eventTsDate < rollbackEventTsDate) {
+                    invalidEventIds.add(event.id)
+                }
+            }
+            this.eventSubs[eventName].buffer = this.eventSubs[eventName].buffer.filter(event => (
+                !invalidEventIds.has(event.id)
+            ))
+        }
+    }
+
     async _sortEventBuffer(eventName: string): Promise<void> {
         return new Promise(async (res, _) => {
             while (true) {
                 const buffer = this.eventSubs[eventName].buffer
                 if (!buffer.length) break
 
-                // Sort buffer by nonce (smallest none first).
+                // Sort buffer by nonce (smallest first).
                 const sortedBuffer = [...buffer].sort((a, b) => {
                     return (
                         parseFloat(a.nonce.replace('-', '.')) -
@@ -1075,6 +1199,16 @@ class Spec {
         return subs
     }
 
+    _getCurrentlyUsedChainIds(): string[] {
+        const chainIds = new Set<string>()
+        Object.values(this.liveObjects).forEach(liveObject => {
+            Object.keys(liveObject.config?.chains || {}).forEach(chainId => {
+                chainIds.add(chainId)
+            })
+        })
+        return Array.from(chainIds)
+    }
+
     _registerEventAsSeen(event: SpecEvent, subjects: string[]) {
         subjects.forEach((subject) => {
             this.seenEvents.set(`${event.id}:${subject}`, true)
@@ -1098,6 +1232,16 @@ class Spec {
             timestamp: event.origin.eventTimestamp,
         }
         this.eventSubs[event.name].cursorChanged = true
+    }
+
+    _bufferAllLiveObjectEvents() {
+        for (const eventName in this.eventSubs) {
+            this.eventSubs[eventName].shouldBuffer = true
+        }
+    }
+
+    _formatReorgEventName(chainId: string): string {
+        return [constants.REORG_EVENT_NAME_PREFIX, chainId].join(':')
     }
 }
 

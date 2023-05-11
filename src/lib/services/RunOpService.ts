@@ -14,16 +14,13 @@ class RunOpService {
 
     tx: Knex.Transaction
 
-    allowUpdatesBackwardsInTime: boolean
-
     get tablePath(): string {
         return `${this.op.schema}.${this.op.table}`
     }
 
-    constructor(op: Op, tx?: Knex.Transaction, allowUpdatesBackwardsInTime: boolean = false) {
+    constructor(op: Op, tx?: Knex.Transaction) {
         this.op = op
         this.tx = tx
-        this.allowUpdatesBackwardsInTime = allowUpdatesBackwardsInTime
     }
 
     async perform() {
@@ -71,14 +68,13 @@ class RunOpService {
             if (mergeColNames.length) {
                 insertQuery.insert(uniqueData).onConflict(conflictTargets).merge(mergeColNames)
 
-                // Restrict updates to only forwards-in-time if the live object's primaryTimestampProperty
-                // is the source for one of the live columns, UNLESS this op came from an event that was
-                // skipped or an event that's being replayed.
+                // Restrict updates to only forwards-in-time if the live object's 
+                // primaryTimestampProperty is the source for one of the live columns.
                 const timestampCol = this.op.primaryTimestampColumn
                 const onlyMergeForwardInTime =
                     timestampCol &&
-                    mergeColNames.includes(timestampCol) &&
-                    !this.allowUpdatesBackwardsInTime
+                    mergeColNames.includes(timestampCol)
+
                 if (onlyMergeForwardInTime) {
                     insertQuery.whereRaw('??.??.?? <= excluded.??', [
                         this.op.schema,

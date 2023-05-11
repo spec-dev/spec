@@ -11,7 +11,7 @@ import {
     getDistinctRecordsOperatedOnAtOrAboveBlockNumber,
     upsertOpTrackingEntries,
     deleteTableOpsAtOrAboveNumber,
-    freezeTableForChainId,
+    freezeTablesForChainId,
 } from '../db/spec'
 
 class RollbackService {
@@ -116,7 +116,7 @@ class RollbackService {
                 // If the rollback completely fails, "freeze" any further updates to it for this specific chain id.
                 const error = `[${this.chainId}:${this.blockNumber}] Failed to rollback ops for ${tablePath}: ${err}`
                 logger.error(error)
-                await freezeTableForChainId(tablePath, this.chainId)
+                await freezeTablesForChainId(tablePath, this.chainId)
                 break
             }
         }    
