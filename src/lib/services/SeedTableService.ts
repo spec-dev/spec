@@ -15,7 +15,7 @@ import {
     OrderByDirection,
 } from '../types'
 import { reverseMap, getCombinations, unique, groupByKeys } from '../utils/formatters'
-import { areColumnsEmpty } from '../db/ops'
+import { areColumnsEmpty } from '../db'
 import RunOpService from './RunOpService'
 import { querySharedTable } from '../shared-tables/client'
 import config from '../config'

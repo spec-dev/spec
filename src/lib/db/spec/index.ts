@@ -1,12 +1,14 @@
 import logger from '../../logger'
-import { doesSchemaExist, doesTableExist } from '../ops'
+import { doesSchemaExist, doesTableExist } from '..'
 import { SPEC_SCHEMA_NAME, specSchemaTableNames } from './names'
 export * from './eventCursors'
 export * from './liveColumns'
 export * from './tableSubCursors'
 export * from './seedCursors'
 export * from './names'
+export * from './ops'
 export * from './opTracking'
+export * from './frozenTables'
 
 const NOT_READY_DELAY = 30000 // ms
 

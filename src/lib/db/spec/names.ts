@@ -5,6 +5,7 @@ export const TABLE_SUB_CURSORS_TABLE_NAME = 'table_sub_cursors'
 export const SEED_CURSORS_TABLE_NAME = 'seed_cursors'
 export const OPS_TABLE_NAME = 'ops'
 export const OP_TRACKING_TABLE_NAME = 'op_tracking'
+export const FROZEN_TABLES = 'frozen_tables'
 export const specSchemaTableNames = [
     EVENT_CURSORS_TABLE_NAME,
     LIVE_COLUMNS_TABLE_NAME,
@@ -12,4 +13,5 @@ export const specSchemaTableNames = [
     SEED_CURSORS_TABLE_NAME,
     OPS_TABLE_NAME,
     OP_TRACKING_TABLE_NAME,
+    FROZEN_TABLES,
 ]

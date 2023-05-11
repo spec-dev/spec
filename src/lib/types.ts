@@ -209,6 +209,18 @@ export interface SeedCursor {
     createdAt: Date
 }
 
+export interface OpRecord {
+    id: number
+    tablePath: string
+    pkNames: string
+    pkValues: string
+    before: StringKeyMap | null
+    after: StringKeyMap | null
+    blockNumber: number
+    chainId: string
+    ts: Date
+}
+
 export interface LiveColumn {
     columnPath: string
     liveProperty: string

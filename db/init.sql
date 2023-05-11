@@ -263,6 +263,7 @@ create table spec.ops (
 comment on table spec.ops is 'Spec: Stores before & after snapshots of records at specific block numbers.';
 create index idx_ops_table_pk_values on spec.ops(table_path, pk_values);
 create index idx_ops_snapshot on spec.ops(block_number, chain_id);
+create index idx_ops_table_snapshot on spec.ops(table_path, block_number, chain_id);
 create index idx_ops_ordered on spec.ops(table_path, pk_values, block_number, ts);
 alter table spec.ops owner to spec;
 
@@ -274,5 +275,15 @@ create table spec.op_tracking (
     is_enabled_above bigint not null
 );
 comment on table spec.ops is 'Spec: Specifies whether ops should be tracked for a given table.';
-create unique index idx_unique_table_path on spec.op_tracking(table_path, chain_id); 
+create unique index idx_op_tracking_table_chain on spec.op_tracking(table_path, chain_id); 
 alter table spec.op_tracking owner to spec;
+
+-- Frozen Tables
+create table spec.frozen_tables (
+    id serial primary key,
+    table_path varchar not null,
+    chain_id varchar not null,
+);
+comment on table spec.frozen_tables is 'Spec: Live tables actively ignoring new updates.';
+create unique index idx_frozen_table_chain on spec.frozen_tables(table_path, chain_id); 
+alter table spec.frozen_tables owner to spec;

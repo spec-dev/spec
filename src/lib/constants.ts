@@ -82,8 +82,14 @@ export const constants: StringKeyMap = {
     // Postgres trigger function name for tracking record operations. 
     TRACK_OPS_FUNCTION_NAME: 'spec_track_ops',
 
+    // Batch size to use when rolling back records to a previous state.
+    ROLLBACK_BATCH_SIZE: Number(ev('ROLLBACK_BATCH_SIZE', 2000)),
+
     // Threshold required to switch from individual update operations to a bulk update operation.
     MAX_UPDATES_BEFORE_BULK_UPDATE_USED: Number(ev('MAX_UPDATES_BEFORE_BULK_UPDATE_USED', 10)),
+
+    // Max number of attempts when retrying a query that hits deadlock.
+    MAX_DEADLOCK_RETRIES: Number(ev('MAX_DEADLOCK_RETRIES', 10)),
 
     // Whether to run in debug mode.
     DEBUG: ['true', true].includes(ev('DEBUG')),

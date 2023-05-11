@@ -168,3 +168,14 @@ export const identPath = (value: string): string =>
         .split('.')
         .map((v) => ident(v))
         .join('.')
+
+export const sum = (arr: number[]): number => arr.reduce((a, b) => a + b, 0)
+
+export const toChunks = (arr: any, chunkSize: number): any[][] => {
+    const result = []
+    for (let i = 0; i < arr.length; i += chunkSize) {
+        const chunk = arr.slice(i, i + chunkSize)
+        result.push(chunk)
+    }
+    return result
+}
