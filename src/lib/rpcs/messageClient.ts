@@ -8,7 +8,7 @@ import {
     ReorgEvent,
 } from '../types'
 import { constants } from '../constants'
-import { noop } from '../utils/formatters'
+import { noop, stringify } from '../utils/formatters'
 import { RpcError } from '../errors'
 import RPC from './functionNames'
 import logger from '../logger'
@@ -70,6 +70,13 @@ export class MessageClient {
         }
     }
 
+    async getMostRecentBlockNumbers(): Promise<{
+        data: StringKeyMap | null
+        error: RpcError | null
+    }> {
+        return this.call(RPC.GetMostRecentBlockNumbers)
+    }
+
     async fetchMissedEvents(cursors: EventCursor[], cb: MissedEventsCallback, onDone?: any) {
         // Subscribe to a unique, temporary channel to use for missed-event transfer.
         const channel = short.generate()
@@ -78,9 +85,9 @@ export class MessageClient {
             async (data: any) => {
                 if (data && typeof data === 'object' && !Array.isArray(data) && data.done) {
                     await this.off(channel)
-                    onDone && onDone()
+                    onDone && await onDone()
                 } else {
-                    cb(data)
+                    await cb(data)
                 }
             },
             { temp: true }
@@ -97,8 +104,17 @@ export class MessageClient {
         }
     }
 
-    async validateReorg(event: ReorgEvent): Promise<boolean> {
-        return true
+    async validateReorg(reorgEvent: ReorgEvent): Promise<boolean> {
+        const { data, error } = await this.call(RPC.ValidateReorg, reorgEvent)
+        if (error) {
+            logger.error(error)
+            throw error
+        }
+        const isValid = !!(data?.isValid)
+        if (!isValid) {
+            logger.error(chalk.redBright(`Invalid reorg detected: ${stringify(reorgEvent)}`))
+        }
+        return isValid
     }
 
     async call(functionName: RPC, payload?: any): Promise<{ data: any; error: RpcError }> {
