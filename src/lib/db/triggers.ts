@@ -56,7 +56,7 @@ export function formatTriggerName(
     }
     const suffix = (primaryKeys || []).sort().join('_')
     const main = `${schema}_${table}__pks__${suffix}`.toLowerCase()
-    return prefix ? `${prefix}__${hash(main)}` : ''
+    return prefix ? `${prefix}__${hash(main).slice(0, 8)}` : ''
 }
 
 export async function getSpecTriggers(procedure: TriggerProcedure): Promise<Trigger[]> {
