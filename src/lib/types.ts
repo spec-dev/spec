@@ -135,10 +135,14 @@ export interface EventSub {
     cursorChanged: boolean
     shouldBuffer: boolean
     buffer: SpecEvent[]
+    last: StringKeyMap | null
+    isGapFilling: boolean
+    setToLastAfterFillingGaps: StringKeyMap | null
 }
 
 export interface ReorgEvent {
     id: string
+    name: string
     chainId: string
     blockNumber: number
     eventTimestamp: string
@@ -224,14 +228,20 @@ export interface SeedCursor {
 
 export interface OpRecord {
     id: number
-    tablePath: string
-    pkNames: string
-    pkValues: string
+    table_path: string
+    pk_names: string
+    pk_values: string
     before: StringKeyMap | null
     after: StringKeyMap | null
-    blockNumber: number
-    chainId: string
+    block_number: number
+    chain_id: string
     ts: Date
+}
+
+export interface FrozenTable {
+    id: number
+    tablePath: string
+    chainId: string
 }
 
 export interface LiveColumn {

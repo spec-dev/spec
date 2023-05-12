@@ -1302,7 +1302,9 @@ class SeedTableService {
         const opTrackingEntries = []
         for (const chainId of this.liveObjectChainIds) {
             if (!mostRecentBlockNumbers.hasOwnProperty(chainId)) continue
-            const newOpTrackingFloor = mostRecentBlockNumbers[chainId]
+            const newOpTrackingFloor = (
+                Number(mostRecentBlockNumbers[chainId]) - constants.OP_TRACKING_FLOOR_OFFSET
+            )
             opTrackingEntries.push({
                 tablePath: this.seedTablePath, 
                 chainId,
@@ -1310,7 +1312,7 @@ class SeedTableService {
             })
         }
 
-        await upsertOpTrackingEntries(opTrackingEntries)
+        opTrackingEntries.length && await upsertOpTrackingEntries(opTrackingEntries)
     }
 
     _findRequiredArgColumns() {

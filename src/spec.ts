@@ -16,6 +16,7 @@ import {
     TriggerProcedure,
     ReorgSub,
     ReorgEvent,
+    EventCursor,
 } from './lib/types'
 import {
     ensureSpecSchemaIsReady,
@@ -30,6 +31,7 @@ import {
     getSeedCursorWaitingInLine,
     upsertOpTrackingEntries,
     freezeTablesForChainId,
+    deleteOpsOlderThan,
 } from './lib/db/spec'
 import { SpecEvent } from '@spec.dev/event-client'
 import LRU from 'lru-cache'
@@ -43,12 +45,14 @@ import ResolveRecordsService from './lib/services/ResolveRecordsService'
 import { getRecordsForPrimaryKeys } from './lib/db'
 import { importHooks } from './lib/hooks'
 import { sleep } from './lib/utils/time'
-import { unique, stringify } from './lib/utils/formatters'
+import { unique, stringify, mapBy } from './lib/utils/formatters'
 import chalk from 'chalk'
+import { hash } from './lib/utils/hash'
 import { tablesMeta } from './lib/db/tablesMeta'
 import { db } from './lib/db'
 import { getSpecTriggers, createTrigger, maybeDropTrigger } from './lib/db/triggers'
 import { importHandlers, getHandlers, CUSTOM_EVENT_HANDLER_KEY } from './lib/handlers'
+import { subtractMinutes } from './lib/utils/time'
 
 class Spec {
     liveObjects: { [key: string]: LiveObject } = {}
@@ -58,6 +62,8 @@ class Spec {
     reorgSubs: { [key: string]: ReorgSub } = {}
 
     customEventHandlers: { [key: string]: any } = {}
+
+    cleanupOpsJob: any = null
 
     saveEventCursorsJob: any = null
 
@@ -133,6 +139,7 @@ class Spec {
             this._upsertOpTrackingTriggers(),
             this._upsertOpTrackingEntries(),
         ])
+        this._upsertCleanupOpsJob()
         
         // Upsert live columns listed in the config and start seeding new ones.
         if (Object.keys(this.liveObjects).length) {
@@ -163,7 +170,7 @@ class Spec {
 
         // Start saving event cursors on an interval (+ save immediately).
         this._saveEventCursors()
-        this._createSaveCursorsJobIfNotExists()
+        this._upsertSaveCursorsJob()
         this._doneProcessingNewConfig()
     }
 
@@ -171,13 +178,46 @@ class Spec {
         // Ensure we're actually subscribed to this event.
         const sub = this.eventSubs[event.name]
         if (!sub) {
-            logger.error(`Got event for ${event.name} without subscription...something's wrong.`)
+            logger.error(chalk.redBright(
+                `Got event for ${event.name} without subscription...something's wrong.`
+            ))
             return
         }
 
-        const hasCustomEventHandler = this.customEventHandlers.hasOwnProperty(event.name)
+        // Detect & fill in any gaps in events by hashing ids in series.
+        const currentLastValue = { ...(sub.last || {}) }
+        const gapDetected = currentLastValue.id && hash(currentLastValue.id) !== event.id
+        const newLastValue = { 
+            id: event.id, 
+            nonce: event.nonce, 
+            name: event.name, 
+            timestamp: event.origin.eventTimestamp,
+            blockNumber: event.origin.blockNumber,
+        }
+        if (gapDetected && !sub.isGapFilling) {
+            this.eventSubs[event.name].isGapFilling = true
+            this.eventSubs[event.name].shouldBuffer = true
+            this.eventSubs[event.name].last = newLastValue
+            logger.warn(chalk.magenta(
+                `Gap in "${event.name}" detected [${currentLastValue.blockNumber} -> ${newLastValue.blockNumber}]\n` +
+                `Patching from ${currentLastValue.id}...`
+            ))
+            await this._fetchEventsAfter(currentLastValue)
+            await this._processAllBufferedEvents([event.name])
+            return
+        }
+
+        if (sub.isGapFilling && !options.forceToBuffer) {
+            // New events coming while actively filling gaps but that aren't 
+            // associated with the gap. Guards against potential race condition.
+            this.eventSubs[event.name].setToLastAfterFillingGaps = newLastValue
+        }
+        else {
+            this.eventSubs[event.name].last = newLastValue
+        }
 
         // Ensure at least one live object (or custom handler) will process this event.
+        const hasCustomEventHandler = this.customEventHandlers.hasOwnProperty(event.name)
         const liveObjectIdsThatWillProcessEvent = (sub.liveObjectIds || []).filter(
             (liveObjectId) => !this.liveObjectsToIgnoreEventsFrom.has(liveObjectId)
         )
@@ -200,23 +240,27 @@ class Spec {
             return
         }
 
-        await this._processEvent(event)
-        this._updateEventCursor(event)
+        await this._processEvent(event) && this._updateEventCursor(event)
     }
 
-    async _processEvent(event: SpecEvent) {
+    async _processEvent(event: SpecEvent): Promise<boolean> {
+        // Ignore invalid events associated with any since-fixed reorgs.
+        if ((event.origin as StringKeyMap).invalid) return false
+
         // Get sub for event.
         const sub = this.eventSubs[event.name]
         if (!sub) {
             logger.error(
                 `Processing event for ${event.name} without subscription...something's wrong.`
             )
-            return
+            return false
         }
 
         // Apply the event to each live object that depends on it.
         let processedEvent = false
-        for (const liveObjectId of sub.liveObjectIds || []) {
+        let allTablesFrozen = true
+        const liveObjectIds = sub.liveObjectIds || []
+        for (const liveObjectId of liveObjectIds) {
             if (this.liveObjectsToIgnoreEventsFrom.has(liveObjectId)) continue
 
             const liveObject = this.liveObjects[liveObjectId]
@@ -226,6 +270,9 @@ class Spec {
             try {
                 const service = new ApplyEventService(event, liveObject)
                 await service.perform()
+                if (!service.allTablesFrozen) {
+                    allTablesFrozen = false
+                }
             } catch (err) {
                 logger.error(
                     `Failed to apply event to live object - (event=${event.name}; ` +
@@ -251,10 +298,17 @@ class Spec {
                 logger.error(`Custom handler for ${event.name} failed: ${err?.message || err}`)
             }
         }
+
+        const shouldRegisterWithCursor = 
+            !liveObjectIds.length || 
+            !processedEvent || 
+            !allTablesFrozen
+
+        return shouldRegisterWithCursor
     }
 
     async _onReorg(event: ReorgEvent) {
-        // Ensure we're actually subscribed to chain's reorgs.
+        // Ensure we're actually subscribed to a chain's reorgs.
         if (!this.reorgSubs[event.chainId]) {
             logger.error(`Got reorg event for chain ${event.chainId} without subscription...something's wrong.`)
             return
@@ -294,14 +348,16 @@ class Spec {
         // Process any events still in the buffer that came before the reorg event.
         for (const eventName in this.eventSubs) {
             await this._sortEventBuffer(eventName)
-            let event
+            let event, eventToUpdateCursorWith
             while (this.eventSubs[eventName].buffer.length) {
                 const eventTsDate = new Date(this.eventSubs[eventName].buffer[0].origin.eventTimestamp)
                 if (eventTsDate > rollbackEventTsDate) break
                 event = this.eventSubs[eventName].buffer.shift()
-                await this._processEvent(event)
+                if (await this._processEvent(event)) {
+                    eventToUpdateCursorWith = event
+                }
             }
-            event && this._updateEventCursor(event)
+            eventToUpdateCursorWith && this._updateEventCursor(eventToUpdateCursorWith)
         }
 
         // Roll records back to their latest valid snapshot.
@@ -322,7 +378,12 @@ class Spec {
         // Mark as done and process any new events 
         // received while the reorg was running.
         this.reorgSubs[chainId].isProcessing = false
-        await this._processAllBufferedEvents()
+        const eventsNotFillingGaps = []
+        for (const eventName in this.eventSubs) {
+            if (this.eventSubs[eventName].isGapFilling) continue
+            eventsNotFillingGaps.push(eventName)
+        }
+        await this._processAllBufferedEvents(eventsNotFillingGaps)
     }
 
     async _getLiveObjectsInConfig() {
@@ -381,6 +442,9 @@ class Spec {
                 cursorChanged: false,
                 shouldBuffer: true,
                 buffer: [],
+                last: null,
+                isGapFilling: false,
+                setToLastAfterFillingGaps: null
             }
 
             newEventNames.push(newEventName)
@@ -402,6 +466,9 @@ class Spec {
                 cursorChanged: false,
                 shouldBuffer: true,
                 buffer: [],
+                last: null,
+                isGapFilling: false,
+                setToLastAfterFillingGaps: null
             }
 
             newEventNames.push(eventName)
@@ -434,7 +501,7 @@ class Spec {
         // Get the previous cursors for the new events.
         const cursors = []
         const eventNamesToBuffer = []
-        for (let newEventName of newEventNames) {
+        for (const newEventName of newEventNames) {
             const cursor = this.eventSubs[newEventName].cursor
             if (!cursor) continue
             cursors.push(cursor)
@@ -444,12 +511,12 @@ class Spec {
 
         eventNamesToBuffer.forEach(eventName => {
             this.eventSubs[eventName].shouldBuffer = true
+            this.eventSubs[eventName].isGapFilling = true
         })
 
         logger.info('Fetching any missed events...')
 
         return new Promise(async (res, _) => {
-            // Fetch any events that came after the following cursors.
             try {
                 const promises = []
                 await messageClient.fetchMissedEvents(cursors,
@@ -465,6 +532,36 @@ class Spec {
                     async () => {
                         await Promise.all(promises)
                         logger.info(chalk.cyanBright(`Events in sync.`))
+                        res(null)
+                    }
+                )
+            } catch (error) {
+                logger.error(error)
+                res(null)
+                return
+            }
+        })
+    }
+
+    // TODO: Consolidate with above.
+    async _fetchEventsAfter(cursor: StringKeyMap) {
+        return new Promise(async (res, _) => {
+            try {
+                const promises = []
+                let i = 0
+                await messageClient.fetchMissedEvents([cursor as EventCursor],
+                    async (events: SpecEvent[]) => {
+                        const handleEvents = async () => {
+                            i += events.length
+                            for (const event of events) {
+                                await this._onEvent(event, { forceToBuffer: true })
+                            }    
+                        }
+                        promises.push(handleEvents())
+                    },
+                    async () => {
+                        logger.info(chalk.cyanBright(`Patched event gap with ${i} events.`))
+                        await Promise.all(promises)
                         res(null)
                     }
                 )
@@ -798,7 +895,7 @@ class Spec {
         })
 
         // Create a job that checks and retries failed seeds on an interval.
-        this._createRetrySeedCursorsJobIfNotExists()
+        this._upsertRetrySeedCursorsJob()
     }
 
     async _runSeedJobs(jobs: StringKeyMap) {
@@ -996,7 +1093,7 @@ class Spec {
 
         // Start saving event cursors on an interval (+ save immediately).
         this._saveEventCursors(newEventNames)
-        this._createSaveCursorsJobIfNotExists()
+        this._upsertSaveCursorsJob()
     }
 
     async _processAllBufferedEvents(eventNamesFilter?: string[]) {
@@ -1014,16 +1111,32 @@ class Spec {
         await this._sortEventBuffer(eventName)
 
         // Process each event.
-        let event
+        let event, eventToUpdateCursorWith
         while (this.eventSubs[eventName].buffer.length) {
             event = this.eventSubs[eventName].buffer.shift()
-            await this._processEvent(event)
+            if (await this._processEvent(event)) {
+                eventToUpdateCursorWith = event
+            }
             await sleep(5)
         }
 
-        // Turn buffer off and use the last seen event as the new cursor.
+        const targetLastValue = this.eventSubs[eventName].setToLastAfterFillingGaps
+        const currentLastValue = this.eventSubs[eventName].last
+        if (targetLastValue) {
+            const targetLastTs = new Date(targetLastValue.timestamp)
+            const currentLastTs = currentLastValue ? new Date(currentLastValue.timestamp) : null
+
+            if (!currentLastTs || (currentLastTs && targetLastTs > currentLastTs)) {
+                this.eventSubs[eventName].last = targetLastValue
+            }
+
+            this.eventSubs[eventName].setToLastAfterFillingGaps = null
+        }
+
+        // Update cursors and re-enable active processing.
         this.eventSubs[eventName].shouldBuffer = false
-        event && this._updateEventCursor(event)
+        this.eventSubs[eventName].isGapFilling = false        
+        eventToUpdateCursorWith && this._updateEventCursor(eventToUpdateCursorWith)
     }
 
     _applyReorgToEventBuffer(reorgEvent: ReorgEvent) {
@@ -1055,8 +1168,9 @@ class Spec {
                 const buffer = this.eventSubs[eventName].buffer
                 if (!buffer.length) break
 
-                // Sort buffer by nonce (smallest first).
-                const sortedBuffer = [...buffer].sort((a, b) => {
+                // Dedupe and sort the buffer oldest to newest.
+                const deduped = Object.values(mapBy([...buffer], 'id'))
+                const sortedBuffer = deduped.sort((a, b) => {
                     return (
                         parseFloat(a.nonce.replace('-', '.')) -
                         parseFloat(b.nonce.replace('-', '.'))
@@ -1205,13 +1319,23 @@ class Spec {
         this.isProcessingNewConfig = false
     }
 
-    _createSaveCursorsJobIfNotExists() {
+    _upsertCleanupOpsJob() {
+        this.cleanupOpsJob =
+            this.cleanupOpsJob ||
+            setInterval(() => {
+                deleteOpsOlderThan(
+                    subtractMinutes(new Date(), constants.CLEANUP_OPS_OLDER_THAN)
+                )
+            }, constants.CLEANUP_OPS_INTERVAL)
+    }
+
+    _upsertSaveCursorsJob() {
         this.saveEventCursorsJob =
             this.saveEventCursorsJob ||
             setInterval(() => this._saveEventCursors(), constants.SAVE_EVENT_CURSORS_INTERVAL)
     }
 
-    _createRetrySeedCursorsJobIfNotExists() {
+    _upsertRetrySeedCursorsJob() {
         this.retrySeedCursorsJob =
             this.retrySeedCursorsJob ||
             setInterval(() => this._retrySeedCursors(), constants.RETRY_SEED_CURSORS_INTERVAL)

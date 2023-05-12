@@ -179,3 +179,8 @@ export const toChunks = (arr: any, chunkSize: number): any[][] => {
     }
     return result
 }
+
+export const padDateNumber = (value: number): string => {
+    const asString = value.toString()
+    return asString.length < 2 ? `0${asString}` : asString
+}

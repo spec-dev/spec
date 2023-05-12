@@ -91,6 +91,15 @@ export const constants: StringKeyMap = {
     // Batch size to use when rolling back records to a previous state.
     ROLLBACK_BATCH_SIZE: Number(ev('ROLLBACK_BATCH_SIZE', 2000)),
 
+    // The number of blocks below the most recent block for 
+    // a given chain to allow op-tracking for during a seed.
+    OP_TRACKING_FLOOR_OFFSET: Number(ev('OP_TRACKING_FLOOR_OFFSET', 10)),
+    
+    // Number of minutes of op-tracking data to keep and 
+    /// the frequency with which to run the cleanup job.
+    CLEANUP_OPS_OLDER_THAN: Number(ev('CLEANUP_OPS_OLDER_THAN', 30)), // 30 minutes
+    CLEANUP_OPS_INTERVAL: Number(ev('CLEANUP_OPS_INTERVAL', 300000)), // 5 minutes
+
     // Threshold required to switch from individual update operations to a bulk update operation.
     MAX_UPDATES_BEFORE_BULK_UPDATE_USED: Number(ev('MAX_UPDATES_BEFORE_BULK_UPDATE_USED', 10)),
 

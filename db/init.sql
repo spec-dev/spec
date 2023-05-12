@@ -167,7 +167,7 @@ BEGIN
     EXECUTE format('SELECT is_enabled_above from spec.op_tracking where table_path = $1 and chain_id = $2')
         INTO block_number_floor
         USING table_path, chain_id::TEXT;
-    IF block_number < block_number_floor THEN
+    IF (block_number_floor IS NULL or block_number < block_number_floor) THEN
         RETURN rec;
     END IF;
 
@@ -286,4 +286,5 @@ create table spec.frozen_tables (
 );
 comment on table spec.frozen_tables is 'Spec: Live tables actively ignoring new updates.';
 create unique index idx_frozen_table_chain on spec.frozen_tables(table_path, chain_id); 
+create index idx_frozen_tables_by_chain on spec.frozen_tables(chain_id); 
 alter table spec.frozen_tables owner to spec;

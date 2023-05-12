@@ -1,7 +1,8 @@
 import { schema } from '..'
 import { OPS_TABLE_NAME, SPEC_SCHEMA_NAME } from './names'
 import { OpRecord } from '../../types'
-import { camelizeKeys } from 'humps'
+import logger from '../../logger'
+import { formatPgDateString } from '../../utils/time'
 
 const ops = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(OPS_TABLE_NAME)
 
@@ -9,7 +10,7 @@ export async function getDistinctRecordsOperatedOnAtOrAboveBlockNumber(
     blockNumber: number,
     chainId: string,
 ): Promise<OpRecord[]> {
-    return camelizeKeys(await ops()
+    return await ops()
         .distinctOn(['table_path', 'pk_values'])
         .where('block_number', '>=', blockNumber)
         .andWhere('chain_id', chainId)
@@ -19,7 +20,6 @@ export async function getDistinctRecordsOperatedOnAtOrAboveBlockNumber(
             { column: 'block_number', order: 'asc' },
             { column: 'ts', order: 'asc' },
         ])
-    )
 }
 
 export async function deleteTableOpsAtOrAboveNumber(
@@ -33,4 +33,17 @@ export async function deleteTableOpsAtOrAboveNumber(
         .andWhere('block_number', '>=', blockNumber)
         .andWhere('chain_id', chainId)
         .del()
+}
+
+export async function deleteOpsOlderThan(date: Date) {
+    const timestamp = formatPgDateString(date, false)
+    try {
+        await ops()
+            .whereRaw(`timezone('UTC', ts) < ?`, [timestamp])
+            .del()
+    } catch (err) {
+        logger.error(
+            `Error deleting ops older than ${timestamp}: ${err}`
+        )
+    }
 }
