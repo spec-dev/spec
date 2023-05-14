@@ -298,11 +298,11 @@ class RollbackService {
             stats.push([tablePath, recordsAffected.length])
         }
         if (!stats.length) {
-            logger.info(chalk.magenta(`[${this.chainId}:${this.blockNumber}] No records to roll back.`))
+            logger.info(chalk.magenta(`[${this.chainId}] No records to roll back.`))
             return false 
         }
         logger.info(chalk.magenta(
-            `[${this.chainId}:${this.blockNumber}] Rolling back ${total} records across ${stats.length} table(s):`
+            `[${this.chainId}] Rolling back ${total} records across ${stats.length} table(s):`
         ))
         return true
     }

@@ -318,8 +318,8 @@ class Spec {
         // Confirm this reorg actually occurred.
         const isValid = await messageClient.validateReorg(event)
         if (!isValid) {
-            this.reorgSubs[event.chainId].buffer = this.reorgSubs[event.chainId].buffer.filter(e => 
-                e.id !== event.id
+            this.reorgSubs[event.chainId].buffer = this.reorgSubs[event.chainId].buffer.filter(
+                e => e.id !== event.id
             )
             return
         }
