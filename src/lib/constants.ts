@@ -63,7 +63,9 @@ export const constants: StringKeyMap = {
     ANALYZE_TABLES_INTERVAL: Number(ev('ANALYZE_TABLES_INTERVAL', 30000)),
 
     // Batch size to upsert with once a new batch of streaming query request data is available.
-    POLL_HEADS_DURING_LONG_RUNNING_SEEDS_INTERVAL: Number(ev('POLL_HEADS_DURING_LONG_RUNNING_SEEDS_INTERVAL', 10000)),
+    POLL_HEADS_DURING_LONG_RUNNING_SEEDS_INTERVAL: Number(
+        ev('POLL_HEADS_DURING_LONG_RUNNING_SEEDS_INTERVAL', 10000)
+    ),
 
     // When a seed/backfill fails, the interval to wait before retrying
     // and the max number of times to retry.
@@ -82,7 +84,7 @@ export const constants: StringKeyMap = {
     // The column name to use to track the last time any table was updated (if it exists).
     TABLE_SUB_UPDATED_AT_COL_NAME: ev('TABLE_SUB_UPDATED_AT_COL_NAME', 'updated_at'),
 
-    // Postgres trigger function name for tracking record operations. 
+    // Postgres trigger function name for tracking record operations.
     TRACK_OPS_FUNCTION_NAME: 'spec_track_ops',
 
     // Event name prefix for chain reorgs.
@@ -91,11 +93,11 @@ export const constants: StringKeyMap = {
     // Batch size to use when rolling back records to a previous state.
     ROLLBACK_BATCH_SIZE: Number(ev('ROLLBACK_BATCH_SIZE', 2000)),
 
-    // The number of blocks below the most recent block for 
+    // The number of blocks below the most recent block for
     // a given chain to allow op-tracking for during a seed.
     OP_TRACKING_FLOOR_OFFSET: Number(ev('OP_TRACKING_FLOOR_OFFSET', 10)),
-    
-    // Number of minutes of op-tracking data to keep and 
+
+    // Number of minutes of op-tracking data to keep and
     /// the frequency with which to run the cleanup job.
     CLEANUP_OPS_OLDER_THAN: Number(ev('CLEANUP_OPS_OLDER_THAN', 30)), // 30 minutes
     CLEANUP_OPS_INTERVAL: Number(ev('CLEANUP_OPS_INTERVAL', 300000)), // 5 minutes
@@ -123,7 +125,7 @@ export const constants: StringKeyMap = {
 
     // Special live object properties.
     CHAIN_ID_PROPERTY: 'chainId',
-    BLOCK_NUMBER_PROPERTY: 'blockNumber', 
+    BLOCK_NUMBER_PROPERTY: 'blockNumber',
 }
 
 constants.PROJECT_CONFIG_PATH = path.join(

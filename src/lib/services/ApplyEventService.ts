@@ -48,10 +48,11 @@ class ApplyEventService {
         // implemented property keys included in the diff structure).
         this.linksToApplyDiffsTo = await this._getLinksToApplyDiffTo(chainId)
         if (!this.linksToApplyDiffsTo.length) {
-            this.allTablesFrozen || logger.warn(
-                `Live object diff didn't satisfy any configured links`,
-                JSON.stringify(this.event, null, 4)
-            )
+            this.allTablesFrozen ||
+                logger.warn(
+                    `Live object diff didn't satisfy any configured links`,
+                    JSON.stringify(this.event, null, 4)
+                )
             return
         }
 
@@ -61,14 +62,16 @@ class ApplyEventService {
 
     async _getLinksToApplyDiffTo(chainId: string): Promise<EnrichedLink[]> {
         const frozenTablePaths = new Set(
-            (await getFrozenTablesForChainId(chainId)).map(r => r.tablePath)
+            (await getFrozenTablesForChainId(chainId)).map((r) => r.tablePath)
         )
         const linksToApplyDiffsTo = []
         for (const link of this.links) {
             if (frozenTablePaths.has(link.table)) {
-                logger.info(chalk.yellow(
-                    `Not applying event to "${link.table}" -- table is frozen for chain ${chainId}.`
-                ))
+                logger.info(
+                    chalk.yellow(
+                        `Not applying event to "${link.table}" -- table is frozen for chain ${chainId}.`
+                    )
+                )
                 if (this.links.length === 1) {
                     this.allTablesFrozen = true
                 }

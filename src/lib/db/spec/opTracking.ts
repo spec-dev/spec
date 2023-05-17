@@ -6,14 +6,11 @@ import { StringKeyMap } from '../../types'
 
 const opTrackingTable = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(OP_TRACKING_TABLE_NAME)
 
-const CONFLICT_COLUMNS = [
-    'table_path',
-    'chain_id',
-]
+const CONFLICT_COLUMNS = ['table_path', 'chain_id']
 
 export async function upsertOpTrackingEntries(
     entries: StringKeyMap[],
-    overwrite: boolean = true,
+    overwrite: boolean = true
 ): Promise<boolean> {
     try {
         const query = opTrackingTable().insert(decamelizeKeys(entries))

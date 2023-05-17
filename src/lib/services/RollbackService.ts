@@ -6,7 +6,7 @@ import { stringify, toChunks, sum } from '../utils/formatters'
 import { sleep } from '../utils/time'
 import { randomIntegerInRange } from '../utils/math'
 import { constants } from '../constants'
-import { 
+import {
     getDistinctRecordsOperatedOnAtOrAboveBlockNumber,
     upsertOpTrackingEntries,
     deleteTableOpsAtOrAboveNumber,
@@ -14,7 +14,6 @@ import {
 } from '../db/spec'
 
 class RollbackService {
-
     blockNumber: number
 
     chainId: string
@@ -41,7 +40,7 @@ class RollbackService {
         if (!needToRollback) return
 
         // Set the new "floor" for ops to be tracked at or above (block number).
-        const opTrackingUpserts = this.tablePaths.map(tablePath => ({
+        const opTrackingUpserts = this.tablePaths.map((tablePath) => ({
             tablePath,
             chainId: this.chainId,
             isEnabledAbove: this.blockNumber,
@@ -60,7 +59,7 @@ class RollbackService {
         try {
             opRecords = await getDistinctRecordsOperatedOnAtOrAboveBlockNumber(
                 this.blockNumber,
-                this.chainId,
+                this.chainId
             )
         } catch (err) {
             throw `[${this.chainId}] Failed getting ops >= ${this.blockNumber}: ${err}`
@@ -68,23 +67,24 @@ class RollbackService {
 
         // Group by table path.
         for (const record of opRecords) {
-            this.recordSnapshotOps[record.table_path] = this.recordSnapshotOps[record.table_path] || []
+            this.recordSnapshotOps[record.table_path] =
+                this.recordSnapshotOps[record.table_path] || []
             this.recordSnapshotOps[record.table_path].push(record)
         }
     }
 
     async _rollbackRecords() {
-        await Promise.all(this.tablePaths.map(tablePath => (
-            this._rollbackRecordsForTable(tablePath)
-        )))
+        await Promise.all(
+            this.tablePaths.map((tablePath) => this._rollbackRecordsForTable(tablePath))
+        )
     }
 
     async _rollbackRecordsForTable(tablePath: string) {
         // Group op records by their rollback operation.
         const opRecords = this.recordSnapshotOps[tablePath]
         const [upsertGroups, deleteGroups] = this._getBatchRollbackOperations(tablePath, opRecords)
-        const numUpserts = sum(upsertGroups.map(r => r.length))
-        const numDeletes = sum(deleteGroups.map(r => r.length))
+        const numUpserts = sum(upsertGroups.map((r) => r.length))
+        const numDeletes = sum(deleteGroups.map((r) => r.length))
         logger.info(chalk.magenta(`- ${tablePath} | Upserts=${numUpserts} | Deletes=${numDeletes}`))
 
         let attempt = 1
@@ -93,19 +93,31 @@ class RollbackService {
                 await db.transaction(async (tx) => {
                     // Rollback records.
                     await Promise.all([
-                        ...upsertGroups.map(records => this._rollbackRecordsWithUpsertion(tablePath, records, tx)),
-                        ...deleteGroups.map(records => this._rollbackRecordsWithDeletion(tablePath, records, tx)),
+                        ...upsertGroups.map((records) =>
+                            this._rollbackRecordsWithUpsertion(tablePath, records, tx)
+                        ),
+                        ...deleteGroups.map((records) =>
+                            this._rollbackRecordsWithDeletion(tablePath, records, tx)
+                        ),
                     ])
-    
+
                     // Remove ops for this table at or above the target block number.
-                    await deleteTableOpsAtOrAboveNumber(tablePath, this.blockNumber, this.chainId, tx)
+                    await deleteTableOpsAtOrAboveNumber(
+                        tablePath,
+                        this.blockNumber,
+                        this.chainId,
+                        tx
+                    )
                 })
                 break
             } catch (err) {
                 attempt++
-                logger.error(`[${this.chainId}] Error rolling back ${tablePath} >= ${this.blockNumber}`, err)
+                logger.error(
+                    `[${this.chainId}] Error rolling back ${tablePath} >= ${this.blockNumber}`,
+                    err
+                )
                 const message = err.message || err.toString() || ''
-            
+
                 // Wait and try again if deadlocked.
                 if (message.toLowerCase().includes('deadlock')) {
                     logger.error(
@@ -122,14 +134,10 @@ class RollbackService {
                 await freezeTablesForChainId(tablePath, this.chainId)
                 break
             }
-        }    
+        }
     }
 
-    async _rollbackRecordsWithUpsertion(
-        tablePath: string,
-        opRecords: OpRecord[],
-        tx: any,
-    ) {
+    async _rollbackRecordsWithUpsertion(tablePath: string, opRecords: OpRecord[], tx: any) {
         const [schemaName, tableName] = tablePath.split('.')
         const rollbackGroups = this._groupUpsertOpsByRecordStructure(opRecords)
         const promises = []
@@ -138,11 +146,7 @@ class RollbackService {
             const upsertOps = rollbackGroups[key]
             const { conflictColNames, updateColNames, columns, upsert } = upsertOps[0]
             const placeholders = []
-            const bindings = [
-                schemaName,
-                tableName,
-                ...columns,
-            ]
+            const bindings = [schemaName, tableName, ...columns]
 
             for (const { values } of upsertOps) {
                 const recordPlaceholders = []
@@ -153,8 +157,10 @@ class RollbackService {
                 placeholders.push(`(${recordPlaceholders.join(', ')})`)
             }
 
-            let query = `insert into ??.?? (${columns.map(() => '??').join(', ')}) values ${placeholders.join(', ')}`
-    
+            let query = `insert into ??.?? (${columns
+                .map(() => '??')
+                .join(', ')}) values ${placeholders.join(', ')}`
+
             if (upsert) {
                 bindings.push(...conflictColNames)
                 const updateClause = []
@@ -162,27 +168,25 @@ class RollbackService {
                     bindings.push(...[colName, colName])
                     updateClause.push(`?? = excluded.??`)
                 }
-                query += ` on conflict (${conflictColNames.map(() => '??').join(', ')}) do update set ${updateClause.join(', ')}`
+                query += ` on conflict (${conflictColNames
+                    .map(() => '??')
+                    .join(', ')}) do update set ${updateClause.join(', ')}`
             }
-         
+
             promises.push(tx.raw(query, bindings))
         }
 
         await Promise.all(promises)
     }
 
-    async _rollbackRecordsWithDeletion(
-        tablePath: string,
-        opRecords: OpRecord[],
-        tx: any,
-    ) {
+    async _rollbackRecordsWithDeletion(tablePath: string, opRecords: OpRecord[], tx: any) {
         const [schemaName, tableName] = tablePath.split('.')
         const orClauses = []
         const bindings = [schemaName, tableName]
 
         for (const opRecord of opRecords) {
-            const pkNames = opRecord.pk_names.split(',').map(name => name.trim())
-            const pkValues = opRecord.pk_values.split(',').map(value => value.trim())
+            const pkNames = opRecord.pk_names.split(',').map((name) => name.trim())
+            const pkValues = opRecord.pk_values.split(',').map((value) => value.trim())
             const andClauses = []
             for (let j = 0; j < pkNames.length; j++) {
                 andClauses.push(`?? = ?`)
@@ -197,15 +201,15 @@ class RollbackService {
     }
 
     /**
-     * Group these table ops by their table/record "structure" to handle 
-     * the case where the table schema has actually changed. 
+     * Group these table ops by their table/record "structure" to handle
+     * the case where the table schema has actually changed.
      */
     _groupUpsertOpsByRecordStructure(opRecords: OpRecord[]): StringKeyMap {
         const rollbackGroups = {}
         for (const opRecord of opRecords) {
-            const conflictColNames = opRecord.pk_names.split(',').map(name => name.trim())
+            const conflictColNames = opRecord.pk_names.split(',').map((name) => name.trim())
             const conflictColNamesSet = new Set(conflictColNames)
-            const conflictColValues = opRecord.pk_values.split(',').map(value => value.trim())
+            const conflictColValues = opRecord.pk_values.split(',').map((value) => value.trim())
             const updateColNames = []
             const updateColValues = []
             const sortedRecordKeys = Object.keys(opRecord.before).sort()
@@ -215,7 +219,7 @@ class RollbackService {
                 updateColNames.push(colName)
                 updateColValues.push(opRecord.before[colName])
             }
-    
+
             const uniqueKey = ['c', ...conflictColNames, 'u', ...updateColNames].join(':')
             rollbackGroups[uniqueKey] = rollbackGroups[uniqueKey] || []
             rollbackGroups[uniqueKey].push({
@@ -230,10 +234,7 @@ class RollbackService {
         return rollbackGroups
     }
 
-    _getBatchRollbackOperations(
-        tablePath: string,
-        opRecords: OpRecord[],
-    ) {
+    _getBatchRollbackOperations(tablePath: string, opRecords: OpRecord[]) {
         const upserts = []
         const deletes = []
         for (const record of opRecords) {
@@ -244,9 +245,7 @@ class RollbackService {
                 )
                 continue
             }
-            const reverseOpType = this._getReverseOpType(
-                this._determineOpTypeFromRecord(record)
-            )
+            const reverseOpType = this._getReverseOpType(this._determineOpTypeFromRecord(record))
             switch (reverseOpType) {
                 case OpType.Insert:
                 case OpType.Update:
@@ -257,18 +256,18 @@ class RollbackService {
                     break
             }
         }
-    
+
         // Split into reasonable-sized batches.
         const upsertGroups = toChunks(upserts, constants.ROLLBACK_BATCH_SIZE) as OpRecord[][]
         const deleteGroups = toChunks(deletes, constants.ROLLBACK_BATCH_SIZE) as OpRecord[][]
-        
+
         return [upsertGroups, deleteGroups]
     }
 
     _determineOpTypeFromRecord(opRecord: OpRecord): OpType {
         const existedBefore = !!opRecord.before
         const existedAfter = !!opRecord.after
-        
+
         if (!existedBefore) {
             return OpType.Insert
         }
@@ -286,7 +285,7 @@ class RollbackService {
             return OpType.Insert
         }
         return OpType.Update
-    } 
+    }
 
     _logTablesAffectedByRollback(): boolean {
         const stats = []
@@ -299,11 +298,13 @@ class RollbackService {
         }
         if (!stats.length) {
             logger.info(chalk.magenta(`[${this.chainId}] No records to roll back.`))
-            return false 
+            return false
         }
-        logger.info(chalk.magenta(
-            `[${this.chainId}] Rolling back ${total} records across ${stats.length} table(s):`
-        ))
+        logger.info(
+            chalk.magenta(
+                `[${this.chainId}] Rolling back ${total} records across ${stats.length} table(s):`
+            )
+        )
         return true
     }
 }

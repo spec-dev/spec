@@ -3,12 +3,13 @@ import { OPS_TABLE_NAME, SPEC_SCHEMA_NAME } from './names'
 import { OpRecord } from '../../types'
 import logger from '../../logger'
 import { formatPgDateString } from '../../utils/time'
+import chalk from 'chalk'
 
 const ops = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(OPS_TABLE_NAME)
 
 export async function getDistinctRecordsOperatedOnAtOrAboveBlockNumber(
     blockNumber: number,
-    chainId: string,
+    chainId: string
 ): Promise<OpRecord[]> {
     return await ops()
         .distinctOn(['table_path', 'pk_values'])
@@ -37,14 +38,10 @@ export async function deleteTableOpsAtOrAboveNumber(
 
 export async function deleteOpsOlderThan(date: Date) {
     const timestamp = formatPgDateString(date, false)
-    logger.info(`Deleting ops older than ${timestamp}...`)
+    logger.info(chalk.gray(`Deleting ops older than ${timestamp}...`))
     try {
-        await ops()
-            .whereRaw(`timezone('UTC', ts) < ?`, [timestamp])
-            .del()
+        await ops().whereRaw(`timezone('UTC', ts) < ?`, [timestamp]).del()
     } catch (err) {
-        logger.error(
-            `Error deleting ops older than ${timestamp}: ${err}`
-        )
+        logger.error(`Error deleting ops older than ${timestamp}: ${err}`)
     }
 }

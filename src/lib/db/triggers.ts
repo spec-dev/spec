@@ -1,6 +1,13 @@
 import logger from '../logger'
 import { db } from './index'
-import { Trigger, TriggerEvent, TriggerProcedure, StringKeyMap, StringMap, LiveObject } from '../types'
+import {
+    Trigger,
+    TriggerEvent,
+    TriggerProcedure,
+    StringKeyMap,
+    StringMap,
+    LiveObject,
+} from '../types'
 import { constants } from '../constants'
 import { tablesMeta } from './tablesMeta'
 import { hash } from '../utils/hash'
@@ -41,7 +48,7 @@ export function formatTriggerName(
     table: string,
     event: TriggerEvent,
     procedure: TriggerProcedure,
-    primaryKeys: string[],
+    primaryKeys: string[]
 ): string {
     let prefix = ''
     switch (procedure) {
@@ -88,11 +95,11 @@ export async function getSpecTriggers(procedure: TriggerProcedure): Promise<Trig
 }
 
 export async function createTrigger(
-    schema: string, 
-    table: string, 
+    schema: string,
+    table: string,
     event: TriggerEvent,
     procedure: TriggerProcedure,
-    liveObjects?: { [key: string]: LiveObject },
+    liveObjects?: { [key: string]: LiveObject }
 ) {
     const tablePath = [schema, table].join('.')
 
@@ -113,9 +120,9 @@ export async function createTrigger(
         procedureArgs = primaryKeys
     }
     // Op-tracking trigger.
-    else if (procedure === TriggerProcedure.TrackOps) {   
+    else if (procedure === TriggerProcedure.TrackOps) {
         const tableChainInfo = config.getChainInfoForTable(tablePath, liveObjects)
-        if (!tableChainInfo) throw `Invalid chain info for table: ${tablePath}`  
+        if (!tableChainInfo) throw `Invalid chain info for table: ${tablePath}`
         procedureName = constants.TRACK_OPS_FUNCTION_NAME
         procedureArgs = [
             tableChainInfo.defaultChainId || '',
@@ -123,8 +130,7 @@ export async function createTrigger(
             tableChainInfo.blockNumberColName,
             ...primaryKeys,
         ]
-    }
-    else {
+    } else {
         throw `Unknown procedure ${procedure}`
     }
 
@@ -132,7 +138,9 @@ export async function createTrigger(
 
     await db.raw(
         `CREATE TRIGGER ${triggerName} AFTER ${event} ON ${identPath(tablePath)}
-        FOR EACH ROW EXECUTE PROCEDURE ${procedureName}(${procedureArgs.map((arg) => `'${arg}'`).join(', ')})`
+        FOR EACH ROW EXECUTE PROCEDURE ${procedureName}(${procedureArgs
+            .map((arg) => `'${arg}'`)
+            .join(', ')})`
     )
 }
 
@@ -143,14 +151,14 @@ export async function maybeDropTrigger(
     procedure: TriggerProcedure,
     primaryKeyColumnNames: string[]
 ): Promise<boolean> {
-    // If the trigger name is different, it means the table's 
+    // If the trigger name is different, it means the table's
     // primary keys must have changed, so drop the existing trigger.
     const expectedTriggerName = formatTriggerName(
         schema,
         table,
         trigger.event,
         procedure,
-        primaryKeyColumnNames,
+        primaryKeyColumnNames
     )
     if (expectedTriggerName && trigger.name !== expectedTriggerName) {
         try {

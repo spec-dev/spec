@@ -135,12 +135,9 @@ class Spec {
         await this._getLiveObjectsInConfig()
 
         // Kick start op-tracking.
-        await Promise.all([
-            this._upsertOpTrackingTriggers(),
-            this._upsertOpTrackingEntries(),
-        ])
+        await Promise.all([this._upsertOpTrackingTriggers(), this._upsertOpTrackingEntries()])
         this._upsertCleanupOpsJob()
-        
+
         // Upsert live columns listed in the config and start seeding new ones.
         if (Object.keys(this.liveObjects).length) {
             await this._upsertAndSeedLiveColumns()
@@ -178,19 +175,21 @@ class Spec {
         // Ensure we're actually subscribed to this event.
         const sub = this.eventSubs[event.name]
         if (!sub) {
-            logger.error(chalk.redBright(
-                `Got event for ${event.name} without subscription...something's wrong.`
-            ))
+            logger.error(
+                chalk.redBright(
+                    `Got event for ${event.name} without subscription...something's wrong.`
+                )
+            )
             return
         }
 
         // Detect & fill in any gaps in events by hashing ids in series.
         const currentLastValue = { ...(sub.last || {}) }
         const gapDetected = currentLastValue.id && hash(currentLastValue.id) !== event.id
-        const newLastValue = { 
-            id: event.id, 
-            nonce: event.nonce, 
-            name: event.name, 
+        const newLastValue = {
+            id: event.id,
+            nonce: event.nonce,
+            name: event.name,
             timestamp: event.origin.eventTimestamp,
             blockNumber: event.origin.blockNumber,
         }
@@ -198,21 +197,22 @@ class Spec {
             this.eventSubs[event.name].isGapFilling = true
             this.eventSubs[event.name].shouldBuffer = true
             this.eventSubs[event.name].last = newLastValue
-            logger.warn(chalk.magenta(
-                `Gap in "${event.name}" detected [${currentLastValue.blockNumber} -> ${newLastValue.blockNumber}]\n` +
-                `Patching from ${currentLastValue.id}...`
-            ))
+            logger.warn(
+                chalk.magenta(
+                    `Gap in "${event.name}" detected [${currentLastValue.blockNumber} -> ${newLastValue.blockNumber}]\n` +
+                        `Patching from ${currentLastValue.id}...`
+                )
+            )
             await this._fetchEventsAfter(currentLastValue)
             await this._processAllBufferedEvents([event.name])
             return
         }
 
         if (sub.isGapFilling && !options.forceToBuffer) {
-            // New events coming while actively filling gaps but that aren't 
+            // New events coming while actively filling gaps but that aren't
             // associated with the gap. Guards against potential race condition.
             this.eventSubs[event.name].setToLastAfterFillingGaps = newLastValue
-        }
-        else {
+        } else {
             this.eventSubs[event.name].last = newLastValue
         }
 
@@ -240,7 +240,7 @@ class Spec {
             return
         }
 
-        await this._processEvent(event) && this._updateEventCursor(event)
+        ;(await this._processEvent(event)) && this._updateEventCursor(event)
     }
 
     async _processEvent(event: SpecEvent): Promise<boolean> {
@@ -299,10 +299,8 @@ class Spec {
             }
         }
 
-        const shouldRegisterWithCursor = 
-            !liveObjectIds.length || 
-            !processedEvent || 
-            !allTablesFrozen
+        const shouldRegisterWithCursor =
+            !liveObjectIds.length || !processedEvent || !allTablesFrozen
 
         return shouldRegisterWithCursor
     }
@@ -310,26 +308,28 @@ class Spec {
     async _onReorg(event: ReorgEvent) {
         // Ensure we're actually subscribed to a chain's reorgs.
         if (!this.reorgSubs[event.chainId]) {
-            logger.error(`Got reorg event for chain ${event.chainId} without subscription...something's wrong.`)
+            logger.error(
+                `Got reorg event for chain ${event.chainId} without subscription...something's wrong.`
+            )
             return
         }
         this.reorgSubs[event.chainId].buffer.push(event)
-        
+
         // Confirm this reorg actually occurred.
         const isValid = await messageClient.validateReorg(event)
         if (!isValid) {
             this.reorgSubs[event.chainId].buffer = this.reorgSubs[event.chainId].buffer.filter(
-                e => e.id !== event.id
+                (e) => e.id !== event.id
             )
             return
         }
 
-        // Force all live object events to buffer 
+        // Force all live object events to buffer
         // so they don't interfere with the reorg.
         this._bufferAllLiveObjectEvents()
         await sleep(100)
 
-        // Remove any events in the event buffer that are associated 
+        // Remove any events in the event buffer that are associated
         // with block numbers >= the reorg rollback target.
         this._applyReorgToEventBuffer(event)
 
@@ -350,7 +350,9 @@ class Spec {
             await this._sortEventBuffer(eventName)
             let event, eventToUpdateCursorWith
             while (this.eventSubs[eventName].buffer.length) {
-                const eventTsDate = new Date(this.eventSubs[eventName].buffer[0].origin.eventTimestamp)
+                const eventTsDate = new Date(
+                    this.eventSubs[eventName].buffer[0].origin.eventTimestamp
+                )
                 if (eventTsDate > rollbackEventTsDate) break
                 event = this.eventSubs[eventName].buffer.shift()
                 if (await this._processEvent(event)) {
@@ -365,7 +367,11 @@ class Spec {
         try {
             await service.perform()
         } catch (err) {
-            logger.error(chalk.redBright(`[${chainId}:${rollbackToBlockNumber}] Reorg failed: ${stringify(err)}`))
+            logger.error(
+                chalk.redBright(
+                    `[${chainId}:${rollbackToBlockNumber}] Reorg failed: ${stringify(err)}`
+                )
+            )
             await freezeTablesForChainId(service.tablePaths, chainId)
         }
 
@@ -375,7 +381,7 @@ class Spec {
             return
         }
 
-        // Mark as done and process any new events 
+        // Mark as done and process any new events
         // received while the reorg was running.
         this.reorgSubs[chainId].isProcessing = false
         const eventsNotFillingGaps = []
@@ -400,15 +406,14 @@ class Spec {
         for (const chainId of chainIds) {
             if (this.reorgSubs.hasOwnProperty(chainId)) continue
 
-            this.reorgSubs[chainId] = { 
-                chainId, 
+            this.reorgSubs[chainId] = {
+                chainId,
                 isProcessing: false,
                 buffer: [],
             }
 
-            messageClient.on(
-                this._formatReorgEventName(chainId), 
-                (event) => this._onReorg(event as unknown as ReorgEvent),
+            messageClient.on(this._formatReorgEventName(chainId), (event) =>
+                this._onReorg(event as unknown as ReorgEvent)
             )
         }
     }
@@ -444,7 +449,7 @@ class Spec {
                 buffer: [],
                 last: null,
                 isGapFilling: false,
-                setToLastAfterFillingGaps: null
+                setToLastAfterFillingGaps: null,
             }
 
             newEventNames.push(newEventName)
@@ -468,7 +473,7 @@ class Spec {
                 buffer: [],
                 last: null,
                 isGapFilling: false,
-                setToLastAfterFillingGaps: null
+                setToLastAfterFillingGaps: null,
             }
 
             newEventNames.push(eventName)
@@ -509,7 +514,7 @@ class Spec {
         }
         if (!cursors.length) return
 
-        eventNamesToBuffer.forEach(eventName => {
+        eventNamesToBuffer.forEach((eventName) => {
             this.eventSubs[eventName].shouldBuffer = true
             this.eventSubs[eventName].isGapFilling = true
         })
@@ -519,13 +524,14 @@ class Spec {
         return new Promise(async (res, _) => {
             try {
                 const promises = []
-                await messageClient.fetchMissedEvents(cursors,
+                await messageClient.fetchMissedEvents(
+                    cursors,
                     async (events: SpecEvent[]) => {
                         const handleEvents = async () => {
                             logger.info(chalk.cyanBright(`Fetched ${events.length} missed events.`))
                             for (const event of events) {
                                 await this._onEvent(event, { forceToBuffer: true })
-                            }    
+                            }
                         }
                         promises.push(handleEvents())
                     },
@@ -549,13 +555,14 @@ class Spec {
             try {
                 const promises = []
                 let i = 0
-                await messageClient.fetchMissedEvents([cursor as EventCursor],
+                await messageClient.fetchMissedEvents(
+                    [cursor as EventCursor],
                     async (events: SpecEvent[]) => {
                         const handleEvents = async () => {
                             i += events.length
                             for (const event of events) {
                                 await this._onEvent(event, { forceToBuffer: true })
-                            }    
+                            }
                         }
                         promises.push(handleEvents())
                     },
@@ -818,7 +825,7 @@ class Spec {
                     seedCursor.metadata,
                     true, // updateOpTrackingFloorAsSeedProgresses
                     liveObjectChainIds,
-                    isReorgActivelyProcessing,
+                    isReorgActivelyProcessing
                 )
 
                 // Determine seed strategy up-front unless already determined
@@ -1005,7 +1012,7 @@ class Spec {
         if (!liveObject) {
             logger.error(
                 `Live object ${liveObjectId} isn't registered anymore - skipping seed cursor in series.`,
-                seedCursor,
+                seedCursor
             )
             // Register success anyway and go to next in series.
             await seedSucceeded(seedCursor.id)
@@ -1018,14 +1025,13 @@ class Spec {
         if (!tableChainInfo) {
             logger.error(
                 `Live object chain info not found - skipping seed cursor in series.`,
-                seedCursor,
+                seedCursor
             )
             // Register success anyway and go to next in series.
             await seedSucceeded(seedCursor.id)
             seedCursor.metadata?.nextId &&
                 this._runNextSeedCursorInSeries(seedCursor.metadata?.nextId)
             return
-
         }
         const { liveObjectChainIds } = tableChainInfo
         const isReorgActivelyProcessing = () => {
@@ -1047,7 +1053,7 @@ class Spec {
                 seedCursor.metadata,
                 true, // updateOpTrackingFloorAsSeedProgresses
                 liveObjectChainIds,
-                isReorgActivelyProcessing,
+                isReorgActivelyProcessing
             )
 
             // Determine seed strategy up-front unless already determined
@@ -1135,7 +1141,7 @@ class Spec {
 
         // Update cursors and re-enable active processing.
         this.eventSubs[eventName].shouldBuffer = false
-        this.eventSubs[eventName].isGapFilling = false        
+        this.eventSubs[eventName].isGapFilling = false
         eventToUpdateCursorWith && this._updateEventCursor(eventToUpdateCursorWith)
     }
 
@@ -1152,13 +1158,16 @@ class Spec {
                 if (event.origin.chainId !== reorgEvent.chainId) continue
                 const eventBlockNumber = Number(event.origin.blockNumber)
                 const eventTsDate = new Date(event.origin.eventTimestamp)
-                if (eventBlockNumber >= rollbackToBlockNumber && eventTsDate < rollbackEventTsDate) {
+                if (
+                    eventBlockNumber >= rollbackToBlockNumber &&
+                    eventTsDate < rollbackEventTsDate
+                ) {
                     invalidEventIds.add(event.id)
                 }
             }
-            this.eventSubs[eventName].buffer = this.eventSubs[eventName].buffer.filter(event => (
-                !invalidEventIds.has(event.id)
-            ))
+            this.eventSubs[eventName].buffer = this.eventSubs[eventName].buffer.filter(
+                (event) => !invalidEventIds.has(event.id)
+            )
         }
     }
 
@@ -1227,12 +1236,17 @@ class Spec {
         }
 
         // Upsert triggers for each table referenced in the project config.
-        await Promise.all(tablePaths.map((tablePath) => (
-            this._upsertOpTrackingTrigger(tablePath, existingTriggersMap)
-        )))
+        await Promise.all(
+            tablePaths.map((tablePath) =>
+                this._upsertOpTrackingTrigger(tablePath, existingTriggersMap)
+            )
+        )
     }
-    
-    async _upsertOpTrackingTrigger(tablePath: string, existingTriggersMap: { [key: string]: Trigger }) {
+
+    async _upsertOpTrackingTrigger(
+        tablePath: string,
+        existingTriggersMap: { [key: string]: Trigger }
+    ) {
         const [schema, table] = tablePath.split('.')
         const currentPrimaryKeyCols = tablesMeta[tablePath].primaryKey
         const currentPrimaryKeys = currentPrimaryKeyCols.map((pk) => pk.name)
@@ -1270,20 +1284,26 @@ class Spec {
 
         // Create the missing triggers.
         const promises = []
-        createInsertTrigger && promises.push(createTrigger(
-            schema, 
-            table, 
-            TriggerEvent.INSERT, 
-            TriggerProcedure.TrackOps,
-            this.liveObjects,
-        ))
-        createUpdateTrigger && promises.push(createTrigger(
-            schema, 
-            table,
-            TriggerEvent.UPDATE,
-            TriggerProcedure.TrackOps,
-            this.liveObjects,
-        ))
+        createInsertTrigger &&
+            promises.push(
+                createTrigger(
+                    schema,
+                    table,
+                    TriggerEvent.INSERT,
+                    TriggerProcedure.TrackOps,
+                    this.liveObjects
+                )
+            )
+        createUpdateTrigger &&
+            promises.push(
+                createTrigger(
+                    schema,
+                    table,
+                    TriggerEvent.UPDATE,
+                    TriggerProcedure.TrackOps,
+                    this.liveObjects
+                )
+            )
         try {
             await Promise.all(promises)
         } catch (err) {
@@ -1300,14 +1320,14 @@ class Spec {
             const tableChainInfo = config.getChainInfoForTable(tablePath, this.liveObjects)
             if (!tableChainInfo) return false
             for (const chainId of tableChainInfo.liveObjectChainIds) {
-                opTrackingEntries.push({ 
-                    tablePath, 
+                opTrackingEntries.push({
+                    tablePath,
                     chainId,
                     isEnabledAbove: 0,
                 })
             }
         }
-        await upsertOpTrackingEntries(opTrackingEntries, false)
+        opTrackingEntries.length && await upsertOpTrackingEntries(opTrackingEntries, false)
     }
 
     _doneProcessingNewConfig() {
@@ -1323,9 +1343,7 @@ class Spec {
         this.cleanupOpsJob =
             this.cleanupOpsJob ||
             setInterval(() => {
-                deleteOpsOlderThan(
-                    subtractMinutes(new Date(), constants.CLEANUP_OPS_OLDER_THAN)
-                )
+                deleteOpsOlderThan(subtractMinutes(new Date(), constants.CLEANUP_OPS_OLDER_THAN))
             }, constants.CLEANUP_OPS_INTERVAL)
     }
 
@@ -1380,8 +1398,8 @@ class Spec {
 
     _getCurrentlyUsedChainIds(): string[] {
         const chainIds = new Set<string>()
-        Object.values(this.liveObjects).forEach(liveObject => {
-            Object.keys(liveObject.config?.chains || {}).forEach(chainId => {
+        Object.values(this.liveObjects).forEach((liveObject) => {
+            Object.keys(liveObject.config?.chains || {}).forEach((chainId) => {
                 chainIds.add(chainId)
             })
         })

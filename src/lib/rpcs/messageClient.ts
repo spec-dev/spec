@@ -85,7 +85,7 @@ export class MessageClient {
             async (data: any) => {
                 if (data && typeof data === 'object' && !Array.isArray(data) && data.done) {
                     await this.off(channel)
-                    onDone && await onDone()
+                    onDone && (await onDone())
                 } else {
                     await cb(data)
                 }
@@ -110,7 +110,7 @@ export class MessageClient {
             logger.error(error)
             throw error
         }
-        const isValid = !!(data?.isValid)
+        const isValid = !!data?.isValid
         if (!isValid) {
             logger.error(chalk.redBright(`Invalid reorg detected: ${stringify(reorgEvent)}`))
         }

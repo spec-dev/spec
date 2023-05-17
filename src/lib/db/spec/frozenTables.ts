@@ -7,18 +7,13 @@ import { FrozenTable } from '../../types'
 
 const frozenTables = (tx?) => schema(SPEC_SCHEMA_NAME, tx).from(FROZEN_TABLES)
 
-const CONFLICT_COLUMNS = [
-    'table_path',
-    'chain_id',
-]
+const CONFLICT_COLUMNS = ['table_path', 'chain_id']
 
 export async function getFrozenTablesForChainId(chainId: string): Promise<FrozenTable[]> {
     try {
         return camelizeKeys(await frozenTables().where('chain_id', chainId))
     } catch (err) {
-        logger.error(
-            `Error getting frozen_tables for chain id ${chainId}: ${err}`
-        )
+        logger.error(`Error getting frozen_tables for chain id ${chainId}: ${err}`)
         return []
     }
 }
@@ -28,12 +23,10 @@ export async function freezeTablesForChainId(tablePaths: string | string[], chai
     logger.error(chalk.red(`Freezing table(s) ${tablePaths.join(', ')} for chain id ${chainId}...`))
     try {
         await frozenTables()
-            .insert(tablePaths.map(tablePath => ({ table_path: tablePath, chain_id: chainId })))
+            .insert(tablePaths.map((tablePath) => ({ table_path: tablePath, chain_id: chainId })))
             .onConflict(CONFLICT_COLUMNS)
             .ignore()
     } catch (err) {
-        logger.error(
-            `Error saving frozen_table(s) for chain id ${chainId}): ${err}`
-        )
+        logger.error(`Error saving frozen_table(s) for chain id ${chainId}): ${err}`)
     }
 }

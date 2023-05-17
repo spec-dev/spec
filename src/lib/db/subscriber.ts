@@ -717,8 +717,14 @@ export class TableSubscriber {
 
         // Create the missing triggers.
         const promises = []
-        createInsertTrigger && promises.push(createTrigger(schema, table, TriggerEvent.INSERT, TriggerProcedure.TableSub))
-        createUpdateTrigger && promises.push(createTrigger(schema, table, TriggerEvent.UPDATE, TriggerProcedure.TableSub))
+        createInsertTrigger &&
+            promises.push(
+                createTrigger(schema, table, TriggerEvent.INSERT, TriggerProcedure.TableSub)
+            )
+        createUpdateTrigger &&
+            promises.push(
+                createTrigger(schema, table, TriggerEvent.UPDATE, TriggerProcedure.TableSub)
+            )
         try {
             await Promise.all(promises)
         } catch (err) {

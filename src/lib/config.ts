@@ -350,7 +350,10 @@ class Config {
         })
     }
 
-    getChainInfoForTable(tablePath: string, liveObjects: { [key: string]: LiveObject }): StringKeyMap | null {
+    getChainInfoForTable(
+        tablePath: string,
+        liveObjects: { [key: string]: LiveObject }
+    ): StringKeyMap | null {
         const [schema, table] = tablePath.split('.')
         const liveColumns = config.getDataSourcesForTable(schema, table)
 
@@ -359,12 +362,12 @@ class Config {
             const [id, property] = key.split(':')
             liveObjectId = liveObjectId || id
             liveObject = liveObject || liveObjects[liveObjectId]
-            blockNumberProperty = liveObject?.config?.blockNumberProperty || constants.BLOCK_NUMBER_PROPERTY
+            blockNumberProperty =
+                liveObject?.config?.blockNumberProperty || constants.BLOCK_NUMBER_PROPERTY
 
             if (!blockNumberColName && property === blockNumberProperty) {
                 blockNumberColName = liveColumns[key][0]?.columnName
-            }
-            else if (!chainIdColName && property === constants.CHAIN_ID_PROPERTY) {
+            } else if (!chainIdColName && property === constants.CHAIN_ID_PROPERTY) {
                 chainIdColName = liveColumns[key][0]?.columnName
             }
         }

@@ -24,7 +24,7 @@ export async function querySharedTable(
     onData: onDataCallbackType,
     sharedErrorContext: StringKeyMap,
     options: SelectOptions = {},
-    attempt: number = 1,
+    attempt: number = 1
 ) {
     const queryPayload = {
         table: tablePath,
@@ -45,9 +45,18 @@ export async function querySharedTable(
     } catch (err) {
         logger.error(`Error handling streaming response from shared table ${tablePath}: ${err}`)
         if (attempt < constants.EXPO_BACKOFF_MAX_ATTEMPTS) {
-            logger.warn(`Retrying with attempt ${attempt}/${constants.EXPO_BACKOFF_MAX_ATTEMPTS}...`)
-            await sleep((constants.EXPO_BACKOFF_FACTOR ** attempt) * constants.EXPO_BACKOFF_DELAY)
-            await querySharedTable(tablePath, payload, onData, sharedErrorContext, options || {}, attempt + 1)
+            logger.warn(
+                `Retrying with attempt ${attempt}/${constants.EXPO_BACKOFF_MAX_ATTEMPTS}...`
+            )
+            await sleep(constants.EXPO_BACKOFF_FACTOR ** attempt * constants.EXPO_BACKOFF_DELAY)
+            await querySharedTable(
+                tablePath,
+                payload,
+                onData,
+                sharedErrorContext,
+                options || {},
+                attempt + 1
+            )
         } else {
             throw err
         }

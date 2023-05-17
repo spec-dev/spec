@@ -47,7 +47,6 @@ export const schema = (name, tx?) => {
     return tx.withSchema(name)
 }
 
-
 export async function doesSchemaExist(schema: string): Promise<boolean> {
     const result = await db
         .from('information_schema.schemata')

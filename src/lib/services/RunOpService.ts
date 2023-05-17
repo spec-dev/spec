@@ -10,7 +10,7 @@ import { applyDefaults } from '../defaults'
 import { isJSONColType } from '../utils/colTypes'
 import { constants } from '../constants'
 import { sleep } from '../utils/time'
-import { randomIntegerInRange } from '../utils/math' 
+import { randomIntegerInRange } from '../utils/math'
 
 class RunOpService {
     op: Op
@@ -71,12 +71,10 @@ class RunOpService {
             if (mergeColNames.length) {
                 insertQuery.insert(uniqueData).onConflict(conflictTargets).merge(mergeColNames)
 
-                // Restrict updates to only forwards-in-time if the live object's 
+                // Restrict updates to only forwards-in-time if the live object's
                 // primaryTimestampProperty is the source for one of the live columns.
                 const timestampCol = this.op.primaryTimestampColumn
-                const onlyMergeForwardInTime =
-                    timestampCol &&
-                    mergeColNames.includes(timestampCol)
+                const onlyMergeForwardInTime = timestampCol && mergeColNames.includes(timestampCol)
 
                 if (onlyMergeForwardInTime) {
                     insertQuery.whereRaw('??.??.?? <= excluded.??', [
@@ -104,7 +102,7 @@ class RunOpService {
             } catch (err) {
                 attempt++
                 const message = err.message || err.toString() || ''
-            
+
                 // Wait and try again if deadlocked.
                 if (message.toLowerCase().includes('deadlock')) {
                     logger.error(
