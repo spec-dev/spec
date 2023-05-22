@@ -127,8 +127,3 @@ export const constants: StringKeyMap = {
     CHAIN_ID_PROPERTY: 'chainId',
     BLOCK_NUMBER_PROPERTY: 'blockNumber',
 }
-
-constants.PROJECT_CONFIG_PATH = path.join(
-    constants.SPEC_CONFIG_DIR,
-    constants.PROJECT_CONFIG_FILE_NAME
-)

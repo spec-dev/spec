@@ -1327,7 +1327,7 @@ class Spec {
                 })
             }
         }
-        opTrackingEntries.length && await upsertOpTrackingEntries(opTrackingEntries, false)
+        opTrackingEntries.length && (await upsertOpTrackingEntries(opTrackingEntries, false))
     }
 
     _doneProcessingNewConfig() {

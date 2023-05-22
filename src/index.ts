@@ -19,6 +19,10 @@ const parsed = parser.parse_args()
 constants.SPEC_CONFIG_DIR = parsed.config_dir
     ? path.resolve(parsed.config_dir)
     : constants.SPEC_CONFIG_DIR
+constants.PROJECT_CONFIG_PATH = path.join(
+    constants.SPEC_CONFIG_DIR,
+    constants.PROJECT_CONFIG_FILE_NAME
+)
 constants.DB_USER = parsed.user || constants.DB_USER
 constants.DB_PASSWORD = parsed.password || constants.DB_PASSWORD
 constants.DB_HOST = parsed.host || constants.DB_HOST
