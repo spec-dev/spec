@@ -249,7 +249,7 @@ comment on table spec.migrations is 'Spec: Stores the latest schema migration ve
 alter table spec.migrations owner to spec;
 
 -- Ops Table
-create table spec.ops (
+create table if not exists spec.ops (
     id serial primary key,
     table_path varchar not null,
     pk_names text not null,
@@ -268,7 +268,7 @@ create index idx_ops_ordered on spec.ops(table_path, pk_values, block_number, ts
 alter table spec.ops owner to spec;
 
 -- Op Tracking Table
-create table spec.op_tracking (
+create table if not exists spec.op_tracking (
     id serial primary key,
     table_path varchar not null,
     chain_id varchar not null,
@@ -279,7 +279,7 @@ create unique index idx_op_tracking_table_chain on spec.op_tracking(table_path, 
 alter table spec.op_tracking owner to spec;
 
 -- Frozen Tables
-create table spec.frozen_tables (
+create table if not exists spec.frozen_tables (
     id serial primary key,
     table_path varchar not null,
     chain_id varchar not null
