@@ -4,6 +4,7 @@ import ApplyDiffsService from './ApplyDiffsService'
 import logger from '../logger'
 import { db } from '../db'
 import RunOpService from './RunOpService'
+import { getFrozenTablesForChainId } from '../db/spec/frozenTables'
 import config from '../config'
 import chalk from 'chalk'
 
@@ -18,16 +19,10 @@ class ApplyEventService {
 
     ops: Op[] = []
 
+    allTablesFrozen: boolean = false
+
     get links(): LiveObjectLink[] {
         return this.liveObject.links || []
-    }
-
-    get wasSkipped(): boolean {
-        return (this.event.origin as StringKeyMap).skipped === true
-    }
-
-    get isReplay(): boolean {
-        return (this.event.origin as StringKeyMap).replay === true
     }
 
     constructor(event: SpecEvent, liveObject: LiveObject) {
@@ -51,12 +46,13 @@ class ApplyEventService {
 
         // Get all links these diffs apply to (i.e. the links with all of their
         // implemented property keys included in the diff structure).
-        this.linksToApplyDiffsTo = this._getLinksToApplyDiffTo()
+        this.linksToApplyDiffsTo = await this._getLinksToApplyDiffTo(chainId)
         if (!this.linksToApplyDiffsTo.length) {
-            logger.warn(
-                `Live object diff didn't satisfy any configured links`,
-                JSON.stringify(this.event, null, 4)
-            )
+            this.allTablesFrozen ||
+                logger.warn(
+                    `Live object diff didn't satisfy any configured links`,
+                    JSON.stringify(this.event, null, 4)
+                )
             return
         }
 
@@ -64,9 +60,23 @@ class ApplyEventService {
         await this.runOps()
     }
 
-    _getLinksToApplyDiffTo(): EnrichedLink[] {
+    async _getLinksToApplyDiffTo(chainId: string): Promise<EnrichedLink[]> {
+        const frozenTablePaths = new Set(
+            (await getFrozenTablesForChainId(chainId)).map((r) => r.tablePath)
+        )
         const linksToApplyDiffsTo = []
         for (const link of this.links) {
+            if (frozenTablePaths.has(link.table)) {
+                logger.info(
+                    chalk.yellow(
+                        `Not applying event to "${link.table}" -- table is frozen for chain ${chainId}.`
+                    )
+                )
+                if (this.links.length === 1) {
+                    this.allTablesFrozen = true
+                }
+                continue
+            }
             const enrichedLink = config.getEnrichedLink(this.liveObject.id, link.table)
             if (!enrichedLink) continue
 
@@ -114,13 +124,8 @@ class ApplyEventService {
             }
         }
 
-        const allowUpdatesBackwardsInTime = this.wasSkipped || this.isReplay
         await db.transaction(async (tx) => {
-            await Promise.all(
-                this.ops.map((op) =>
-                    new RunOpService(op, tx, allowUpdatesBackwardsInTime).perform()
-                )
-            )
+            await Promise.all(this.ops.map((op) => new RunOpService(op, tx).perform()))
         })
     }
 }

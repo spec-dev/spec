@@ -13,12 +13,13 @@ export async function importHooks() {
             return
         }
 
-        // Import the default exported hooks.
         const givenHooks = (await dynamicImport(hooksDir)).default || {}
         if (!Object.keys(givenHooks).length) {
             hooks = {}
             return
         }
+
+        hooks = givenHooks
     } catch (err) {
         hooks = {}
     }

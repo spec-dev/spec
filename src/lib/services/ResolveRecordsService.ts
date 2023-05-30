@@ -165,7 +165,9 @@ class ResolveRecordsService {
                     await this._handleFunctionRespData(data as StringKeyMap[]).catch((err) => {
                         sharedErrorContext.error = err
                     }),
-                sharedErrorContext
+                sharedErrorContext,
+                {},
+                true
             )
         } catch (err) {
             logger.error(err)

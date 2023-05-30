@@ -135,6 +135,23 @@ export interface EventSub {
     cursorChanged: boolean
     shouldBuffer: boolean
     buffer: SpecEvent[]
+    last: StringKeyMap | null
+    isGapFilling: boolean
+    setToLastAfterFillingGaps: StringKeyMap | null
+}
+
+export interface ReorgEvent {
+    id: string
+    name: string
+    chainId: string
+    blockNumber: number
+    eventTimestamp: string
+}
+
+export interface ReorgSub {
+    chainId: string
+    isProcessing: boolean
+    buffer: ReorgEvent[]
 }
 
 export enum TableSubStatus {
@@ -209,6 +226,24 @@ export interface SeedCursor {
     createdAt: Date
 }
 
+export interface OpRecord {
+    id: number
+    table_path: string
+    pk_names: string
+    pk_values: string
+    before: StringKeyMap | null
+    after: StringKeyMap | null
+    block_number: number
+    chain_id: string
+    ts: Date
+}
+
+export interface FrozenTable {
+    id: number
+    tablePath: string
+    chainId: string
+}
+
 export interface LiveColumn {
     columnPath: string
     liveProperty: string
@@ -251,6 +286,11 @@ export interface ForeignKeyConstraint {
     foreignTable: string
     foreignKey: string[]
     referenceKey: string[]
+}
+
+export enum TriggerProcedure {
+    TableSub,
+    TrackOps,
 }
 
 export enum TriggerEvent {

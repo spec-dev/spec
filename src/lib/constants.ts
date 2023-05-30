@@ -62,6 +62,11 @@ export const constants: StringKeyMap = {
     // How often to poll the database schema for any changes.
     ANALYZE_TABLES_INTERVAL: Number(ev('ANALYZE_TABLES_INTERVAL', 30000)),
 
+    // Batch size to upsert with once a new batch of streaming query request data is available.
+    POLL_HEADS_DURING_LONG_RUNNING_SEEDS_INTERVAL: Number(
+        ev('POLL_HEADS_DURING_LONG_RUNNING_SEEDS_INTERVAL', 10000)
+    ),
+
     // When a seed/backfill fails, the interval to wait before retrying
     // and the max number of times to retry.
     RETRY_SEED_CURSORS_INTERVAL: Number(ev('RETRY_SEED_CURSORS_INTERVAL', 5000)),
@@ -69,8 +74,8 @@ export const constants: StringKeyMap = {
 
     // The LISTEN/NOTIFY channel and function name associated with
     // the triggers Spec uses to listen to table activity.
-    TABLE_SUB_FUNCTION_NAME: ev('TABLE_SUB_FUNCTION_NAME', 'spec_table_sub'),
-    TABLE_SUB_CHANNEL: ev('TABLE_SUB_CHANNEL', 'spec_data_change'),
+    TABLE_SUB_FUNCTION_NAME: 'spec_table_sub',
+    TABLE_SUB_CHANNEL: 'spec_data_change',
 
     // Buffer config to use when debouncing table subscription events from postgres triggers.
     TABLE_SUB_BUFFER_INTERVAL: Number(ev('TABLE_SUB_BUFFER_INTERVAL', 100)),
@@ -79,8 +84,29 @@ export const constants: StringKeyMap = {
     // The column name to use to track the last time any table was updated (if it exists).
     TABLE_SUB_UPDATED_AT_COL_NAME: ev('TABLE_SUB_UPDATED_AT_COL_NAME', 'updated_at'),
 
+    // Postgres trigger function name for tracking record operations.
+    TRACK_OPS_FUNCTION_NAME: 'spec_track_ops',
+
+    // Event name prefix for chain reorgs.
+    REORG_EVENT_NAME_PREFIX: 'chain.reorgs',
+
+    // Batch size to use when rolling back records to a previous state.
+    ROLLBACK_BATCH_SIZE: Number(ev('ROLLBACK_BATCH_SIZE', 2000)),
+
+    // The number of blocks below the most recent block for
+    // a given chain to allow op-tracking for during a seed.
+    OP_TRACKING_FLOOR_OFFSET: Number(ev('OP_TRACKING_FLOOR_OFFSET', 10)),
+
+    // Number of minutes of op-tracking data to keep and
+    /// the frequency with which to run the cleanup job.
+    CLEANUP_OPS_OLDER_THAN: Number(ev('CLEANUP_OPS_OLDER_THAN', 30)), // 30 minutes
+    CLEANUP_OPS_INTERVAL: Number(ev('CLEANUP_OPS_INTERVAL', 300000)), // 5 minutes
+
     // Threshold required to switch from individual update operations to a bulk update operation.
     MAX_UPDATES_BEFORE_BULK_UPDATE_USED: Number(ev('MAX_UPDATES_BEFORE_BULK_UPDATE_USED', 10)),
+
+    // Max number of attempts when retrying a query that hits deadlock.
+    MAX_DEADLOCK_RETRIES: Number(ev('MAX_DEADLOCK_RETRIES', 10)),
 
     // Whether to run in debug mode.
     DEBUG: ['true', true].includes(ev('DEBUG')),
@@ -96,9 +122,8 @@ export const constants: StringKeyMap = {
     EXPO_BACKOFF_DELAY: 100,
     EXPO_BACKOFF_MAX_ATTEMPTS: 10,
     EXPO_BACKOFF_FACTOR: 1.5,
-}
 
-constants.PROJECT_CONFIG_PATH = path.join(
-    constants.SPEC_CONFIG_DIR,
-    constants.PROJECT_CONFIG_FILE_NAME
-)
+    // Special live object properties.
+    CHAIN_ID_PROPERTY: 'chainId',
+    BLOCK_NUMBER_PROPERTY: 'blockNumber',
+}

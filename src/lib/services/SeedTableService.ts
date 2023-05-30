@@ -15,7 +15,7 @@ import {
     OrderByDirection,
 } from '../types'
 import { reverseMap, getCombinations, unique, groupByKeys } from '../utils/formatters'
-import { areColumnsEmpty } from '../db/ops'
+import { areColumnsEmpty } from '../db'
 import RunOpService from './RunOpService'
 import { querySharedTable } from '../shared-tables/client'
 import config from '../config'
@@ -24,11 +24,12 @@ import { QueryError } from '../errors'
 import { constants } from '../constants'
 import { tablesMeta, getRel, isColTypeArray } from '../db/tablesMeta'
 import chalk from 'chalk'
-import { updateCursor, updateMetadata } from '../db/spec'
+import { updateCursor, updateMetadata, upsertOpTrackingEntries } from '../db/spec'
 import LRU from 'lru-cache'
 import { applyDefaults } from '../defaults'
 import { withDeadlockProtection } from '../utils/db'
 import { isContractNamespace } from '../utils/chains'
+import messageClient from '../rpcs/messageClient'
 
 const valueSep = '__:__'
 
@@ -42,6 +43,12 @@ class SeedTableService {
     cursor: number
 
     metadata: StringKeyMap
+
+    updateOpTrackingFloorAsSeedProgresses: boolean
+
+    liveObjectChainIds: string[]
+
+    isReorgActivelyProcessing: Function | null
 
     seedColNames: Set<string>
 
@@ -77,6 +84,8 @@ class SeedTableService {
 
     foreignKeyMappings: LRU<string, any> = new LRU({ max: 5000 })
 
+    lastOpTrackingFloorUpdate: Date | null = null
+
     get seedTablePath(): string {
         return this.seedSpec.tablePath
     }
@@ -111,18 +120,32 @@ class SeedTableService {
         return this.liveObject.config.table
     }
 
+    get attemptOpTrackingFloorUpdate(): boolean {
+        return (
+            this.updateOpTrackingFloorAsSeedProgresses &&
+            this.isReorgActivelyProcessing &&
+            !this.isReorgActivelyProcessing()
+        )
+    }
+
     constructor(
         seedSpec: SeedSpec,
         liveObject: LiveObject,
         seedCursorId: string,
         cursor: number,
-        metadata?: StringKeyMap | null
+        metadata?: StringKeyMap | null,
+        updateOpTrackingFloorAsSeedProgresses?: boolean,
+        liveObjectChainIds?: string[],
+        isReorgActivelyProcessing?: Function | null
     ) {
         this.seedSpec = seedSpec
         this.liveObject = liveObject
         this.seedCursorId = seedCursorId
         this.cursor = cursor || 0
         this.metadata = metadata || {}
+        this.updateOpTrackingFloorAsSeedProgresses = !!updateOpTrackingFloorAsSeedProgresses
+        this.liveObjectChainIds = liveObjectChainIds || []
+        this.isReorgActivelyProcessing = isReorgActivelyProcessing || null
         this.seedColNames = new Set<string>(this.seedSpec.seedColNames)
         this.tableDataSources = config.getLiveObjectTableDataSources(
             this.liveObject.id,
@@ -263,6 +286,8 @@ class SeedTableService {
     }
 
     async _seedFromScratch() {
+        this.attemptOpTrackingFloorUpdate && (await this._updateOpTrackingFloor())
+
         logger.info(chalk.cyanBright(`\nSeeding ${this.seedTablePath} from scratch...`))
 
         const inputArgs = this.valueFilters.map((vf) => this._formatValueFilterGroupAsInputArgs(vf))
@@ -293,9 +318,8 @@ class SeedTableService {
             )
 
         const sharedErrorContext = { error: null }
-        const t0 = performance.now()
-
         const originalInputArgsLength = inputArgs.length
+        const t0 = performance.now()
 
         while (true) {
             this.fromScratchBatchResultSize = 0
@@ -329,7 +353,8 @@ class SeedTableService {
                         )
                     },
                     sharedErrorContext,
-                    options
+                    options,
+                    this.metadata.fromTrigger
                 )
             } catch (err) {
                 logger.error(err)
@@ -350,7 +375,11 @@ class SeedTableService {
                 await updateCursor(this.seedCursorId, this.cursor)
             }
 
-            if (this.fromScratchBatchResultSize < limit) break
+            const isLastBatch = this.fromScratchBatchResultSize < limit
+            if (!isLastBatch && this.attemptOpTrackingFloorUpdate) {
+                await this._updateOpTrackingFloor()
+            }
+            if (isLastBatch) break
         }
 
         const tf = performance.now()
@@ -451,7 +480,9 @@ class SeedTableService {
                     this.sharedTablePath,
                     batchFunctionInput,
                     onFunctionRespData,
-                    sharedErrorContext
+                    sharedErrorContext,
+                    {},
+                    this.metadata.fromTrigger
                 )
             } catch (err) {
                 logger.error(err)
@@ -543,6 +574,8 @@ class SeedTableService {
                 }
             }
         }
+
+        this.attemptOpTrackingFloorUpdate && (await this._updateOpTrackingFloor())
 
         const seedInputBatchSize =
             arrayInputColNames.length || this.forceSeedInputBatchSizeToOne
@@ -637,7 +670,9 @@ class SeedTableService {
                     this.sharedTablePath,
                     batchFunctionInputs,
                     onFunctionRespData,
-                    sharedErrorContext
+                    sharedErrorContext,
+                    {},
+                    this.metadata.fromTrigger
                 )
             } catch (err) {
                 logger.error(err)
@@ -652,6 +687,14 @@ class SeedTableService {
 
             await updateCursor(this.seedCursorId, this.cursor)
 
+            if (
+                !isLastBatch &&
+                this.updateOpTrackingFloorAsSeedProgresses &&
+                this.isReorgActivelyProcessing &&
+                !this.isReorgActivelyProcessing()
+            ) {
+                await this._updateOpTrackingFloor()
+            }
             if (isLastBatch) {
                 this._logResults(t0)
                 break
@@ -1247,6 +1290,41 @@ class SeedTableService {
             logger.error(new QueryError('select', schema, table, err).message)
             return null
         }
+    }
+
+    async _updateOpTrackingFloor() {
+        const lastUpdate = this.lastOpTrackingFloorUpdate
+        const now = new Date()
+        // @ts-ignore
+        const timeSinceLastUpdate = now - lastUpdate
+        if (
+            lastUpdate &&
+            timeSinceLastUpdate < constants.POLL_HEADS_DURING_LONG_RUNNING_SEEDS_INTERVAL
+        ) {
+            return
+        }
+        this.lastOpTrackingFloorUpdate = now
+
+        const { data: mostRecentBlockNumbers, error } =
+            await messageClient.getMostRecentBlockNumbers()
+        if (error) {
+            logger.error(`Not updating op-tracking floor. Got error: ${error}`)
+            return
+        }
+
+        const opTrackingEntries = []
+        for (const chainId of this.liveObjectChainIds) {
+            if (!mostRecentBlockNumbers.hasOwnProperty(chainId)) continue
+            const newOpTrackingFloor =
+                Number(mostRecentBlockNumbers[chainId]) - constants.OP_TRACKING_FLOOR_OFFSET
+            opTrackingEntries.push({
+                tablePath: this.seedTablePath,
+                chainId,
+                isEnabledAbove: newOpTrackingFloor,
+            })
+        }
+
+        opTrackingEntries.length && (await upsertOpTrackingEntries(opTrackingEntries))
     }
 
     _findRequiredArgColumns() {
