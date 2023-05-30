@@ -353,7 +353,8 @@ class SeedTableService {
                         )
                     },
                     sharedErrorContext,
-                    options
+                    options,
+                    this.metadata.fromTrigger,
                 )
             } catch (err) {
                 logger.error(err)
@@ -479,7 +480,9 @@ class SeedTableService {
                     this.sharedTablePath,
                     batchFunctionInput,
                     onFunctionRespData,
-                    sharedErrorContext
+                    sharedErrorContext,
+                    {},
+                    this.metadata.fromTrigger,
                 )
             } catch (err) {
                 logger.error(err)
@@ -667,7 +670,9 @@ class SeedTableService {
                     this.sharedTablePath,
                     batchFunctionInputs,
                     onFunctionRespData,
-                    sharedErrorContext
+                    sharedErrorContext,
+                    {},
+                    this.metadata.fromTrigger,
                 )
             } catch (err) {
                 logger.error(err)

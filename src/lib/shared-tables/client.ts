@@ -24,14 +24,18 @@ export async function querySharedTable(
     onData: onDataCallbackType,
     sharedErrorContext: StringKeyMap,
     options: SelectOptions = {},
+    nearHead: boolean = false,
     attempt: number = 1
 ) {
-    const queryPayload = {
+    const queryPayload: StringKeyMap = {
         table: tablePath,
         filters: stringifyAnyDates(payload),
         options,
     }
-
+    if (nearHead) {
+        queryPayload.nearHead = true
+    }
+    
     const abortController = new AbortController()
     const resp = await makeRequest(tablePath, queryPayload, abortController)
 
@@ -55,6 +59,7 @@ export async function querySharedTable(
                 onData,
                 sharedErrorContext,
                 options || {},
+                nearHead,
                 attempt + 1
             )
         } else {

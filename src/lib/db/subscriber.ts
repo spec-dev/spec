@@ -522,6 +522,7 @@ export class TableSubscriber {
             metadata: {
                 foreignTablePath: tablePath,
                 foreignPrimaryKeyData: primaryKeyDataForAllEvents,
+                fromTrigger: true,
             },
         }
         await createSeedCursor(seedCursor)
@@ -532,7 +533,8 @@ export class TableSubscriber {
                 seedSpec,
                 liveObject,
                 seedCursor.id,
-                seedCursor.cursor
+                seedCursor.cursor,
+                seedCursor.metadata,
             )
             await seedTableService.seedWithForeignRecords(tablePath, records)
         } catch (err) {
