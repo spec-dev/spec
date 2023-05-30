@@ -354,7 +354,7 @@ class SeedTableService {
                     },
                     sharedErrorContext,
                     options,
-                    this.metadata.fromTrigger,
+                    this.metadata.fromTrigger
                 )
             } catch (err) {
                 logger.error(err)
@@ -482,7 +482,7 @@ class SeedTableService {
                     onFunctionRespData,
                     sharedErrorContext,
                     {},
-                    this.metadata.fromTrigger,
+                    this.metadata.fromTrigger
                 )
             } catch (err) {
                 logger.error(err)
@@ -672,7 +672,7 @@ class SeedTableService {
                     onFunctionRespData,
                     sharedErrorContext,
                     {},
-                    this.metadata.fromTrigger,
+                    this.metadata.fromTrigger
                 )
             } catch (err) {
                 logger.error(err)

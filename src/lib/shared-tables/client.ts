@@ -35,7 +35,7 @@ export async function querySharedTable(
     if (nearHead) {
         queryPayload.nearHead = true
     }
-    
+
     const abortController = new AbortController()
     const resp = await makeRequest(tablePath, queryPayload, abortController)
 

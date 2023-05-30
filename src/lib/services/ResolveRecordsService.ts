@@ -167,7 +167,7 @@ class ResolveRecordsService {
                     }),
                 sharedErrorContext,
                 {},
-                true,
+                true
             )
         } catch (err) {
             logger.error(err)

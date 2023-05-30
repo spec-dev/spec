@@ -534,7 +534,7 @@ export class TableSubscriber {
                 liveObject,
                 seedCursor.id,
                 seedCursor.cursor,
-                seedCursor.metadata,
+                seedCursor.metadata
             )
             await seedTableService.seedWithForeignRecords(tablePath, records)
         } catch (err) {
