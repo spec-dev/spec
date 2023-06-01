@@ -240,7 +240,7 @@ class Spec {
             return
         }
 
-        ;(await this._processEvent(event)) && this._updateEventCursor(event)
+        await this._processEvent(event) && this._updateEventCursor(event)
     }
 
     async _processEvent(event: SpecEvent): Promise<boolean> {
