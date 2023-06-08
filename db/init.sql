@@ -154,6 +154,11 @@ BEGIN
     INTO block_number
     USING rec;
 
+    -- Ensure block number exists.
+    IF block_number IS NULL THEN
+        RETURN rec;
+    END IF;
+
     -- Get chain id from record (or default value).
     IF default_chain_id != '' THEN
         chain_id = default_chain_id;
