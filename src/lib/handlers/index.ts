@@ -3,6 +3,7 @@ import { chainNamespaces } from '../utils/chains'
 import { constants } from '../constants'
 import path from 'path'
 import { fileExists } from '../utils/file'
+import logger from '../logger'
 
 let handlers = {}
 
@@ -53,6 +54,7 @@ export async function importHandlers() {
         }
         handlers = resolvedHandlers
     } catch (err) {
+        logger.error(err)
         handlers = {}
     }
 }
