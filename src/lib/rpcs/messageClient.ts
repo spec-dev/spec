@@ -14,6 +14,7 @@ import RPC from './functionNames'
 import logger from '../logger'
 import short from 'short-uuid'
 import chalk from 'chalk'
+import { sleep } from '../utils/time'
 
 const DEFAULT_OPTIONS = {
     onConnect: noop,
@@ -50,11 +51,11 @@ export class MessageClient {
 
     on(eventName: string, cb: EventCallback, opts?: StringKeyMap) {
         this.client.on(eventName, cb, opts)
-        logger.info(chalk.green(`Subscribed to event ${eventName}`))
+        opts?.temp || logger.info(chalk.green(`Subscribed to event ${eventName}`))
     }
 
-    async off(eventName: string) {
-        await this.client.off(eventName)
+    async off(eventName: string, opts?: StringKeyMap) {
+        await this.client.off(eventName, opts)
     }
 
     async resolveLiveObjects(liveObjectIds: string[]): Promise<{
@@ -78,20 +79,27 @@ export class MessageClient {
     }
 
     async fetchMissedEvents(cursors: EventCursor[], cb: MissedEventsCallback, onDone?: any) {
+        if (!cursors.length) {
+            onDone && (await onDone())
+            return
+        }
+
         // Subscribe to a unique, temporary channel to use for missed-event transfer.
         const channel = short.generate()
+        const opts = { resolveVersion: false, temp: true }
         this.on(
             channel,
             async (data: any) => {
                 if (data && typeof data === 'object' && !Array.isArray(data) && data.done) {
-                    await this.off(channel)
+                    await this.off(channel, opts)
                     onDone && (await onDone())
                 } else {
                     await cb(data)
                 }
             },
-            { temp: true }
+            opts
         )
+        await sleep(100)
 
         // Tell the server to find and send over the missed events.
         const { error } = await this.call(RPC.GetEventsAfterCursors, {

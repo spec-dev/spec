@@ -1,7 +1,7 @@
 {
     "name": "@spec.dev/spec",
     "description": "Spec",
-    "version": "0.0.7",
+    "version": "0.0.8",
     "keywords": [
         "javascript",
         "typescript",
@@ -33,7 +33,7 @@
     },
     "dependencies": {
         "@ltd/j-toml": "1.30.0",
-        "@spec.dev/event-client": "^0.0.16",
+        "@spec.dev/event-client": "^0.0.17",
         "@spec.dev/realtime-client": "^0.0.2",
         "@streamparser/json": "^0.0.8",
         "argparse": "^2.0.1",
