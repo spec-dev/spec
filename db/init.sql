@@ -262,7 +262,7 @@ create table if not exists spec.ops (
     "before" json,
     "after" json,
     block_number bigint not null,
-    chain_id text not null,
+    chain_id varchar not null,
     ts timestamp with time zone not null default(now() at time zone 'utc')
 );
 comment on table spec.ops is 'Spec: Stores before & after snapshots of records at specific block numbers.';
