@@ -437,9 +437,9 @@ class Spec {
             }
 
             // Subscribe to event.
-            messageClient.on(newEventName, (event: SpecEvent) => (
-                this._onEvent(event).catch(e => logger.error(e))
-            ))
+            messageClient.on(newEventName, (event: SpecEvent) =>
+                this._onEvent(event).catch((e) => logger.error(e))
+            )
 
             // Register sub.
             this.eventSubs[newEventName] = {
@@ -463,9 +463,9 @@ class Spec {
         // Subscribe to events for custom handlers.
         for (const eventName in this.customEventHandlers) {
             if (this.eventSubs.hasOwnProperty(eventName)) continue
-            messageClient.on(eventName, (event: SpecEvent) => (
-                this._onEvent(event).catch(e => logger.error(e))
-            ))
+            messageClient.on(eventName, (event: SpecEvent) =>
+                this._onEvent(event).catch((e) => logger.error(e))
+            )
 
             // Register sub with no live object ids.
             this.eventSubs[eventName] = {
