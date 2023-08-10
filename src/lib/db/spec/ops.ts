@@ -38,7 +38,7 @@ export async function deleteTableOpsAtOrAboveNumber(
 
 export async function deleteOpsOlderThan(date: Date) {
     const timestamp = formatPgDateString(date, false)
-    logger.info(chalk.gray(`Deleting ops older than ${timestamp}...`))
+    logger.debug(chalk.gray(`Deleting ops older than ${timestamp}...`))
     try {
         await ops().whereRaw(`timezone('UTC', ts) < ?`, [timestamp]).del()
     } catch (err) {

@@ -693,7 +693,7 @@ class Config {
         const objects = this.liveObjects
         let isValid = true
 
-        for (let configName in objects) {
+        for (const configName in objects) {
             const obj = objects[configName]
 
             // Ensure object has id.
@@ -712,7 +712,7 @@ class Config {
                 isValid = false
             }
 
-            // Ensure object has links.
+            // Ensure object has at least 1 link.
             if (!obj.links?.length) {
                 logger.error(`Live object "${configName}" has no links.`)
                 isValid = false
