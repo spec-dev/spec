@@ -52,6 +52,12 @@ export class Logger {
         this.localWriteStream?.write(`${log.message}\n`)
     }
 
+    debug(...args: any[]) {
+        const log = this._newLog(args, LogLevel.Info)
+        console.log(log.message)
+        this.localWriteStream?.write(`${log.message}\n`)
+    }
+
     warn(...args: any[]) {
         const log = this._newLog(args, LogLevel.Warn)
         console.warn(log.message)

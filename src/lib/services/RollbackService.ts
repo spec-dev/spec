@@ -30,7 +30,7 @@ class RollbackService {
     }
 
     async perform() {
-        logger.info(chalk.gray(`[${this.chainId}] Rolling back to block ${this.blockNumber}...`))
+        logger.debug(chalk.gray(`[${this.chainId}] Rolling back to block ${this.blockNumber}...`))
 
         // Get snapshots of records that need to be rolled back, indexed by table path.
         await this._getTargetRecordSnapshotOps()
@@ -297,7 +297,7 @@ class RollbackService {
             stats.push([tablePath, recordsAffected.length])
         }
         if (!stats.length) {
-            logger.info(chalk.gray(`[${this.chainId}] No records to roll back.`))
+            logger.debug(chalk.gray(`[${this.chainId}] No records to roll back.`))
             return false
         }
         logger.info(
