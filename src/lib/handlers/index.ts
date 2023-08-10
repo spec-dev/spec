@@ -28,22 +28,27 @@ export async function importHandlers() {
         // a) are a contract event and don't have a chain-specific namespace
         // b) don't have a version
         const resolvedHandlers = {}
-        for (const eventName in givenHandlers) {
+        for (const givenEventName in givenHandlers) {
+            let eventName = givenEventName
             const handler = givenHandlers[eventName]
 
+            // Add a missing "contracts." prefix if missing.
+            if (eventName.split('.').length === 3) {
+                eventName = `${CONTRACTS_EVENT_NSP}.${eventName}`
+            }
+
             // Add default version if it doesn't exist.
-            let resolvedEventName = eventName
-            if (!resolvedEventName.includes('@')) {
-                resolvedEventName += '@0.0.1'
+            if (!eventName.includes('@')) {
+                eventName += '@0.0.1'
             }
 
             // Subscribe to contract event on all chains if chain not specified.
-            if (resolvedEventName.startsWith(`${CONTRACTS_EVENT_NSP}.`)) {
+            if (eventName.startsWith(`${CONTRACTS_EVENT_NSP}.`)) {
                 for (const nsp of Object.values(chainNamespaces)) {
-                    resolvedHandlers[[nsp, resolvedEventName].join('.')] = handler
+                    resolvedHandlers[[nsp, eventName].join('.')] = handler
                 }
             } else {
-                resolvedHandlers[resolvedEventName] = handler
+                resolvedHandlers[eventName] = handler
             }
         }
         handlers = resolvedHandlers
