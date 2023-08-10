@@ -208,7 +208,7 @@ class Spec {
             return
         }
 
-        if (sub.isGapFilling && !options.forceToBuffer) {
+        if (sub.isGapFilling && !options?.forceToBuffer) {
             // New events coming while actively filling gaps but that aren't
             // associated with the gap. Guards against potential race condition.
             this.eventSubs[event.name].setToLastAfterFillingGaps = newLastValue
