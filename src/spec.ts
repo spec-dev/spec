@@ -534,7 +534,11 @@ class Spec {
                         const handleEvents = async () => {
                             logger.info(chalk.cyanBright(`Fetched ${events.length} missed events.`))
                             for (const event of events) {
-                                await this._onEvent(event, { forceToBuffer: true })
+                                try {
+                                    await this._onEvent(event, { forceToBuffer: true })
+                                } catch (err) {
+                                    logger.error(`Handling event ${event.id} failed`, err)
+                                }
                             }
                         }
                         promises.push(handleEvents())
@@ -565,7 +569,11 @@ class Spec {
                         const handleEvents = async () => {
                             i += events.length
                             for (const event of events) {
-                                await this._onEvent(event, { forceToBuffer: true })
+                                try {
+                                    await this._onEvent(event, { forceToBuffer: true })
+                                } catch (err) {
+                                    logger.error(`Handling event ${event.id} failed`, err)
+                                }
                             }
                         }
                         promises.push(handleEvents())

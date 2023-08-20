@@ -124,7 +124,7 @@ class ApplyDiffsService {
         }
 
         // Convert diffs into upsert operations.
-        this._createUpsertOps()
+        await this._createUpsertOps()
 
         return this.ops
     }
