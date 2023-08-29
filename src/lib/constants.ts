@@ -67,7 +67,7 @@ export const constants: StringKeyMap = {
         ev('POLL_HEADS_DURING_LONG_RUNNING_SEEDS_INTERVAL', 10000)
     ),
 
-    // When a seed/backfill fails, the interval to wait before retrying
+    // When a seed/backfill fails, the interval to wait between retries
     // and the max number of times to retry.
     RETRY_SEED_CURSORS_INTERVAL: Number(ev('RETRY_SEED_CURSORS_INTERVAL', 5000)),
     MAX_SEED_JOB_ATTEMPTS: Number(ev('MAX_SEED_JOB_ATTEMPTS', 10)),
