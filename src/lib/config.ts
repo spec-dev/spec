@@ -105,6 +105,10 @@ class Config {
         return this.enrichedLinks[[liveObjectId, tablePath].join(':')] || null
     }
 
+    getLink(liveObjectId: string, tablePath: string): LiveObjectLink | null {
+        return this.getLinksForTable(tablePath).find(l => l.liveObjectId === liveObjectId)?.link || null
+    }
+
     getLinksForTable(tablePath: string): TableLink[] {
         const tableLinks = []
         const objects = this.liveObjects

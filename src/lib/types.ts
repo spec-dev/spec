@@ -244,6 +244,13 @@ export interface FrozenTable {
     chainId: string
 }
 
+export interface LinksTableRecord {
+    tablePath: string
+    liveObjectId: string
+    uniqueBy: string
+    filterBy: string | null
+}
+
 export interface LiveColumn {
     columnPath: string
     liveProperty: string

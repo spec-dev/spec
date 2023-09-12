@@ -595,8 +595,7 @@ class Spec {
     async _upsertAndSeedLiveColumns() {
         let liveColumnsToSeed = []
 
-        // Upsert any new/changed live columns listed in the config.
-        // We will seed (or re-seed) all live columns that were upserted.
+        // Detect any changes with live columns or links (filterBy, uniqueBy, etc.).
         const upsertLiveColumnService = new UpsertLiveColumnsService()
         try {
             await upsertLiveColumnService.perform()
