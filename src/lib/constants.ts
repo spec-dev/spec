@@ -99,7 +99,7 @@ export const constants: StringKeyMap = {
 
     // Number of minutes of op-tracking data to keep and
     /// the frequency with which to run the cleanup job.
-    CLEANUP_OPS_OLDER_THAN: Number(ev('CLEANUP_OPS_OLDER_THAN', 30)), // 30 minutes
+    CLEANUP_OPS_OLDER_THAN: Number(ev('CLEANUP_OPS_OLDER_THAN', 180)), // 3 hours
     CLEANUP_OPS_INTERVAL: Number(ev('CLEANUP_OPS_INTERVAL', 300000)), // 5 minutes
 
     // Threshold required to switch from individual update operations to a bulk update operation.
