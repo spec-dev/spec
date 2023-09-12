@@ -154,10 +154,10 @@ class Spec {
             return
         }
 
-        // Load the latest events received by each sub.
+        // Load the last event seen for each subscription.
         await this._loadEventCursors()
 
-        // Fetch missed events for any new sub that already has an
+        // Fetch missed events for any subcription that already has an
         // existing event cursor (i.e. events that have been seen before).
         await this._fetchMissedEvents(newEventNames)
 
