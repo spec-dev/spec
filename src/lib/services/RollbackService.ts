@@ -12,6 +12,7 @@ import {
     deleteTableOpsAtOrAboveNumber,
     freezeTablesForChainId,
 } from '../db/spec'
+import { tablesMeta } from '../db/tablesMeta'
 
 class RollbackService {
     blockNumber: number
@@ -19,6 +20,8 @@ class RollbackService {
     chainId: string
 
     recordSnapshotOps: { [key: string]: OpRecord[] } = {}
+
+    tablePathsWithRollbackAttempted: string[] = []
 
     get tablePaths(): string[] {
         return Object.keys(this.recordSnapshotOps)
@@ -46,7 +49,7 @@ class RollbackService {
             isEnabledAbove: this.blockNumber,
         }))
         if (!(await upsertOpTrackingEntries(opTrackingUpserts))) {
-            throw `[${this.chainId}] Failed to set new op tracking floor during rollback to ${this.blockNumber}`
+            throw `Failed to set new op tracking floor during rollback to ${this.blockNumber}`
         }
 
         // Roll records back to their previous states prior to the target block number.
@@ -62,7 +65,7 @@ class RollbackService {
                 this.chainId
             )
         } catch (err) {
-            throw `[${this.chainId}] Failed getting ops >= ${this.blockNumber}: ${err}`
+            throw `Failed getting ops >= ${this.blockNumber}: ${err}`
         }
 
         // Group by table path.
@@ -74,9 +77,38 @@ class RollbackService {
     }
 
     async _rollbackRecords() {
-        await Promise.all(
-            this.tablePaths.map((tablePath) => this._rollbackRecordsForTable(tablePath))
-        )
+        const orderedTablePaths = this._getTablePathsInReverseConstraintOrder()
+        for (const tablePath of orderedTablePaths) {
+            this.tablePathsWithRollbackAttempted.push(tablePath)
+            await this._rollbackRecordsForTable(tablePath)
+        }
+    }
+
+    _getTablePathsInReverseConstraintOrder(): string[] {        
+        const tablePaths = this.tablePaths
+        for (const tablePath of tablePaths) {
+            const meta = tablesMeta[tablePath]
+            if (!meta) {
+                logger.error(
+                    `[${this.chainId}:${this.blockNumber}] Rollback error — no metadata found for table ${tablePath}.\n` +
+                    'Not rolling back.' 
+                )
+                continue
+            }
+
+            const foreignKeys = meta.foreignKeys || []
+            if (!foreignKeys.length) {
+
+            }
+
+            for (const fk of foreignKeys) {
+
+            }
+
+        }
+
+        tablesMeta
+        return []
     }
 
     async _rollbackRecordsForTable(tablePath: string) {

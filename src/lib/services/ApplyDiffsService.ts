@@ -25,6 +25,7 @@ import { isSpecTimestampFilterFormat } from '../utils/date'
 import { identPath } from '../utils/formatters'
 import { ident } from 'pg-format'
 import { invert } from 'lodash'
+import { constants } from '../constants'
 
 const valueSep = '__:__'
 
@@ -320,7 +321,7 @@ class ApplyDiffsService {
 
         // If the link table path is referenced at all in this filter group, use it as the lookup table.
         // Otherwise, take the first column filter table, which will be foreign (we can make this assumption
-        // becuase only 1 foreign table can be referenced in a link's filters).
+        // because only 1 foreign table can be referenced in a link's filters).
         const lookupTablePath = colFilterTables.has(this.linkTablePath)
             ? this.linkTablePath
             : (Array.from(colFilterTables)[0] as string)
@@ -414,7 +415,7 @@ class ApplyDiffsService {
                         for (const colPath in andConditions) {
                             const property = colPropertyMappings[colPath]
                             const value = andConditions[colPath]
-                            const fuzzyMatch = !!property?.match(/address/i)
+                            const fuzzyMatch = !!property?.match(/address/i) && constants.MATCH_CASE_INSENSITIVE_ADDRESSES
                             if (j === 0) {
                                 fuzzyMatch
                                     ? builder.whereRaw(`${identPath(colPath)} ~* ?`, [value])
@@ -436,7 +437,7 @@ class ApplyDiffsService {
             const filterProperty = lookupColFilterProperties[0]
 
             // Fuzzy-match on address properties.
-            if (whereInColValues.length && !!filterProperty.match(/address/i)) {
+            if (whereInColValues.length && !!filterProperty.match(/address/i) && constants.MATCH_CASE_INSENSITIVE_ADDRESSES) {
                 query.whereRaw(`${identPath(filterColPath)} ~* ?`, [whereInColValues.join('|')])
             } else {
                 whereInColValues.length && query.whereIn(filterColPath, whereInColValues)
@@ -458,7 +459,7 @@ class ApplyDiffsService {
                     let value = record[colPath]
                     const property = lookupColFilterProperties[i]
                     // Auto-lowercase addresses.
-                    if (value && !!property.match(/address/i)) {
+                    if (value && !!property.match(/address/i) && constants.MATCH_CASE_INSENSITIVE_ADDRESSES) {
                         value = value.toLowerCase()
                     }
                     // Auto-stringify chain ids.
@@ -545,7 +546,7 @@ class ApplyDiffsService {
                         `${ident(colName)} && ARRAY[${values.map(() => '?').join(',')}]`,
                         values,
                     ])
-                } else if (!!property.match(/address/i)) {
+                } else if (!!property.match(/address/i) && constants.MATCH_CASE_INSENSITIVE_ADDRESSES) {
                     foreignTableQueryConditions[colTablePath].whereRaw.push([
                         `${ident(colName)} ~* ?`,
                         [values.join('|')],
@@ -596,7 +597,7 @@ class ApplyDiffsService {
                         let value = record[colName]
                         const property = queryConditions.properties[i]
                         // Auto-lowercase addresses.
-                        if (value && !!property.match(/address/i)) {
+                        if (value && !!property.match(/address/i) && constants.MATCH_CASE_INSENSITIVE_ADDRESSES) {
                             value = value.toLowerCase()
                         }
                         // Auto-stringify chain ids.

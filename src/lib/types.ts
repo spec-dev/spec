@@ -133,11 +133,7 @@ export interface EventSub {
     liveObjectIds: string[]
     cursor: EventCursor
     cursorChanged: boolean
-    shouldBuffer: boolean
-    buffer: SpecEvent[]
-    last: StringKeyMap | null
-    isGapFilling: boolean
-    setToLastAfterFillingGaps: StringKeyMap | null
+    lastNonceSeen: string
 }
 
 export interface ReorgEvent {

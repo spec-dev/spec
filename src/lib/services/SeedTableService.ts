@@ -804,7 +804,7 @@ class SeedTableService {
             if (ignoreData) continue
 
             /**
-             * TODO: Bring back once you finalize new multi-col FK strategy
+             * TODO: Bring back once you finalize new multi-table FK strategy
              */
             // const otherForeignLookups = {}
             // for (let i = 0; i < otherLinkedForeignTables.length; i++) {
@@ -1130,7 +1130,7 @@ class SeedTableService {
                         let castedValue = originalValue
 
                         // Auto-lowercase addresses.
-                        if (originalValue && !!property.match(/address/i)) {
+                        if (originalValue && !!property.match(/address/i) && constants.MATCH_CASE_INSENSITIVE_ADDRESSES) {
                             castedValue = originalValue.toLowerCase()
                         }
                         // Auto-stringify chain ids.
