@@ -415,7 +415,9 @@ class ApplyDiffsService {
                         for (const colPath in andConditions) {
                             const property = colPropertyMappings[colPath]
                             const value = andConditions[colPath]
-                            const fuzzyMatch = !!property?.match(/address/i) && constants.MATCH_CASE_INSENSITIVE_ADDRESSES
+                            const fuzzyMatch =
+                                !!property?.match(/address/i) &&
+                                constants.MATCH_CASE_INSENSITIVE_ADDRESSES
                             if (j === 0) {
                                 fuzzyMatch
                                     ? builder.whereRaw(`${identPath(colPath)} ~* ?`, [value])
@@ -437,7 +439,11 @@ class ApplyDiffsService {
             const filterProperty = lookupColFilterProperties[0]
 
             // Fuzzy-match on address properties.
-            if (whereInColValues.length && !!filterProperty.match(/address/i) && constants.MATCH_CASE_INSENSITIVE_ADDRESSES) {
+            if (
+                whereInColValues.length &&
+                !!filterProperty.match(/address/i) &&
+                constants.MATCH_CASE_INSENSITIVE_ADDRESSES
+            ) {
                 query.whereRaw(`${identPath(filterColPath)} ~* ?`, [whereInColValues.join('|')])
             } else {
                 whereInColValues.length && query.whereIn(filterColPath, whereInColValues)
@@ -459,7 +465,11 @@ class ApplyDiffsService {
                     let value = record[colPath]
                     const property = lookupColFilterProperties[i]
                     // Auto-lowercase addresses.
-                    if (value && !!property.match(/address/i) && constants.MATCH_CASE_INSENSITIVE_ADDRESSES) {
+                    if (
+                        value &&
+                        !!property.match(/address/i) &&
+                        constants.MATCH_CASE_INSENSITIVE_ADDRESSES
+                    ) {
                         value = value.toLowerCase()
                     }
                     // Auto-stringify chain ids.
@@ -546,7 +556,10 @@ class ApplyDiffsService {
                         `${ident(colName)} && ARRAY[${values.map(() => '?').join(',')}]`,
                         values,
                     ])
-                } else if (!!property.match(/address/i) && constants.MATCH_CASE_INSENSITIVE_ADDRESSES) {
+                } else if (
+                    !!property.match(/address/i) &&
+                    constants.MATCH_CASE_INSENSITIVE_ADDRESSES
+                ) {
                     foreignTableQueryConditions[colTablePath].whereRaw.push([
                         `${ident(colName)} ~* ?`,
                         [values.join('|')],
@@ -597,7 +610,11 @@ class ApplyDiffsService {
                         let value = record[colName]
                         const property = queryConditions.properties[i]
                         // Auto-lowercase addresses.
-                        if (value && !!property.match(/address/i) && constants.MATCH_CASE_INSENSITIVE_ADDRESSES) {
+                        if (
+                            value &&
+                            !!property.match(/address/i) &&
+                            constants.MATCH_CASE_INSENSITIVE_ADDRESSES
+                        ) {
                             value = value.toLowerCase()
                         }
                         // Auto-stringify chain ids.

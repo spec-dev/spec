@@ -1130,7 +1130,11 @@ class SeedTableService {
                         let castedValue = originalValue
 
                         // Auto-lowercase addresses.
-                        if (originalValue && !!property.match(/address/i) && constants.MATCH_CASE_INSENSITIVE_ADDRESSES) {
+                        if (
+                            originalValue &&
+                            !!property.match(/address/i) &&
+                            constants.MATCH_CASE_INSENSITIVE_ADDRESSES
+                        ) {
                             castedValue = originalValue.toLowerCase()
                         }
                         // Auto-stringify chain ids.

@@ -55,7 +55,6 @@ import { importHandlers, getHandlers, CUSTOM_EVENT_HANDLER_KEY } from './lib/han
 import { subtractMinutes } from './lib/utils/time'
 
 class Spec {
-
     liveObjects: { [key: string]: LiveObject } = {}
 
     eventSubs: { [key: string]: EventSub } = {}
@@ -87,7 +86,7 @@ class Spec {
     seenEvents: LRU<string, boolean> = new LRU({
         max: constants.SEEN_EVENTS_CACHE_SIZE,
     })
-    
+
     async start() {
         await Promise.all([importHooks(), importHandlers()])
         this.customEventHandlers = getHandlers()
@@ -163,7 +162,7 @@ class Spec {
 
         // Load the last event seen for each subscription.
         await this._loadEventCursors()
-        
+
         // Fetch missed events for any subcription that already has an
         // existing event cursor (i.e. events that have been seen before).
         this.bufferNewEvents = true
@@ -211,7 +210,7 @@ class Spec {
             }
             return
         }
-        
+
         // Ensure at least one live object (or custom handler) will process this event.
         const hasCustomEventHandler = this.customEventHandlers.hasOwnProperty(event.name)
         const liveObjectIdsThatWillProcessEvent = (sub.liveObjectIds || []).filter(
@@ -234,7 +233,7 @@ class Spec {
         if (!lastNumericNonce || currentNumericNonce > lastNumericNonce) {
             this.eventSubs[event.name].lastNonceSeen = event.nonce
         }
-        
+
         const prevNonce = (event as StringKeyMap).prevNonce
         const isNonceMismatch = lastNonceSeen && prevNonce && lastNonceSeen !== prevNonce
         const gapExists = isNonceMismatch && currentNumericNonce > lastNumericNonce
@@ -242,7 +241,7 @@ class Spec {
             logger.warn(
                 chalk.magenta(
                     `Gap in "${event.name}" detected [${lastNonceSeen} -> ${event.nonce}]\n` +
-                    `Patching from ${lastNonceSeen}...`
+                        `Patching from ${lastNonceSeen}...`
                 )
             )
             await this._fetchEventsAfter({ name: event.name, nonce: lastNonceSeen })
@@ -269,7 +268,7 @@ class Spec {
             return
         }
         this._registerEventAsSeen(eventToProcessKey, subjects)
-    
+
         const processed = await this._processEvent(eventToProcess)
         processed && this._updateEventCursor(eventToProcess)
 
@@ -307,23 +306,27 @@ class Spec {
         const sorted = events.sort((a, b) => {
             const blockTimestampA = new Date(a.origin.blockTimestamp)
             const blockTimestampB = new Date(b.origin.blockTimestamp)
+            const txIndexA = a.origin.hasOwnProperty('transactionIndex')
+                ? // @ts-ignore
+                  parseInt(a.origin.transactionIndex)
+                : 0
+            const txIndexB = b.origin.hasOwnProperty('transactionIndex')
+                ? // @ts-ignore
+                  parseInt(b.origin.transactionIndex)
+                : 0
             // @ts-ignore
-            const txIndexA = a.origin.hasOwnProperty('transactionIndex') ? parseInt(a.origin.transactionIndex): 0
+            const logIndexA = a.origin.hasOwnProperty('logIndex') ? parseInt(a.origin.logIndex) : 0
             // @ts-ignore
-            const txIndexB = b.origin.hasOwnProperty('transactionIndex') ? parseInt(b.origin.transactionIndex): 0
-            // @ts-ignore
-            const logIndexA = a.origin.hasOwnProperty('logIndex') ? parseInt(a.origin.logIndex): 0
-            // @ts-ignore
-            const logIndexB = b.origin.hasOwnProperty('logIndex') ? parseInt(b.origin.logIndex): 0
+            const logIndexB = b.origin.hasOwnProperty('logIndex') ? parseInt(b.origin.logIndex) : 0
             const nonceFloatA = parseFloat(a.nonce.replace('-', '.'))
             const nonceFloatB = parseFloat(b.nonce.replace('-', '.'))
-            
+
             return (
                 // @ts-ignore
-                (blockTimestampA - blockTimestampB) ||
-                (txIndexA - txIndexB) || 
-                (logIndexA - logIndexB) ||
-                (nonceFloatA - nonceFloatB)
+                blockTimestampA - blockTimestampB ||
+                txIndexA - txIndexB ||
+                logIndexA - logIndexB ||
+                nonceFloatA - nonceFloatB
             )
         })
 
@@ -346,9 +349,7 @@ class Spec {
         const origin = event.origin
         const chainId = origin?.chainId
         const blockNumber = origin?.blockNumber
-        logger.info(
-            `[${chainId}:${blockNumber}] Processing ${event.name} (${event.nonce})...`
-        )
+        logger.info(`[${chainId}:${blockNumber}] Processing ${event.name} (${event.nonce})...`)
 
         // Run custom event handler (if exists).
         const customHandler = this.customEventHandlers[event.name]
@@ -385,7 +386,8 @@ class Spec {
             }
         }
 
-        const shouldRegisterWithCursor = !liveObjectIds.length || !processedEvent || !allTablesFrozen
+        const shouldRegisterWithCursor =
+            !liveObjectIds.length || !processedEvent || !allTablesFrozen
         return shouldRegisterWithCursor
     }
 
@@ -455,7 +457,7 @@ class Spec {
             return
         }
 
-        // Mark as done and process new events in the buffer 
+        // Mark as done and process new events in the buffer
         // unless there's another reorg actively happening.
         this.reorgSubs[chainId].isProcessing = false
         for (const chainId in this.reorgSubs) {
@@ -488,9 +490,11 @@ class Spec {
                 buffer: [],
             }
 
-            messageClient.on(this._formatReorgEventName(chainId), (event) =>
-                this._onReorg(event as unknown as ReorgEvent)
-            , { resolveVersion: false })
+            messageClient.on(
+                this._formatReorgEventName(chainId),
+                (event) => this._onReorg(event as unknown as ReorgEvent),
+                { resolveVersion: false }
+            )
         }
     }
 
@@ -522,11 +526,9 @@ class Spec {
             }
 
             newEventNames.push(newEventName)
-            
+
             // Subscribe to new events.
-            messageClient.on(newEventName, (event: SpecEvent) =>
-                this._addEventToBuffer(event)
-            )
+            messageClient.on(newEventName, (event: SpecEvent) => this._addEventToBuffer(event))
         }
 
         // Unsubscribe from events that aren't needed anymore.
@@ -535,9 +537,7 @@ class Spec {
         // Subscribe to events for custom handlers.
         for (const eventName in this.customEventHandlers) {
             if (this.eventSubs.hasOwnProperty(eventName)) continue
-            messageClient.on(eventName, (event: SpecEvent) =>
-                this._addEventToBuffer(event)
-            )
+            messageClient.on(eventName, (event: SpecEvent) => this._addEventToBuffer(event))
 
             // Register sub with no live object ids.
             this.eventSubs[eventName] = {
@@ -594,7 +594,7 @@ class Spec {
                     async (events: SpecEvent[]) => {
                         const handleEvents = async () => {
                             logger.info(chalk.cyanBright(`Fetched ${events.length} missed events.`))
-                            events.forEach(event => this._addEventToBuffer(event))
+                            events.forEach((event) => this._addEventToBuffer(event))
                         }
                         promises.push(handleEvents())
                     },
@@ -623,7 +623,7 @@ class Spec {
                     async (events: SpecEvent[]) => {
                         const handleEvents = async () => {
                             i += events.length
-                            events.forEach(event => this._addEventToBuffer(event))
+                            events.forEach((event) => this._addEventToBuffer(event))
                         }
                         promises.push(handleEvents())
                     },
@@ -1174,10 +1174,7 @@ class Spec {
             if (event.origin.chainId !== reorgEvent.chainId) continue
             const eventBlockNumber = Number(event.origin.blockNumber)
             const eventTsDate = new Date(event.origin.eventTimestamp)
-            if (
-                eventBlockNumber >= rollbackToBlockNumber &&
-                eventTsDate < rollbackEventTsDate
-            ) {
+            if (eventBlockNumber >= rollbackToBlockNumber && eventTsDate < rollbackEventTsDate) {
                 // @ts-ignore
                 this.buffer[key].origin.invalid = true
             }
@@ -1425,7 +1422,7 @@ class Spec {
     }
 
     _toNumericNonce(nonce: string): number {
-       return parseFloat(nonce.replace('-', '.'))
+        return parseFloat(nonce.replace('-', '.'))
     }
 }
 

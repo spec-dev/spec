@@ -127,7 +127,9 @@ export const constants: StringKeyMap = {
     CHAIN_ID_PROPERTY: 'chainId',
     BLOCK_NUMBER_PROPERTY: 'blockNumber',
 
-    // Whether to allow live relationships that 
+    // Whether to allow live relationships that
     // use non-lowercased addresses as filter columns.
-    MATCH_CASE_INSENSITIVE_ADDRESSES: ['true', true].includes(ev('MATCH_CASE_INSENSITIVE_ADDRESSES')),
+    MATCH_CASE_INSENSITIVE_ADDRESSES: ['true', true].includes(
+        ev('MATCH_CASE_INSENSITIVE_ADDRESSES')
+    ),
 }

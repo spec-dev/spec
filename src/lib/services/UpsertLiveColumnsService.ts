@@ -15,7 +15,6 @@ import {
 import logger from '../logger'
 
 class UpsertLiveColumnsService {
-
     querySpecs: LiveColumnQuerySpec[] = []
 
     prevLiveColumns: LiveColumn[] = []
@@ -46,11 +45,11 @@ class UpsertLiveColumnsService {
     async _upsertLinks() {
         // Get links from config.
         const linksInConfig = this._getLinksInConfig()
-        const uniqueLinkProperties = Object.keys(linksInConfig).map(key => {
+        const uniqueLinkProperties = Object.keys(linksInConfig).map((key) => {
             const [liveObjectId, tablePath] = key.split(':')
             return { liveObjectId, tablePath }
         })
-        if (!uniqueLinkProperties.length) return 
+        if (!uniqueLinkProperties.length) return
 
         // Get links from database.
         let cachedLinks = []
@@ -77,9 +76,9 @@ class UpsertLiveColumnsService {
                 liveObjectId,
                 tablePath,
                 uniqueBy: mostRecentLinkData.uniqueBy.sort().join(','),
-                filterBy: mostRecentLinkData.filterBy.length 
+                filterBy: mostRecentLinkData.filterBy.length
                     ? hash(JSON.stringify(mostRecentLinkData.filterBy))
-                    : null
+                    : null,
             }
             const prevLinkRecord = mappedCachedLinks[linkKey]
 
@@ -93,12 +92,12 @@ class UpsertLiveColumnsService {
             if (linkRecord.uniqueBy !== prevLinkRecord.uniqueBy) {
                 linksToUpsert.push(linkRecord)
                 continue
-            }            
+            }
 
             // Compare current vs. prev filterBy
             if (linkRecord.filterBy !== prevLinkRecord.filterBy) {
                 linksToUpsert.push(linkRecord)
-            }    
+            }
         }
         if (!linksToUpsert.length) return
 
@@ -134,7 +133,8 @@ class UpsertLiveColumnsService {
 
             for (const liveColumn of liveColumnsForLink) {
                 const { columnPath, liveProperty } = liveColumn
-                if (liveColumnIdsAlreadyPlannedForSeed.has([columnPath, liveProperty].join(':'))) continue
+                if (liveColumnIdsAlreadyPlannedForSeed.has([columnPath, liveProperty].join(':')))
+                    continue
                 this.liveColumnsToUpsert.push(liveColumn)
             }
         }
@@ -235,14 +235,16 @@ class UpsertLiveColumnsService {
             const linkKey = [liveObjectId, tablePath].join(':')
             const link = config.getLink(liveObjectId, tablePath)
             if (!link) {
-                logger.warn(`Upsert links — Link not found (tablePath=${tablePath}, liveObjectId=${liveObjectId})`)
+                logger.warn(
+                    `Upsert links — Link not found (tablePath=${tablePath}, liveObjectId=${liveObjectId})`
+                )
                 continue
             }
 
             const { uniqueBy, filterBy } = link
-            linksInConfig[linkKey] = { 
-                uniqueBy: uniqueBy || [], 
-                filterBy: filterBy || []
+            linksInConfig[linkKey] = {
+                uniqueBy: uniqueBy || [],
+                filterBy: filterBy || [],
             }
         }
         return linksInConfig
