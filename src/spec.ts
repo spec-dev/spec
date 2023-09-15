@@ -307,17 +307,13 @@ class Spec {
             const blockTimestampA = new Date(a.origin.blockTimestamp)
             const blockTimestampB = new Date(b.origin.blockTimestamp)
             const txIndexA = a.origin.hasOwnProperty('transactionIndex')
-                ? // @ts-ignore
-                  parseInt(a.origin.transactionIndex)
+                ? Number(a.origin.transactionIndex)
                 : 0
             const txIndexB = b.origin.hasOwnProperty('transactionIndex')
-                ? // @ts-ignore
-                  parseInt(b.origin.transactionIndex)
+                ? Number(b.origin.transactionIndex)
                 : 0
-            // @ts-ignore
-            const logIndexA = a.origin.hasOwnProperty('logIndex') ? parseInt(a.origin.logIndex) : 0
-            // @ts-ignore
-            const logIndexB = b.origin.hasOwnProperty('logIndex') ? parseInt(b.origin.logIndex) : 0
+            const logIndexA = a.origin.hasOwnProperty('logIndex') ? Number(a.origin.logIndex) : 0
+            const logIndexB = b.origin.hasOwnProperty('logIndex') ? Number(b.origin.logIndex) : 0
             const nonceFloatA = parseFloat(a.nonce.replace('-', '.'))
             const nonceFloatB = parseFloat(b.nonce.replace('-', '.'))
 
