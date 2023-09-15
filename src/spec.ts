@@ -87,7 +87,7 @@ class Spec {
     seenEvents: LRU<string, boolean> = new LRU({
         max: constants.SEEN_EVENTS_CACHE_SIZE,
     })
-
+    
     async start() {
         await Promise.all([importHooks(), importHandlers()])
         this.customEventHandlers = getHandlers()
@@ -227,7 +227,8 @@ class Spec {
             return
         }
 
-        const lastNumericNonce = sub.lastNonceSeen ? this._toNumericNonce(sub.lastNonceSeen) : null
+        const lastNonceSeen = sub.lastNonceSeen
+        const lastNumericNonce = lastNonceSeen ? this._toNumericNonce(lastNonceSeen) : null
         const currentNumericNonce = this._toNumericNonce(event.nonce)
 
         if (!lastNumericNonce || currentNumericNonce > lastNumericNonce) {
@@ -235,16 +236,16 @@ class Spec {
         }
         
         const prevNonce = (event as StringKeyMap).prevNonce
-        const isNonceMismatch = sub.lastNonceSeen && prevNonce && sub.lastNonceSeen !== prevNonce
+        const isNonceMismatch = lastNonceSeen && prevNonce && lastNonceSeen !== prevNonce
         const gapExists = isNonceMismatch && currentNumericNonce > lastNumericNonce
         if (gapExists) {
             logger.warn(
                 chalk.magenta(
-                    `Gap in "${event.name}" detected [${sub.lastNonceSeen} -> ${event.nonce}]\n` +
-                    `Patching from ${sub.lastNonceSeen}...`
+                    `Gap in "${event.name}" detected [${lastNonceSeen} -> ${event.nonce}]\n` +
+                    `Patching from ${lastNonceSeen}...`
                 )
             )
-            await this._fetchEventsAfter({ name: event.name, nonce: sub.lastNonceSeen })
+            await this._fetchEventsAfter({ name: event.name, nonce: lastNonceSeen })
             await this._pullFromEventBuffer()
             return
         }
@@ -445,7 +446,7 @@ class Spec {
                     `[${chainId}:${rollbackToBlockNumber}] Reorg failed: ${stringify(err)}`
                 )
             )
-            await freezeTablesForChainId(service.tablePathsWithRollbackAttempted, chainId)
+            await freezeTablesForChainId(service.tablePaths, chainId)
         }
 
         // Keep pulling from the buffer until all reorgs are complete.
@@ -489,7 +490,7 @@ class Spec {
 
             messageClient.on(this._formatReorgEventName(chainId), (event) =>
                 this._onReorg(event as unknown as ReorgEvent)
-            )
+            , { resolveVersion: false })
         }
     }
 
