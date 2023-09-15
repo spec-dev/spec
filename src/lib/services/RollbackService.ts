@@ -12,7 +12,6 @@ import {
     deleteTableOpsAtOrAboveNumber,
     freezeTablesForChainId,
 } from '../db/spec'
-import { tablesMeta } from '../db/tablesMeta'
 
 class RollbackService {
     blockNumber: number
@@ -20,8 +19,6 @@ class RollbackService {
     chainId: string
 
     recordSnapshotOps: { [key: string]: OpRecord[] } = {}
-
-    tablePathsWithRollbackAttempted: string[] = []
 
     get tablePaths(): string[] {
         return Object.keys(this.recordSnapshotOps)
@@ -49,7 +46,7 @@ class RollbackService {
             isEnabledAbove: this.blockNumber,
         }))
         if (!(await upsertOpTrackingEntries(opTrackingUpserts))) {
-            throw `Failed to set new op tracking floor during rollback to ${this.blockNumber}`
+            throw `[${this.chainId}] Failed to set new op tracking floor during rollback to ${this.blockNumber}`
         }
 
         // Roll records back to their previous states prior to the target block number.
@@ -65,7 +62,7 @@ class RollbackService {
                 this.chainId
             )
         } catch (err) {
-            throw `Failed getting ops >= ${this.blockNumber}: ${err}`
+            throw `[${this.chainId}] Failed getting ops >= ${this.blockNumber}: ${err}`
         }
 
         // Group by table path.
@@ -77,38 +74,9 @@ class RollbackService {
     }
 
     async _rollbackRecords() {
-        const orderedTablePaths = this._getTablePathsInReverseConstraintOrder()
-        for (const tablePath of orderedTablePaths) {
-            this.tablePathsWithRollbackAttempted.push(tablePath)
-            await this._rollbackRecordsForTable(tablePath)
-        }
-    }
-
-    _getTablePathsInReverseConstraintOrder(): string[] {        
-        const tablePaths = this.tablePaths
-        for (const tablePath of tablePaths) {
-            const meta = tablesMeta[tablePath]
-            if (!meta) {
-                logger.error(
-                    `[${this.chainId}:${this.blockNumber}] Rollback error — no metadata found for table ${tablePath}.\n` +
-                    'Not rolling back.' 
-                )
-                continue
-            }
-
-            const foreignKeys = meta.foreignKeys || []
-            if (!foreignKeys.length) {
-
-            }
-
-            for (const fk of foreignKeys) {
-
-            }
-
-        }
-
-        tablesMeta
-        return []
+        await Promise.all(
+            this.tablePaths.map((tablePath) => this._rollbackRecordsForTable(tablePath))
+        )
     }
 
     async _rollbackRecordsForTable(tablePath: string) {
@@ -249,7 +217,14 @@ class RollbackService {
             for (const colName of sortedRecordKeys) {
                 if (conflictColNamesSet.has(colName)) continue
                 updateColNames.push(colName)
-                updateColValues.push(opRecord.before[colName])
+
+                // Re-stringify JSON column types.
+                let colValue = opRecord.before[colName]
+                if (colValue && typeof colValue === 'object') {
+                    colValue = this._stringifyObjectTypeColValue(colName, colValue)
+                }
+
+                updateColValues.push(colValue)
             }
 
             const uniqueKey = ['c', ...conflictColNames, 'u', ...updateColNames].join(':')
@@ -338,6 +313,16 @@ class RollbackService {
             )
         )
         return true
+    }
+
+    _stringifyObjectTypeColValue(colName: string, value: any): any {
+        const originalValue = value
+        try {
+            return JSON.stringify(value)
+        } catch (err) {
+            logger.error(`Error stringifying ${colName} during rollback: ${value} - ${err}`)
+            return originalValue
+        }
     }
 }
 
