@@ -249,17 +249,15 @@ class Spec {
             return
         }
 
-        const eventToProcess = this._getEarliestInBufferByBlockTime()
-        const eventToProcessKey = this._formatBufferEventKey(eventToProcess)
-        delete this.buffer[eventToProcessKey]
+        delete this.buffer[eventKey]
 
         // Prevent the re-processing of duplicates.
         const subjects = [...liveObjectIdsThatWillProcessEvent]
         if (hasCustomEventHandler) {
             subjects.push(CUSTOM_EVENT_HANDLER_KEY)
         }
-        if (this._wasEventSeenByAll(eventToProcessKey, subjects)) {
-            logger.warn(`Duplicate event seen - ${eventToProcessKey} - skipping.`)
+        if (this._wasEventSeenByAll(eventKey, subjects)) {
+            logger.warn(`Duplicate event seen - ${eventKey} - skipping.`)
             if (Object.keys(this.buffer).length) {
                 await this._pullFromEventBuffer()
             } else {
@@ -267,10 +265,10 @@ class Spec {
             }
             return
         }
-        this._registerEventAsSeen(eventToProcessKey, subjects)
+        this._registerEventAsSeen(eventKey, subjects)
 
-        const processed = await this._processEvent(eventToProcess)
-        processed && this._updateEventCursor(eventToProcess)
+        const processed = await this._processEvent(event)
+        processed && this._updateEventCursor(event)
 
         if (Object.keys(this.buffer).length) {
             await this._pullFromEventBuffer()
@@ -294,36 +292,6 @@ class Spec {
             const nonceFloatA = parseFloat(a.nonce.replace('-', '.'))
             const nonceFloatB = parseFloat(b.nonce.replace('-', '.'))
             return nonceFloatA - nonceFloatB
-        })
-
-        return sorted[0]
-    }
-
-    _getEarliestInBufferByBlockTime(): SpecEvent | null {
-        const events = Object.values(this.buffer)
-        if (!events.length) return null
-
-        const sorted = events.sort((a, b) => {
-            const blockTimestampA = new Date(a.origin.blockTimestamp)
-            const blockTimestampB = new Date(b.origin.blockTimestamp)
-            const txIndexA = a.origin.hasOwnProperty('transactionIndex')
-                ? Number(a.origin.transactionIndex)
-                : 0
-            const txIndexB = b.origin.hasOwnProperty('transactionIndex')
-                ? Number(b.origin.transactionIndex)
-                : 0
-            const logIndexA = a.origin.hasOwnProperty('logIndex') ? Number(a.origin.logIndex) : 0
-            const logIndexB = b.origin.hasOwnProperty('logIndex') ? Number(b.origin.logIndex) : 0
-            const nonceFloatA = parseFloat(a.nonce.replace('-', '.'))
-            const nonceFloatB = parseFloat(b.nonce.replace('-', '.'))
-
-            return (
-                // @ts-ignore
-                blockTimestampA - blockTimestampB ||
-                txIndexA - txIndexB ||
-                logIndexA - logIndexB ||
-                nonceFloatA - nonceFloatB
-            )
         })
 
         return sorted[0]
