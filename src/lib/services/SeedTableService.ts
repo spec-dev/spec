@@ -384,13 +384,12 @@ class SeedTableService {
 
         const tf = performance.now()
         const seconds = Number(((tf - t0) / 1000).toFixed(2))
-        const rate = Math.round(this.seedCount / seconds)
         logger.info(chalk.cyanBright('Done.'))
         logger.info(
             chalk.cyanBright(
                 `Upserted ${this.seedCount.toLocaleString(
                     'en-US'
-                )} records in ${seconds} seconds (${rate.toLocaleString('en-US')} rows/s)`
+                )} records in ${seconds} seconds.`
             )
         )
     }
@@ -1389,7 +1388,7 @@ class SeedTableService {
             chalk.cyanBright(
                 `Upserted ${this.seedCount.toLocaleString('en-US')} ${
                     this.seedTableName
-                } records in ${seconds} seconds.`
+                } records. in ${seconds} seconds.`
             )
         )
     }
