@@ -387,9 +387,7 @@ class SeedTableService {
         logger.info(chalk.cyanBright('Done.'))
         logger.info(
             chalk.cyanBright(
-                `Upserted ${this.seedCount.toLocaleString(
-                    'en-US'
-                )} records in ${seconds} seconds.`
+                `Upserted ${this.seedCount.toLocaleString('en-US')} records in ${seconds} seconds.`
             )
         )
     }
