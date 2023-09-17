@@ -57,7 +57,7 @@ export const constants: StringKeyMap = {
     STREAMING_SEED_UPSERT_BATCH_SIZE: Number(ev('STREAMING_SEED_UPSERT_BATCH_SIZE', 1000)),
 
     // How often to save the most recent events recieved from the events API to the DB.
-    SAVE_EVENT_CURSORS_INTERVAL: Number(ev('SAVE_EVENT_CURSORS_INTERVAL', 1000)),
+    SAVE_EVENT_CURSORS_INTERVAL: Number(ev('SAVE_EVENT_CURSORS_INTERVAL', 100)),
 
     // How often to poll the database schema for any changes.
     ANALYZE_TABLES_INTERVAL: Number(ev('ANALYZE_TABLES_INTERVAL', 30000)),
@@ -126,4 +126,10 @@ export const constants: StringKeyMap = {
     // Special live object properties.
     CHAIN_ID_PROPERTY: 'chainId',
     BLOCK_NUMBER_PROPERTY: 'blockNumber',
+
+    // Whether to allow live relationships that
+    // use non-lowercased addresses as filter columns.
+    MATCH_CASE_INSENSITIVE_ADDRESSES: ['true', true].includes(
+        ev('MATCH_CASE_INSENSITIVE_ADDRESSES')
+    ),
 }

@@ -217,7 +217,14 @@ class RollbackService {
             for (const colName of sortedRecordKeys) {
                 if (conflictColNamesSet.has(colName)) continue
                 updateColNames.push(colName)
-                updateColValues.push(opRecord.before[colName])
+
+                // Re-stringify JSON column types.
+                let colValue = opRecord.before[colName]
+                if (colValue && typeof colValue === 'object') {
+                    colValue = this._stringifyObjectTypeColValue(colName, colValue)
+                }
+
+                updateColValues.push(colValue)
             }
 
             const uniqueKey = ['c', ...conflictColNames, 'u', ...updateColNames].join(':')
@@ -306,6 +313,16 @@ class RollbackService {
             )
         )
         return true
+    }
+
+    _stringifyObjectTypeColValue(colName: string, value: any): any {
+        const originalValue = value
+        try {
+            return JSON.stringify(value)
+        } catch (err) {
+            logger.error(`Error stringifying ${colName} during rollback: ${value} - ${err}`)
+            return originalValue
+        }
     }
 }
 

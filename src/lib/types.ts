@@ -133,11 +133,7 @@ export interface EventSub {
     liveObjectIds: string[]
     cursor: EventCursor
     cursorChanged: boolean
-    shouldBuffer: boolean
-    buffer: SpecEvent[]
-    last: StringKeyMap | null
-    isGapFilling: boolean
-    setToLastAfterFillingGaps: StringKeyMap | null
+    lastNonceSeen: string
 }
 
 export interface ReorgEvent {
@@ -242,6 +238,13 @@ export interface FrozenTable {
     id: number
     tablePath: string
     chainId: string
+}
+
+export interface LinksTableRecord {
+    tablePath: string
+    liveObjectId: string
+    uniqueBy: string
+    filterBy: string | null
 }
 
 export interface LiveColumn {

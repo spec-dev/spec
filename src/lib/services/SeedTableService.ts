@@ -384,13 +384,12 @@ class SeedTableService {
 
         const tf = performance.now()
         const seconds = Number(((tf - t0) / 1000).toFixed(2))
-        const rate = Math.round(this.seedCount / seconds)
         logger.info(chalk.cyanBright('Done.'))
         logger.info(
             chalk.cyanBright(
                 `Upserted ${this.seedCount.toLocaleString(
                     'en-US'
-                )} records in ${seconds} seconds (${rate.toLocaleString('en-US')} rows/s)`
+                )} records in ${seconds} seconds.`
             )
         )
     }
@@ -804,7 +803,7 @@ class SeedTableService {
             if (ignoreData) continue
 
             /**
-             * TODO: Bring back once you finalize new multi-col FK strategy
+             * TODO: Bring back once you finalize new multi-table FK strategy
              */
             // const otherForeignLookups = {}
             // for (let i = 0; i < otherLinkedForeignTables.length; i++) {
@@ -1130,7 +1129,11 @@ class SeedTableService {
                         let castedValue = originalValue
 
                         // Auto-lowercase addresses.
-                        if (originalValue && !!property.match(/address/i)) {
+                        if (
+                            originalValue &&
+                            !!property.match(/address/i) &&
+                            constants.MATCH_CASE_INSENSITIVE_ADDRESSES
+                        ) {
                             castedValue = originalValue.toLowerCase()
                         }
                         // Auto-stringify chain ids.
@@ -1385,7 +1388,7 @@ class SeedTableService {
             chalk.cyanBright(
                 `Upserted ${this.seedCount.toLocaleString('en-US')} ${
                     this.seedTableName
-                } records in ${seconds} seconds.`
+                } records. in ${seconds} seconds.`
             )
         )
     }

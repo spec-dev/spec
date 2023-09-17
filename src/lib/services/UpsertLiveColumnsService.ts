@@ -1,13 +1,18 @@
-import { LiveColumnQuerySpec, LiveColumn } from '../types'
+import { LiveColumnQuerySpec, LiveColumn, StringKeyMap } from '../types'
 import config from '../config'
 import { QueryError } from '../errors'
 import { mapBy } from '../utils/formatters'
+import { hash } from '../utils/hash'
 import {
     SPEC_SCHEMA_NAME,
     LIVE_COLUMNS_TABLE_NAME,
     getLiveColumnsForColPaths,
     saveLiveColumns,
+    getCachedLinks,
+    LINKS_TABLE_NAME,
+    saveLinks,
 } from '../db/spec'
+import logger from '../logger'
 
 class UpsertLiveColumnsService {
     querySpecs: LiveColumnQuerySpec[] = []
@@ -21,11 +26,12 @@ class UpsertLiveColumnsService {
     newLiveTablePaths: Set<string> = new Set()
 
     async perform() {
-        await this._getExistingLiveColumns()
         await this._upsertLiveColumns()
+        await this._upsertLinks()
     }
 
     async _upsertLiveColumns() {
+        await this._getExistingLiveColumns()
         this._findLiveColumnsToUpsert()
 
         if (!this.liveColumnsToUpsert.length) return
@@ -33,6 +39,104 @@ class UpsertLiveColumnsService {
             await saveLiveColumns(this.liveColumnsToUpsert)
         } catch (err) {
             throw new QueryError('upsert', SPEC_SCHEMA_NAME, LIVE_COLUMNS_TABLE_NAME, err)
+        }
+    }
+
+    async _upsertLinks() {
+        // Get links from config.
+        const linksInConfig = this._getLinksInConfig()
+        const uniqueLinkProperties = Object.keys(linksInConfig).map((key) => {
+            const [liveObjectId, tablePath] = key.split(':')
+            return { liveObjectId, tablePath }
+        })
+        if (!uniqueLinkProperties.length) return
+
+        // Get links from database.
+        let cachedLinks = []
+        try {
+            cachedLinks = await getCachedLinks(uniqueLinkProperties)
+        } catch (err) {
+            throw new QueryError('select', SPEC_SCHEMA_NAME, LINKS_TABLE_NAME, err)
+        }
+        const mappedCachedLinks = {}
+        for (const cachedLink of cachedLinks) {
+            const linkKey = [cachedLink.liveObjectId, cachedLink.tablePath].join(':')
+            mappedCachedLinks[linkKey] = {
+                uniqueBy: cachedLink.uniqueBy,
+                filterBy: cachedLink.filterBy || null,
+            }
+        }
+
+        // Compare links for diffs.
+        const linksToUpsert = []
+        for (const linkKey in linksInConfig) {
+            const [liveObjectId, tablePath] = linkKey.split(':')
+            const mostRecentLinkData = linksInConfig[linkKey]
+            const linkRecord = {
+                liveObjectId,
+                tablePath,
+                uniqueBy: mostRecentLinkData.uniqueBy.sort().join(','),
+                filterBy: mostRecentLinkData.filterBy.length
+                    ? hash(JSON.stringify(mostRecentLinkData.filterBy))
+                    : null,
+            }
+            const prevLinkRecord = mappedCachedLinks[linkKey]
+
+            // Completely new link.
+            if (!prevLinkRecord) {
+                linksToUpsert.push(linkRecord)
+                continue
+            }
+
+            // Compare current vs. prev uniqueBy
+            if (linkRecord.uniqueBy !== prevLinkRecord.uniqueBy) {
+                linksToUpsert.push(linkRecord)
+                continue
+            }
+
+            // Compare current vs. prev filterBy
+            if (linkRecord.filterBy !== prevLinkRecord.filterBy) {
+                linksToUpsert.push(linkRecord)
+            }
+        }
+        if (!linksToUpsert.length) return
+
+        // Save the links that changed.
+        try {
+            await saveLinks(linksToUpsert)
+        } catch (err) {
+            throw new QueryError('upsert', SPEC_SCHEMA_NAME, LINKS_TABLE_NAME, err)
+        }
+
+        // Aggregate all live columns by their links.
+        const allLiveColumnsByLink = {}
+        for (const { columnPath, liveProperty } of this.querySpecs) {
+            const [schema, table, _] = columnPath.split('.')
+            const colTablePath = [schema, table].join('.')
+            const colLiveObjectId = liveProperty.split(':')[0]
+            const linkKey = [colLiveObjectId, colTablePath].join(':')
+            allLiveColumnsByLink[linkKey] = allLiveColumnsByLink[linkKey] || []
+            allLiveColumnsByLink[linkKey].push({ columnPath, liveProperty })
+        }
+
+        // Get a set of the unique live columns that were going to already be upserted.
+        const liveColumnIdsAlreadyPlannedForSeed = new Set()
+        for (const { columnPath, liveProperty } of this.liveColumnsToUpsert) {
+            liveColumnIdsAlreadyPlannedForSeed.add([columnPath, liveProperty].join(':'))
+        }
+
+        // Add any live columns associated with the links that changed to the `this.liveColumnsToUpsert`
+        // array after the fact, so that users of this class will assume they need to be reseeded.
+        for (const { liveObjectId, tablePath } of linksToUpsert) {
+            const linkKey = [liveObjectId, tablePath].join(':')
+            const liveColumnsForLink = allLiveColumnsByLink[linkKey] || []
+
+            for (const liveColumn of liveColumnsForLink) {
+                const { columnPath, liveProperty } = liveColumn
+                if (liveColumnIdsAlreadyPlannedForSeed.has([columnPath, liveProperty].join(':')))
+                    continue
+                this.liveColumnsToUpsert.push(liveColumn)
+            }
         }
     }
 
@@ -119,6 +223,31 @@ class UpsertLiveColumnsService {
             }
         }
         this.querySpecs = liveColumnQuerySpecs
+    }
+
+    _getLinksInConfig(): StringKeyMap {
+        const linksInConfig = {}
+        for (const { columnPath, liveProperty } of this.querySpecs) {
+            const [schema, table, _] = columnPath.split('.')
+            const tablePath = [schema, table].join('.')
+            const [liveObjectId, __] = liveProperty.split(':')
+
+            const linkKey = [liveObjectId, tablePath].join(':')
+            const link = config.getLink(liveObjectId, tablePath)
+            if (!link) {
+                logger.warn(
+                    `Upsert links — Link not found (tablePath=${tablePath}, liveObjectId=${liveObjectId})`
+                )
+                continue
+            }
+
+            const { uniqueBy, filterBy } = link
+            linksInConfig[linkKey] = {
+                uniqueBy: uniqueBy || [],
+                filterBy: filterBy || [],
+            }
+        }
+        return linksInConfig
     }
 }
 

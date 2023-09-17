@@ -134,7 +134,8 @@ class RunOpService {
         for (const record of data) {
             const updates = {}
             for (const colName of jsonColNames) {
-                updates[colName] = stringify(record[colName])
+                const value = record[colName]
+                updates[colName] = typeof value === 'object' ? stringify(value) : value
             }
             newData.push({
                 ...record,
