@@ -132,4 +132,5 @@ export const constants: StringKeyMap = {
     MATCH_CASE_INSENSITIVE_ADDRESSES: ['true', true].includes(
         ev('MATCH_CASE_INSENSITIVE_ADDRESSES')
     ),
+    RESEED_QUEUE_CHANNEL: 'spec_new_reseed_job',
 }
