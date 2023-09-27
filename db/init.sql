@@ -197,6 +197,19 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Reseed Queue Trigger Function
+CREATE OR REPLACE FUNCTION spec_reseed_queue_sub() RETURNS trigger AS $$
+DECLARE
+    rec RECORD;
+    payload TEXT;
+BEGIN
+    rec := NEW;
+    payload := '{"data":' || row_to_json(rec) || '}';
+    PERFORM pg_notify('spec_new_reseed_job', payload);
+    RETURN rec;
+END;
+$$ LANGUAGE plpgsql;
+
 --=======================================================
 -- SPEC SCHEMA
 --=======================================================
@@ -304,3 +317,15 @@ comment on table spec.frozen_tables is 'Spec: Live tables actively ignoring new 
 create unique index idx_frozen_table_chain on spec.frozen_tables(table_path, chain_id); 
 create index idx_frozen_tables_by_chain on spec.frozen_tables(chain_id); 
 alter table spec.frozen_tables owner to spec;
+
+-- Reseed Queue
+create table if not exists spec.reseed_queue (
+    id serial primary key,
+    table_name character varying not null,
+    column_names character varying not null,
+    status character varying not null,
+    created_at timestamp with time zone not null default(now() at time zone 'utc')
+);
+comment on table spec.reseed_queue is 'Spec: Job queue for re-seeding live tables.';
+alter table spec.reseed_queue owner to spec;
+create trigger on_insert_reseed_queue after insert on spec.reseed_queue for each row execute function spec_reseed_queue_sub();
