@@ -3,6 +3,7 @@ export const chainNamespaces = {
     GOERLI: 'goerli',
     POLYGON: 'polygon',
     MUMBAI: 'mumbai',
+    BASE: 'base',
 }
 
 export const isContractNamespace = (nsp: string): boolean => {
