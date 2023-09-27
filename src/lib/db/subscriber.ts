@@ -61,6 +61,7 @@ export class TableSubscriber {
             logger.error(`Table Subscriber Error: ${err}`)
         })
     }
+    reseedJobCallback: (columns: { path: string }[]) => Promise<void>
 
     async upsertTableSubs() {
         this._upsertPgListener()

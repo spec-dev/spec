@@ -131,6 +131,8 @@ class Spec {
         tableSubscriber.getLiveObject = (id) => this.liveObjects[id]
         await tableSubscriber.upsertTableSubs()
 
+        tableSubscriber.reseedJobCallback = (columns) => this._upsertAndSeedLiveColumns(columns)
+
         // Connect to event/rpc message client.
         // Force run the onConnect handler if already connected.
         messageClient.client ? messageClient.onConnect() : messageClient.connect()
