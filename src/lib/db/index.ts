@@ -1,6 +1,5 @@
 import knex from 'knex'
 import { constants } from '../constants'
-import createSubscriber from 'pg-listen'
 import logger from '../logger'
 import { Pool } from 'pg'
 import { StringKeyMap } from '../types'
@@ -20,7 +19,7 @@ if (constants.DB_SSL) {
 
 export const db = knex({
     client: 'pg',
-    connection: connectionConfig,
+    connection: { ...connectionConfig },
     pool: {
         min: 0,
         max: constants.MAX_POOL_SIZE,
@@ -35,12 +34,6 @@ export const pool = new Pool({
     max: 10,
 })
 pool.on('error', (err) => logger.error('pg client error', err))
-
-export const pgListener = createSubscriber(connectionConfig)
-
-pgListener.events.on('error', async (err) => {
-    logger.error(`Table Subscriber Error: ${err}`)
-})
 
 export const schema = (name, tx?) => {
     tx = tx || db

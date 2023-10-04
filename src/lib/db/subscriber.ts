@@ -1,4 +1,4 @@
-import { pgListener, db, connectionConfig } from '.'
+import { db, connectionConfig } from '.'
 import { getSpecTriggers, maybeDropTrigger, createTrigger } from './triggers'
 import {
     TableSub,
@@ -16,6 +16,7 @@ import {
     TriggerProcedure,
 } from '../types'
 import { tablesMeta, getRel } from './tablesMeta'
+import createSubscriber, { Subscriber } from 'pg-listen'
 import config from '../config'
 import { filterObjectByKeys, keysWithNonEmptyValues, noop } from '../utils/formatters'
 import logger from '../logger'
@@ -48,10 +49,22 @@ const initRealtimeClient = () => {
 export class TableSubscriber {
     tableSubs: { [key: string]: TableSub } = {}
 
+    pgListener: Subscriber
+
     // Set dynamically from the Spec class.
     getLiveObject: (id: string) => LiveObject
 
+    _upsertPgListener() {
+        if (this.pgListener) return
+        this.pgListener = createSubscriber(connectionConfig)
+        this.pgListener.events.on('error', async (err) => {
+            logger.error(`Table Subscriber Error: ${err}`)
+        })
+    }
+
     async upsertTableSubs() {
+        this._upsertPgListener()
+
         // Create a map of table subs from the tables mentioned in the config.
         this._populateTableSubsFromConfig()
 
@@ -124,18 +137,18 @@ export class TableSubscriber {
         }
 
         // Ensure we're not already subscribed to the table subs channel.
-        const subscribedChannels = pgListener.getSubscribedChannels()
+        const subscribedChannels = this.pgListener.getSubscribedChannels()
         if (subscribedChannels.includes(constants.TABLE_SUB_CHANNEL)) return
 
         // Register event handler.
-        pgListener.notifications.on(constants.TABLE_SUB_CHANNEL, (event) =>
+        this.pgListener.notifications.on(constants.TABLE_SUB_CHANNEL, (event) =>
             this._onTableDataChange(event)
         )
 
         // Actually start listening to table data changes.
         try {
-            await pgListener.connect()
-            await pgListener.listenTo(constants.TABLE_SUB_CHANNEL)
+            await this.pgListener.connect()
+            await this.pgListener.listenTo(constants.TABLE_SUB_CHANNEL)
         } catch (err) {
             logger.error(`Error connecting to table-subs notification channel: ${err}`)
         }
