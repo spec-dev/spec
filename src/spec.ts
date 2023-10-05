@@ -691,7 +691,7 @@ class Spec {
                 continue
             }
 
-            if (seedCursor.jobType === SeedCursorJobType.SeedTable) {
+            if (seedCursor.job_type === SeedCursorJobType.SeedTable) {
                 // Check to see if a seed spec for this liveObjectId+tablePath
                 // is already scheduled to run (per above).
                 const uniqueSeedSpecKey = `${liveObjectId}:${tablePath}`
@@ -717,7 +717,7 @@ class Spec {
                 } else {
                     retrySeedTableJobs.push(seedCursor)
                 }
-            } else if (seedCursor.jobType === SeedCursorJobType.ResolveRecords) {
+            } else if (seedCursor.job_type === SeedCursorJobType.ResolveRecords) {
                 retryResolveRecordsJobs.push(seedCursor)
             }
         }
@@ -753,7 +753,7 @@ class Spec {
 
         const seedCursorsToWaitInLine: StringKeyMap[] = seedSpecsToWaitInLine.map((seedSpec) => ({
             id: short.generate(),
-            jobType: SeedCursorJobType.SeedTable,
+            job_type: SeedCursorJobType.SeedTable,
             spec: seedSpec,
             status: SeedCursorStatus.InLine,
             cursor: 0,
@@ -773,7 +773,7 @@ class Spec {
             const seedSpec = seedSpecsToRunNow[i]
             const seedCursor: StringKeyMap = {
                 id: short.generate(),
-                jobType: SeedCursorJobType.SeedTable,
+                job_type: SeedCursorJobType.SeedTable,
                 spec: seedSpec,
                 status: SeedCursorStatus.InProgress,
                 cursor: 0,

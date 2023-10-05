@@ -450,7 +450,7 @@ export class TableSubscriber {
         // Create and save seed cursor.
         const seedCursor = {
             id: short.generate(),
-            jobType: SeedCursorJobType.ResolveRecords,
+            job_type: SeedCursorJobType.ResolveRecords,
             spec: resolveRecordsSpec,
             status: SeedCursorStatus.InProgress,
             cursor: 0,
@@ -528,7 +528,7 @@ export class TableSubscriber {
         // Create and save seed cursor.
         const seedCursor = {
             id: short.generate(),
-            jobType: SeedCursorJobType.SeedTable,
+            job_type: SeedCursorJobType.SeedTable,
             spec: seedSpec,
             status: SeedCursorStatus.InProgress,
             cursor: 0,

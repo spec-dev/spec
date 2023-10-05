@@ -214,7 +214,7 @@ export enum SeedCursorJobType {
 
 export interface SeedCursor {
     id: string
-    jobType: string
+    job_type: string
     spec: StringKeyMap
     status: SeedCursorStatus
     cursor: number

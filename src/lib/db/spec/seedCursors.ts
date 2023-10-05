@@ -3,7 +3,6 @@ import { SeedCursor, SeedCursorStatus, StringKeyMap } from '../../types'
 import { SPEC_SCHEMA_NAME, SEED_CURSORS_TABLE_NAME } from './names'
 import logger from '../../logger'
 import { unique } from '../../utils/formatters'
-import { camelizeKeys, decamelizeKeys } from 'humps'
 import { constants } from '../../constants'
 import chalk from 'chalk'
 
@@ -20,7 +19,7 @@ export async function getSeedCursorWaitingInLine(id: string): Promise<SeedCursor
         logger.error(`Error getting seed_cursor where id=${id}: ${err}`)
         return null
     }
-    return camelizeKeys(records || [])[0] as SeedCursor
+    return (records || [])[0] as SeedCursor
 }
 
 export async function getSeedCursorsWithStatus(
@@ -35,7 +34,8 @@ export async function getSeedCursorsWithStatus(
         logger.error(`Error getting seed_cursors for status: ${status.join(', ')}: ${err}`)
         return []
     }
-    const records = camelizeKeys(results || []) as SeedCursor[]
+
+    const records = results || [] as SeedCursor[]
     const finalRecords = []
     for (const record of records) {
         if (
@@ -54,7 +54,7 @@ export async function createSeedCursor(seedCursor: StringKeyMap) {
     try {
         await db.transaction(async (tx) => {
             await seedCursors(tx).insert({
-                ...decamelizeKeys(seedCursor),
+                ...seedCursor,
                 created_at: db.raw(`CURRENT_TIMESTAMP at time zone 'UTC'`),
             })
         })
@@ -83,7 +83,7 @@ export async function processSeedCursorBatch(
                 promises.push(
                     seedCursors(tx).insert(
                         inserts.map((seedCursor) => ({
-                            ...decamelizeKeys(seedCursor),
+                            ...seedCursor,
                             created_at: db.raw(`CURRENT_TIMESTAMP at time zone 'UTC'`),
                         }))
                     )
