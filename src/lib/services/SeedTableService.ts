@@ -14,7 +14,13 @@ import {
     SelectOptions,
     OrderByDirection,
 } from '../types'
-import { reverseMap, getCombinations, unique, groupByKeys } from '../utils/formatters'
+import {
+    reverseMap,
+    getCombinations,
+    unique,
+    groupByKeys,
+    fromNamespacedVersion,
+} from '../utils/formatters'
 import { areColumnsEmpty } from '../db'
 import RunOpService from './RunOpService'
 import { querySharedTable } from '../shared-tables/client'
@@ -28,7 +34,7 @@ import { updateCursor, updateMetadata, upsertOpTrackingEntries } from '../db/spe
 import LRU from 'lru-cache'
 import { applyDefaults } from '../defaults'
 import { withDeadlockProtection } from '../utils/db'
-import { isContractNamespace } from '../utils/chains'
+import { isContractNamespace, isPrimitiveNamespace } from '../utils/chains'
 import messageClient from '../rpcs/messageClient'
 
 const valueSep = '__:__'
@@ -574,10 +580,15 @@ class SeedTableService {
 
         this.attemptOpTrackingFloorUpdate && (await this._updateOpTrackingFloor())
 
-        const seedInputBatchSize =
+        let seedInputBatchSize =
             arrayInputColNames.length || this.forceSeedInputBatchSizeToOne
                 ? 1
                 : constants.FOREIGN_SEED_INPUT_BATCH_SIZE
+
+        const { nsp: liveObjectNsp } = fromNamespacedVersion(this.liveObject.id)
+        if (isPrimitiveNamespace(liveObjectNsp)) {
+            seedInputBatchSize = Math.min(seedInputBatchSize, 10)
+        }
 
         const sharedErrorContext = { error: null }
         let t0 = null

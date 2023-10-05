@@ -1162,7 +1162,7 @@ class Spec {
     }
 
     async _upsertOpTrackingTriggers() {
-        const tablePaths = config.getAllReferencedTablePaths()
+        const tablePaths = config.liveTablePaths
 
         // Get all existing spec op-tracking triggers.
         let triggers
@@ -1262,7 +1262,7 @@ class Spec {
 
     async _upsertOpTrackingEntries() {
         const opTrackingEntries = []
-        for (const tablePath of config.getAllReferencedTablePaths()) {
+        for (const tablePath of config.liveTablePaths) {
             const tableChainInfo = config.getChainInfoForTable(tablePath, this.liveObjects)
             if (!tableChainInfo) return false
             for (const chainId of tableChainInfo.liveObjectChainIds) {

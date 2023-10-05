@@ -59,6 +59,17 @@ class Config {
         return this.config.tables || {}
     }
 
+    get liveTablePaths(): string[] {
+        const tablePaths = []
+        for (const schema in this.config.tables) {
+            for (const tableName in this.config.tables[schema]) {
+                const tablePath = [schema, tableName].join('.')
+                tablePaths.push(tablePath)
+            }
+        }
+        return tablePaths
+    }
+
     get defaults(): DefaultsConfig {
         return this.config.defaults || {}
     }
