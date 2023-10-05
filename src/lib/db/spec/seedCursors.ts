@@ -35,7 +35,7 @@ export async function getSeedCursorsWithStatus(
         return []
     }
 
-    const records = results || [] as SeedCursor[]
+    const records = results || ([] as SeedCursor[])
     const finalRecords = []
     for (const record of records) {
         if (
