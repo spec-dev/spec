@@ -587,7 +587,7 @@ class SeedTableService {
 
         const { nsp: liveObjectNsp } = fromNamespacedVersion(this.liveObject.id)
         if (isPrimitiveNamespace(liveObjectNsp)) {
-            seedInputBatchSize = Math.min(seedInputBatchSize, 10)
+            seedInputBatchSize = Math.min(seedInputBatchSize, 20)
         }
 
         const sharedErrorContext = { error: null }
