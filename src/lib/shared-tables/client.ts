@@ -25,45 +25,61 @@ export async function querySharedTable(
     sharedErrorContext: StringKeyMap,
     options: SelectOptions = {},
     nearHead: boolean = false,
-    attempt: number = 1
+    attempt: number = 1,
+    streamShouldContinue?: () => Promise<boolean>
 ) {
-    const queryPayload: StringKeyMap = {
-        table: tablePath,
-        filters: stringifyAnyDates(payload),
-        options,
-    }
-    if (nearHead) {
-        queryPayload.nearHead = true
-    }
+    // check if we should continue
+    const shouldContinue = streamShouldContinue ? await streamShouldContinue() : true
 
-    const abortController = new AbortController()
-    const resp = await makeRequest(tablePath, queryPayload, abortController)
-
-    if (!isStreamingResp(resp)) {
-        await handleJSONResp(resp, tablePath, onData)
+    if (!shouldContinue) {
+        logger.info('aborting', shouldContinue)
         return
-    }
+    } else {
+        const queryPayload: StringKeyMap = {
+            table: tablePath,
+            filters: stringifyAnyDates(payload),
+            options,
+        }
+        if (nearHead) {
+            queryPayload.nearHead = true
+        }
 
-    try {
-        await handleStreamingResp(resp, abortController, onData, sharedErrorContext)
-    } catch (err) {
-        logger.error(`Error handling streaming response from shared table ${tablePath}: ${err}`)
-        if (attempt < constants.EXPO_BACKOFF_MAX_ATTEMPTS) {
-            logger.warn(
-                `Retrying with attempt ${attempt}/${constants.EXPO_BACKOFF_MAX_ATTEMPTS}...`
-            )
-            await sleep(constants.EXPO_BACKOFF_FACTOR ** attempt * constants.EXPO_BACKOFF_DELAY)
-            await querySharedTable(
-                tablePath,
-                payload,
+        const abortController = new AbortController()
+        const resp = await makeRequest(tablePath, queryPayload, abortController)
+
+        if (!isStreamingResp(resp)) {
+            await handleJSONResp(resp, tablePath, onData)
+            return
+        }
+
+        try {
+            await handleStreamingResp(
+                resp,
+                abortController,
                 onData,
                 sharedErrorContext,
-                options || {},
-                nearHead,
-                attempt + 1
+                streamShouldContinue
             )
-        } else {
-            throw err
+        } catch (err) {
+            logger.error(`Error handling streaming response from shared table ${tablePath}: ${err}`)
+            if (attempt < constants.EXPO_BACKOFF_MAX_ATTEMPTS) {
+                logger.warn(
+                    `Retrying with attempt ${attempt}/${constants.EXPO_BACKOFF_MAX_ATTEMPTS}...`
+                )
+                await sleep(constants.EXPO_BACKOFF_FACTOR ** attempt * constants.EXPO_BACKOFF_DELAY)
+                await querySharedTable(
+                    tablePath,
+                    payload,
+                    onData,
+                    sharedErrorContext,
+                    options || {},
+                    nearHead,
+                    attempt + 1,
+                    streamShouldContinue
+                )
+            } else {
+                throw err
+            }
         }
     }
 }
@@ -84,7 +100,8 @@ async function handleStreamingResp(
     resp: Response,
     abortController: AbortController,
     onData: onDataCallbackType,
-    sharedErrorContext: StringKeyMap
+    sharedErrorContext: StringKeyMap,
+    streamShouldContinue?: () => Promise<boolean>
 ) {
     // Create JSON parser for streamed response.
     const jsonParser = new JSONParser({
@@ -105,20 +122,41 @@ async function handleStreamingResp(
 
     let pendingDataPromise = null
 
-    // Parse each JSON object and add it to a batch.
     let batch = []
-    jsonParser.onValue = (obj) => {
-        if (!obj) return
-        obj = obj as StringKeyMap
-        if (obj.error) throw obj.error // Throw any errors explicitly passed back
+    try {
+        // Parse each JSON object and add it to a batch.
+        jsonParser.onValue = (obj) => {
+            if (!obj) return
+            obj = obj as StringKeyMap
+            if (obj.error) throw obj.error // Throw any errors explicitly passed back
 
-        obj = camelizeKeys(obj)
+            obj = camelizeKeys(obj)
 
-        batch.push(obj)
-        if (batch.length === constants.STREAMING_SEED_UPSERT_BATCH_SIZE) {
-            pendingDataPromise = onData([...batch])
-            batch = []
+            batch.push(obj)
+
+            const NUMBER_TO_CHECK_FOR_PAUSE = 1000
+            if (batch.length % NUMBER_TO_CHECK_FOR_PAUSE === 0) {
+                new Promise(async (resolve) => {
+                    const shouldContinue = streamShouldContinue
+                        ? await streamShouldContinue()
+                        : true
+
+                    if (!shouldContinue) {
+                        abortController.abort()
+                        resolve('aborted')
+                    } else {
+                        resolve('not aborted')
+                    }
+                })
+            }
+
+            if (batch.length === constants.STREAMING_SEED_UPSERT_BATCH_SIZE) {
+                pendingDataPromise = onData([...batch])
+                batch = []
+            }
         }
+    } catch (e) {
+        console.log('error in json parser', e)
     }
 
     let chunk
@@ -138,7 +176,6 @@ async function handleStreamingResp(
         chunkTimer && clearTimeout(chunkTimer)
         throw `Error iterating response stream: ${err?.message || err}`
     }
-    chunkTimer && clearTimeout(chunkTimer)
 
     if (batch.length) {
         await onData([...batch])

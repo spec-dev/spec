@@ -210,3 +210,34 @@ export async function failedSeedCursorsExist(): Promise<boolean> {
         return false
     }
 }
+
+export async function checkIfSeedCursorIsPaused(id: string) {
+    try {
+        const results = await seedCursors().select('status').where('id', id).limit(1)
+        const status = results[0]?.status
+        return status && status === 'paused' ? true : false
+    } catch (err) {
+        logger.error(`Error checking if seed_cursor (id=${id}) is paused: ${err}`)
+        return false
+    }
+}
+
+export async function pauseSeedCursor(id: string) {
+    try {
+        await db.transaction(async (tx) => {
+            await seedCursors(tx).update('is_paused', true).where('id', id)
+        })
+    } catch (err) {
+        logger.error(`Error pausing seed_cursor (id=${id}): ${err}`)
+    }
+}
+
+export async function resumeSeedCursor(id: string) {
+    try {
+        await db.transaction(async (tx) => {
+            await seedCursors(tx).update('is_paused', false).where('id', id)
+        })
+    } catch (err) {
+        logger.error(`Error unpausing seed_cursor (id=${id}): ${err}`)
+    }
+}

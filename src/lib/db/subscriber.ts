@@ -19,6 +19,7 @@ import {
     ResolveRecordsSpec,
     SeedCursorJobType,
     SeedCursorStatus,
+    SeedCursor,
     TriggerProcedure,
 } from '../types'
 import { tablesMeta, getRel } from './tablesMeta'
@@ -68,6 +69,7 @@ export class TableSubscriber {
         })
     }
     reseedJobCallback: (columns: { path: string }[]) => Promise<void>
+    pauseResumeSeedJobCallback: (seedCursor: SeedCursor) => Promise<void>
 
     async upsertTableSubs() {
         this._upsertPgListener()
@@ -148,12 +150,29 @@ export class TableSubscriber {
         if (subscribedChannels.includes(constants.TABLE_SUB_CHANNEL)) return
 
         // Register event handler.
-        this.pgListener.notifications.on(constants.TABLE_SUB_CHANNEL, (event) =>
+        this.pgListener.notifications.on(constants.TABLE_SUB_CHANNEL, (event) => {
             this._onTableDataChange(event)
-        )
+        })
 
-        // Register event handler.
-        pgListener.notifications.on(constants.RESEED_QUEUE_CHANNEL, async (event) => {
+        this.pgListener.notifications.on(constants.SEED_CURSOR_STATUS_CHANNEL, async (event) => {
+            // get seed cursor data
+            const seedCursorData = event.data
+            const seedCursor: SeedCursor = {
+                id: seedCursorData.id,
+                job_type: seedCursorData.job_type,
+                spec: seedCursorData.spec,
+                status: seedCursorData.status,
+                cursor: seedCursorData.cursor,
+                createdAt: seedCursorData.created_at,
+            }
+
+            // run the seed cursor
+            if (seedCursor.status === 'in-progress') {
+                await this.pauseResumeSeedJobCallback(seedCursor)
+            }
+        })
+
+        this.pgListener.notifications.on(constants.RESEED_QUEUE_CHANNEL, async (event) => {
             const reseedJob: ReseedJob = {
                 id: event.data.id,
                 tableName: event.data.table_name,
@@ -188,6 +207,7 @@ export class TableSubscriber {
         // Actually start listening to table data changes.
         try {
             await this.pgListener.connect()
+            await this.pgListener.listenTo(constants.SEED_CURSOR_STATUS_CHANNEL)
             await this.pgListener.listenTo(constants.TABLE_SUB_CHANNEL)
             await this.pgListener.listenTo(constants.RESEED_QUEUE_CHANNEL)
         } catch (err) {
