@@ -30,7 +30,12 @@ import { QueryError } from '../errors'
 import { constants } from '../constants'
 import { tablesMeta, getRel, isColTypeArray } from '../db/tablesMeta'
 import chalk from 'chalk'
-import { updateCursor, updateMetadata, upsertOpTrackingEntries } from '../db/spec'
+import {
+    checkIfSeedCursorIsPaused,
+    updateCursor,
+    updateMetadata,
+    upsertOpTrackingEntries,
+} from '../db/spec'
 import LRU from 'lru-cache'
 import { applyDefaults } from '../defaults'
 import { withDeadlockProtection } from '../utils/db'
@@ -38,6 +43,11 @@ import { isContractNamespace, isPrimitiveNamespace } from '../utils/chains'
 import messageClient from '../rpcs/messageClient'
 
 const valueSep = '__:__'
+
+const shouldContinueWithSeedCursor = async (seedCursorId: string) => {
+    const isSeedCursorPaused = await checkIfSeedCursorIsPaused(seedCursorId)
+    return !isSeedCursorPaused
+}
 
 class SeedTableService {
     seedSpec: SeedSpec
@@ -360,7 +370,17 @@ class SeedTableService {
                     },
                     sharedErrorContext,
                     options,
-                    this.metadata.fromTrigger
+                    this.metadata.fromTrigger,
+                    1,
+                    async () => {
+                        try {
+                            const isPaused = await checkIfSeedCursorIsPaused(this.seedCursorId)
+                            return !isPaused
+                        } catch (err) {
+                            console.log("we got an error checking if we're paused", err)
+                            return false
+                        }
+                    }
                 )
             } catch (err) {
                 logger.error(err)
@@ -485,7 +505,17 @@ class SeedTableService {
                     onFunctionRespData,
                     sharedErrorContext,
                     {},
-                    this.metadata.fromTrigger
+                    this.metadata.fromTrigger,
+                    1,
+                    async () => {
+                        try {
+                            const isPaused = await checkIfSeedCursorIsPaused(this.seedCursorId)
+                            return !isPaused
+                        } catch (err) {
+                            logger.error("we got an error checking if we're paused", err)
+                            return false
+                        }
+                    }
                 )
             } catch (err) {
                 logger.error(err)
@@ -680,7 +710,17 @@ class SeedTableService {
                     onFunctionRespData,
                     sharedErrorContext,
                     {},
-                    this.metadata.fromTrigger
+                    this.metadata.fromTrigger,
+                    1,
+                    async () => {
+                        try {
+                            const isPaused = await checkIfSeedCursorIsPaused(this.seedCursorId)
+                            return !isPaused
+                        } catch (err) {
+                            console.log("we got an error checking if we're paused", err)
+                            return false
+                        }
+                    }
                 )
             } catch (err) {
                 logger.error(err)

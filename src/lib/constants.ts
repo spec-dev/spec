@@ -133,4 +133,5 @@ export const constants: StringKeyMap = {
         ev('MATCH_CASE_INSENSITIVE_ADDRESSES')
     ),
     RESEED_QUEUE_CHANNEL: 'spec_new_reseed_job',
+    SEED_CURSOR_STATUS_CHANNEL: 'spec_seed_cursor_status',
 }

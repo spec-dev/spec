@@ -210,6 +210,21 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Seed Cursor Status Trigger Function
+CREATE OR REPLACE FUNCTION spec_seed_cursor_status_sub() RETURNS trigger AS $$
+DECLARE
+    rec RECORD;
+    payload TEXT;
+BEGIN
+    IF OLD.status = 'paused' AND NEW.status = 'in-progress' THEN
+        rec := NEW;
+        payload := '{"data":' || row_to_json(rec) || '}';
+        PERFORM pg_notify('spec_seed_cursor_status', payload);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 --=======================================================
 -- SPEC SCHEMA
 --=======================================================
@@ -269,6 +284,7 @@ alter table spec.seed_cursors owner to spec;
 create trigger on_insert_seed_cursors after insert on spec.seed_cursors for each row execute function spec_table_sub('id');
 create trigger on_update_seed_cursors after update on spec.seed_cursors for each row execute function spec_table_sub('id');
 create trigger on_delete_seed_cursors after delete on spec.seed_cursors for each row execute function spec_table_sub('id');
+create trigger on_status_change_seed_cursors after update of status on spec.seed_cursors for each row execute function spec_seed_cursor_status_sub();
 
 -- Migrations Table
 create table if not exists spec.migrations (

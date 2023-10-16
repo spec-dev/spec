@@ -32,6 +32,7 @@ import {
     upsertOpTrackingEntries,
     freezeTablesForChainId,
     deleteOpsOlderThan,
+    checkIfSeedCursorIsPaused,
 } from './lib/db/spec'
 import { SpecEvent } from '@spec.dev/event-client'
 import LRU from 'lru-cache'
@@ -132,6 +133,7 @@ class Spec {
         await tableSubscriber.upsertTableSubs()
 
         tableSubscriber.reseedJobCallback = (columns) => this._upsertAndSeedLiveColumns(columns)
+        tableSubscriber.pauseResumeSeedJobCallback = () => this._onMessageClientConnected()
 
         // Connect to event/rpc message client.
         // Force run the onConnect handler if already connected.
@@ -715,7 +717,6 @@ class Spec {
                 deleteSeedCursorIds.push(seedCursor.id)
                 continue
             }
-
             if (seedCursor.job_type === SeedCursorJobType.SeedTable) {
                 // Check to see if a seed spec for this liveObjectId+tablePath
                 // is already scheduled to run (per above).
@@ -1039,7 +1040,10 @@ class Spec {
             }
         }
 
-        await seedSucceeded(seedTableService.seedCursorId)
+        // if the seed is paused, then we don't want to register it as successful
+        const isPaused = await checkIfSeedCursorIsPaused(seedTableService.seedCursorId)
+
+        !isPaused && (await seedSucceeded(seedTableService.seedCursorId))
 
         // Run next seed cursor in series if one is registered.
         metadata?.nextId && this._runNextSeedCursorInSeries(metadata.nextId)
