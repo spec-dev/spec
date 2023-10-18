@@ -51,6 +51,7 @@
         "sha.js": "^2.4.11",
         "short-uuid": "^4.2.0",
         "stream-json": "^1.7.4",
+        "toposort": "^2.0.2",
         "uuid4": "^2.0.2"
     },
     "devDependencies": {

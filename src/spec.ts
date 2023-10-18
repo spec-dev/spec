@@ -83,8 +83,14 @@ class Spec {
 
     hasCalledUpsertAndSeedLiveColumns: boolean = false
 
+    eventOrder: string[] = []
+
     seenEvents: LRU<string, boolean> = new LRU({
         max: constants.SEEN_EVENTS_CACHE_SIZE,
+    })
+
+    receivedBlockNumberEvent: LRU<string, number> = new LRU({
+        max: constants.RECEIVED_BLOCK_NUMBER_EVENT_CACHE_SIZE,
     })
 
     async start() {
@@ -140,6 +146,9 @@ class Spec {
         // Resolve all live objects for the versions listed in the config file.
         await this._getLiveObjectsInConfig()
 
+        // Use config's table order to create the event order.
+        this._buildEventOrder()
+
         // Kick start op-tracking.
         await Promise.all([this._upsertOpTrackingTriggers(), this._upsertOpTrackingEntries()])
         this._upsertCleanupOpsJob()
@@ -179,7 +188,7 @@ class Spec {
         this._doneProcessingNewConfig()
     }
 
-    async _pullFromEventBuffer() {
+    async _pullFromEventBuffer(forcedEvent?: SpecEvent) {
         this.processingEvents = true
 
         if (!Object.keys(this.buffer).length) {
@@ -187,7 +196,7 @@ class Spec {
             return
         }
 
-        const event = this._getEarliestInBufferByNonce()
+        const event = forcedEvent || this._getEarliestInBufferByNonce()
         if (!event) {
             this.processingEvents = false
             return
@@ -226,6 +235,34 @@ class Spec {
             return
         }
 
+        // Ensure we've waited long enough since this event's block number was first seen.
+        const receivedBlockNumberKey = this._formatReceivedBlockNumberEventKey(event)
+        const blockNumberFirstSeenAt = this.receivedBlockNumberEvent.get(receivedBlockNumberKey)
+        if (blockNumberFirstSeenAt) {
+            const now = Date.now()
+            const timeDiff = now - blockNumberFirstSeenAt
+
+            // Only need to debouce for FK reasons.
+            const ignoreDebouncing = config.liveTablePaths.length < 2
+
+            // Force debounce for this block's events.
+            if (!ignoreDebouncing && (timeDiff < constants.FORCED_BLOCK_NUMBER_EVENT_DEBOUNCE_DURATION)) {
+                await sleep(constants.FORCED_BLOCK_NUMBER_EVENT_DEBOUNCE_DURATION - timeDiff + 10)
+                await this._pullFromEventBuffer()
+                return
+            }
+        } else {
+            logger.warn(`No entry in receivedBlockNumberEvent cache for "${receivedBlockNumberKey}".`)
+        }
+
+        // Ensure there isn't another event in the buffer for with this exact same 
+        // block number that needs to be processed first, based on FK dependency reasons.
+        const replacmentEvent = this._shouldProcessAnotherEventFirstAtSameBlockNumber(event)
+        if (replacmentEvent) {
+            await this._pullFromEventBuffer(replacmentEvent)
+            return
+        }
+        
         const lastNonceSeen = sub.lastNonceSeen
         const lastNumericNonce = lastNonceSeen ? this._toNumericNonce(lastNonceSeen) : null
         const currentNumericNonce = this._toNumericNonce(event.nonce)
@@ -234,6 +271,7 @@ class Spec {
             this.eventSubs[event.name].lastNonceSeen = event.nonce
         }
 
+        // Detect and fill-in any gaps.
         const prevNonce = (event as StringKeyMap).prevNonce
         const isNonceMismatch = lastNonceSeen && prevNonce && lastNonceSeen !== prevNonce
         const gapExists = isNonceMismatch && currentNumericNonce > lastNumericNonce
@@ -265,6 +303,7 @@ class Spec {
             }
             return
         }
+
         this._registerEventAsSeen(eventKey, subjects)
 
         const processed = await this._processEvent(event)
@@ -280,6 +319,12 @@ class Spec {
     _addEventToBuffer(event: SpecEvent) {
         const eventKey = this._formatBufferEventKey(event)
         this.buffer[eventKey] = event
+
+        const receivedBlockNumberKey = this._formatReceivedBlockNumberEventKey(event)
+        if (!this.receivedBlockNumberEvent.has(receivedBlockNumberKey)) {
+            this.receivedBlockNumberEvent.set(receivedBlockNumberKey, Date.now())
+        }        
+        
         if (this.bufferNewEvents) return
         this.processingEvents || this._pullFromEventBuffer()
     }
@@ -732,7 +777,10 @@ class Spec {
             }
         }
         seedSpecsOnNewLiveTables.sort(
-            (a, b) => config.getTableOrder(a.tablePath) - config.getTableOrder(b.tablePath)
+            (a, b) => (
+                config.orderedLiveTablePaths.indexOf(a.tablePath) - 
+                config.orderedLiveTablePaths.indexOf(b.tablePath)
+            )
         )
 
         if (seedSpecsOnNewLiveTables.length) {
@@ -1352,6 +1400,51 @@ class Spec {
         return Array.from(chainIds)
     }
 
+    _buildEventOrder() {
+        const seen = new Set()
+        const orderedEventNames = []
+        for (const tablePath of config.orderedLiveTablePaths) {
+            for (const liveObjectId of config.getDataSourceLiveObjectIdsForTablePath(tablePath)) {
+                for (const eventName of this.liveObjects[liveObjectId].events.map(event => event.name)) {
+                    if (seen.has(eventName)) continue
+                    seen.add(eventName)
+                    orderedEventNames.push(eventName)
+                }
+            }
+        }
+        this.eventOrder = orderedEventNames
+    }
+
+    _shouldProcessAnotherEventFirstAtSameBlockNumber(currentEvent: SpecEvent): SpecEvent | null {
+        const { blockNumber, chainId } = currentEvent.origin
+        const events = Object.values(this.buffer)
+        if (!events?.length) return null
+
+        const currentEventIndex = this.eventOrder.indexOf(currentEvent.name)
+
+        const eventsAtSameBlockNumber = events.filter(event => (
+            event.origin.chainId === chainId && 
+            event.origin.blockNumber === blockNumber
+        )).sort((a, b) => {
+            const nonceFloatA = parseFloat(a.nonce.replace('-', '.'))
+            const nonceFloatB = parseFloat(b.nonce.replace('-', '.'))
+            return nonceFloatA - nonceFloatB
+        })
+        if (!eventsAtSameBlockNumber.length) return null
+
+        for (const event of eventsAtSameBlockNumber) {
+            const eventIndex = this.eventOrder.indexOf(event.name)
+            if (eventIndex < 0) continue
+
+            // Replacment event.
+            if (eventIndex < currentEventIndex) {
+                return event
+            }
+        }
+
+        return null
+    }
+
     _registerEventAsSeen(eventKey: string, subjects: string[]) {
         subjects.forEach((subject) => {
             this.seenEvents.set(`${eventKey}:${subject}`, true)
@@ -1383,6 +1476,10 @@ class Spec {
 
     _formatBufferEventKey(event: SpecEvent): string {
         return [event.name, event.nonce].join(':')
+    }
+
+    _formatReceivedBlockNumberEventKey(event: SpecEvent): string {
+        return [event.origin.chainId, event.origin.blockNumber].join(':')
     }
 
     _toNumericNonce(nonce: string): number {

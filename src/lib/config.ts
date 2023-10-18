@@ -6,6 +6,7 @@ import { noop, toMap, fromNamespacedVersion, unique } from './utils/formatters'
 import { isNonEmptyString, couldBeColPath, couldBeNumber } from './utils/validators'
 import logger from './logger'
 import { tablesMeta, pullTableMeta, getRel } from './db/tablesMeta'
+import toposort from 'toposort'
 import { cloneDeep } from 'lodash'
 import { isTimestampColType } from './utils/colTypes'
 import {
@@ -50,6 +51,10 @@ class Config {
     fileContents: string = ''
 
     onUpdate: () => void
+
+    // Table paths ordered by relationships 
+    // between one another (reverse toposort).
+    orderedLiveTablePaths: string[] = []
 
     get liveObjects(): LiveObjectsConfig {
         return this.config.objects || {}
@@ -140,20 +145,7 @@ class Config {
         }
         return tableLinks
     }
-
-    getTableOrder(matchTablePath: string): number | null {
-        const tables = this.tables
-        let i = 0
-        for (const schema in tables) {
-            for (const tableName in tables[schema]) {
-                const tablePath = [schema, tableName].join('.')
-                if (tablePath === matchTablePath) return i
-                i++
-            }
-        }
-        return null
-    }
-
+    
     getDefaultColumnValuesForTable(tablePath: string): { [key: string]: ColumnDefaultsConfig } {
         const [schemaName, tableName] = tablePath.split('.')
         const defaults = this.defaults
@@ -288,6 +280,17 @@ class Config {
         }
 
         return dataSources
+    }
+
+    getDataSourceLiveObjectIdsForTablePath(tablePath: string): string[] {
+        const [schema, table] = tablePath.split('.')
+        const dataSources = this.getDataSourcesForTable(schema, table)
+        const liveObjectIds = new Set<string>()
+        for (const key in dataSources) {
+            const liveObjectId = key.split(':')[0]
+            liveObjectIds.add(liveObjectId)
+        }
+        return Array.from(liveObjectIds)
     }
 
     // TODO: Clean this up with recursion.
@@ -516,11 +519,34 @@ class Config {
             return false
         }
 
+        // Discover table order based on FK relations to one another.
+        if (!this._sortLiveTablePaths()) {
+            return false
+        }
+
         // Use table metadata/constraints to build and cache links.
         if (!this._buildEnrichedLinks()) {
             return false
         }
 
+        return true
+    }
+
+    _sortLiveTablePaths(): boolean {
+        const nodes = []
+        const seen = new Set()
+        for (const tablePath of this.liveTablePaths) {
+            for (const { foreignSchema, foreignTable } of tablesMeta[tablePath].foreignKeys || []) {
+                const foreignTablePath = [foreignSchema, foreignTable].join('.')
+                if (seen.has([foreignTablePath, tablePath].join(':'))) {
+                    logger.error(`Circular foreign reference detected between ${tablePath} and ${foreignTablePath}.`)
+                    return false
+                }
+                seen.add([tablePath, foreignTablePath].join(':'))
+                nodes.push([tablePath, foreignTablePath])
+            }
+        }
+        this.orderedLiveTablePaths = toposort(nodes).reverse()
         return true
     }
 

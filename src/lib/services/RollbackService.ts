@@ -6,6 +6,7 @@ import { stringify, toChunks, sum } from '../utils/formatters'
 import { sleep } from '../utils/time'
 import { randomIntegerInRange } from '../utils/math'
 import { constants } from '../constants'
+import config from '../config'
 import {
     getDistinctRecordsOperatedOnAtOrAboveBlockNumber,
     upsertOpTrackingEntries,
@@ -74,9 +75,31 @@ class RollbackService {
     }
 
     async _rollbackRecords() {
-        await Promise.all(
-            this.tablePaths.map((tablePath) => this._rollbackRecordsForTable(tablePath))
-        )
+        let tablePathsToRollback = []
+        for (const tablePath of this.tablePaths) {
+            if (!config.orderedLiveTablePaths.includes(tablePath)) {
+                logger.error(`Not rolling back ${tablePath} -- not found in config.orderedLiveTablePaths: ${
+                    config.orderedLiveTablePaths.join(', ')
+                }`)
+                continue
+            }
+            tablePathsToRollback.push(tablePath)
+        }
+
+        // Reverse.
+        tablePathsToRollback = tablePathsToRollback.sort((a, b) => (
+            config.orderedLiveTablePaths.indexOf(b) - config.orderedLiveTablePaths.indexOf(a)
+        ))
+
+        // One at a time in an order that won't violate FK contraints.
+        let i = 0
+        for (const tablePath of tablePathsToRollback) {
+            i++
+            if (!(await this._rollbackRecordsForTable(tablePath))) {
+                logger.error(`Preventing rollback of subsequent tables (${tablePathsToRollback.slice(i)}) due to failure of ${tablePath}`)
+                return
+            }
+        }
     }
 
     async _rollbackRecordsForTable(tablePath: string) {
@@ -87,6 +110,7 @@ class RollbackService {
         const numDeletes = sum(deleteGroups.map((r) => r.length))
         logger.info(chalk.magenta(`- ${tablePath} | Upserts=${numUpserts} | Deletes=${numDeletes}`))
 
+        let success = true
         let attempt = 1
         while (attempt <= constants.MAX_DEADLOCK_RETRIES) {
             try {
@@ -132,9 +156,12 @@ class RollbackService {
                 const error = `[${this.chainId}:${this.blockNumber}] Failed to rollback ops for ${tablePath}: ${err}`
                 logger.error(error)
                 await freezeTablesForChainId(tablePath, this.chainId)
+                success = false
                 break
             }
         }
+
+        return success
     }
 
     async _rollbackRecordsWithUpsertion(tablePath: string, opRecords: OpRecord[], tx: any) {
