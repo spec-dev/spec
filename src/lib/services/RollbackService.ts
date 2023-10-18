@@ -78,25 +78,32 @@ class RollbackService {
         let tablePathsToRollback = []
         for (const tablePath of this.tablePaths) {
             if (!config.orderedLiveTablePaths.includes(tablePath)) {
-                logger.error(`Not rolling back ${tablePath} -- not found in config.orderedLiveTablePaths: ${
-                    config.orderedLiveTablePaths.join(', ')
-                }`)
+                logger.error(
+                    `Not rolling back ${tablePath} -- not found in config.orderedLiveTablePaths: ${config.orderedLiveTablePaths.join(
+                        ', '
+                    )}`
+                )
                 continue
             }
             tablePathsToRollback.push(tablePath)
         }
 
         // Reverse.
-        tablePathsToRollback = tablePathsToRollback.sort((a, b) => (
-            config.orderedLiveTablePaths.indexOf(b) - config.orderedLiveTablePaths.indexOf(a)
-        ))
+        tablePathsToRollback = tablePathsToRollback.sort(
+            (a, b) =>
+                config.orderedLiveTablePaths.indexOf(b) - config.orderedLiveTablePaths.indexOf(a)
+        )
 
         // One at a time in an order that won't violate FK contraints.
         let i = 0
         for (const tablePath of tablePathsToRollback) {
             i++
             if (!(await this._rollbackRecordsForTable(tablePath))) {
-                logger.error(`Preventing rollback of subsequent tables (${tablePathsToRollback.slice(i)}) due to failure of ${tablePath}`)
+                logger.error(
+                    `Preventing rollback of subsequent tables (${tablePathsToRollback.slice(
+                        i
+                    )}) due to failure of ${tablePath}`
+                )
                 return
             }
         }

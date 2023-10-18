@@ -246,23 +246,28 @@ class Spec {
             const ignoreDebouncing = config.liveTablePaths.length < 2
 
             // Force debounce for this block's events.
-            if (!ignoreDebouncing && (timeDiff < constants.FORCED_BLOCK_NUMBER_EVENT_DEBOUNCE_DURATION)) {
+            if (
+                !ignoreDebouncing &&
+                timeDiff < constants.FORCED_BLOCK_NUMBER_EVENT_DEBOUNCE_DURATION
+            ) {
                 await sleep(constants.FORCED_BLOCK_NUMBER_EVENT_DEBOUNCE_DURATION - timeDiff + 10)
                 await this._pullFromEventBuffer()
                 return
             }
         } else {
-            logger.warn(`No entry in receivedBlockNumberEvent cache for "${receivedBlockNumberKey}".`)
+            logger.warn(
+                `No entry in receivedBlockNumberEvent cache for "${receivedBlockNumberKey}".`
+            )
         }
 
-        // Ensure there isn't another event in the buffer for with this exact same 
+        // Ensure there isn't another event in the buffer for with this exact same
         // block number that needs to be processed first, based on FK dependency reasons.
         const replacmentEvent = this._shouldProcessAnotherEventFirstAtSameBlockNumber(event)
         if (replacmentEvent) {
             await this._pullFromEventBuffer(replacmentEvent)
             return
         }
-        
+
         const lastNonceSeen = sub.lastNonceSeen
         const lastNumericNonce = lastNonceSeen ? this._toNumericNonce(lastNonceSeen) : null
         const currentNumericNonce = this._toNumericNonce(event.nonce)
@@ -323,8 +328,8 @@ class Spec {
         const receivedBlockNumberKey = this._formatReceivedBlockNumberEventKey(event)
         if (!this.receivedBlockNumberEvent.has(receivedBlockNumberKey)) {
             this.receivedBlockNumberEvent.set(receivedBlockNumberKey, Date.now())
-        }        
-        
+        }
+
         if (this.bufferNewEvents) return
         this.processingEvents || this._pullFromEventBuffer()
     }
@@ -777,10 +782,9 @@ class Spec {
             }
         }
         seedSpecsOnNewLiveTables.sort(
-            (a, b) => (
-                config.orderedLiveTablePaths.indexOf(a.tablePath) - 
+            (a, b) =>
+                config.orderedLiveTablePaths.indexOf(a.tablePath) -
                 config.orderedLiveTablePaths.indexOf(b.tablePath)
-            )
         )
 
         if (seedSpecsOnNewLiveTables.length) {
@@ -1405,7 +1409,9 @@ class Spec {
         const orderedEventNames = []
         for (const tablePath of config.orderedLiveTablePaths) {
             for (const liveObjectId of config.getDataSourceLiveObjectIdsForTablePath(tablePath)) {
-                for (const eventName of this.liveObjects[liveObjectId].events.map(event => event.name)) {
+                for (const eventName of this.liveObjects[liveObjectId].events.map(
+                    (event) => event.name
+                )) {
                     if (seen.has(eventName)) continue
                     seen.add(eventName)
                     orderedEventNames.push(eventName)
@@ -1422,14 +1428,16 @@ class Spec {
 
         const currentEventIndex = this.eventOrder.indexOf(currentEvent.name)
 
-        const eventsAtSameBlockNumber = events.filter(event => (
-            event.origin.chainId === chainId && 
-            event.origin.blockNumber === blockNumber
-        )).sort((a, b) => {
-            const nonceFloatA = parseFloat(a.nonce.replace('-', '.'))
-            const nonceFloatB = parseFloat(b.nonce.replace('-', '.'))
-            return nonceFloatA - nonceFloatB
-        })
+        const eventsAtSameBlockNumber = events
+            .filter(
+                (event) =>
+                    event.origin.chainId === chainId && event.origin.blockNumber === blockNumber
+            )
+            .sort((a, b) => {
+                const nonceFloatA = parseFloat(a.nonce.replace('-', '.'))
+                const nonceFloatB = parseFloat(b.nonce.replace('-', '.'))
+                return nonceFloatA - nonceFloatB
+            })
         if (!eventsAtSameBlockNumber.length) return null
 
         for (const event of eventsAtSameBlockNumber) {

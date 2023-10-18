@@ -40,9 +40,13 @@ export const constants: StringKeyMap = {
     EVENTS_HOSTNAME: ev('EVENTS_HOSTNAME', 'events.spec.dev'),
     EVENTS_PORT: Number(ev('EVENTS_PORT', 443)),
     SEEN_EVENTS_CACHE_SIZE: Number(ev('SEEN_EVENTS_CACHE_SIZE', 1000)),
-    RECEIVED_BLOCK_NUMBER_EVENT_CACHE_SIZE: Number(ev('RECEIVED_BLOCK_NUMBER_EVENT_CACHE_SIZE', 1000)),
+    RECEIVED_BLOCK_NUMBER_EVENT_CACHE_SIZE: Number(
+        ev('RECEIVED_BLOCK_NUMBER_EVENT_CACHE_SIZE', 1000)
+    ),
     EVENTS_PING_INTERVAL: Number(ev('SEEN_EVENTS_CACHE_SIZE', 30000)),
-    FORCED_BLOCK_NUMBER_EVENT_DEBOUNCE_DURATION: Number(ev('FORCED_BLOCK_NUMBER_EVENT_DEBOUNCE_DURATION', 500)),
+    FORCED_BLOCK_NUMBER_EVENT_DEBOUNCE_DURATION: Number(
+        ev('FORCED_BLOCK_NUMBER_EVENT_DEBOUNCE_DURATION', 500)
+    ),
 
     // The number of records to use in a single input batch when
     // seeding live columns by an *adjacent column of the same table*.

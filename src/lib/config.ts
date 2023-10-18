@@ -52,7 +52,7 @@ class Config {
 
     onUpdate: () => void
 
-    // Table paths ordered by relationships 
+    // Table paths ordered by relationships
     // between one another (reverse toposort).
     orderedLiveTablePaths: string[] = []
 
@@ -145,7 +145,7 @@ class Config {
         }
         return tableLinks
     }
-    
+
     getDefaultColumnValuesForTable(tablePath: string): { [key: string]: ColumnDefaultsConfig } {
         const [schemaName, tableName] = tablePath.split('.')
         const defaults = this.defaults
@@ -539,7 +539,9 @@ class Config {
             for (const { foreignSchema, foreignTable } of tablesMeta[tablePath].foreignKeys || []) {
                 const foreignTablePath = [foreignSchema, foreignTable].join('.')
                 if (seen.has([foreignTablePath, tablePath].join(':'))) {
-                    logger.error(`Circular foreign reference detected between ${tablePath} and ${foreignTablePath}.`)
+                    logger.error(
+                        `Circular foreign reference detected between ${tablePath} and ${foreignTablePath}.`
+                    )
                     return false
                 }
                 seen.add([tablePath, foreignTablePath].join(':'))
