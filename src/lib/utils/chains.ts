@@ -4,6 +4,11 @@ export const chainNamespaces = {
     POLYGON: 'polygon',
     MUMBAI: 'mumbai',
     BASE: 'base',
+    OPTIMISM: 'optimism',
+    ARBITRUM: 'arbitrum',
+    PGN: 'pgn',
+    CELO: 'celo',
+    LINEA: 'linea',
 }
 
 export const TOKENS_NSP = 'tokens'
