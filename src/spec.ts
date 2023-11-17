@@ -137,6 +137,8 @@ class Spec {
         tableSubscriber.getLiveObject = (id) => this.liveObjects[id]
         await tableSubscriber.upsertTableSubs()
 
+        tableSubscriber.reseedJobCallback = (columns) => this._upsertAndSeedLiveColumns(columns)
+
         // Connect to event/rpc message client.
         // Force run the onConnect handler if already connected.
         messageClient.client ? messageClient.onConnect() : messageClient.connect()
@@ -655,21 +657,44 @@ class Spec {
         })
     }
 
-    async _upsertAndSeedLiveColumns() {
+    async _upsertAndSeedLiveColumns(columns?: { path: string }[]) {
+        if (columns) {
+            this.hasCalledUpsertAndSeedLiveColumns = false
+        }
         let liveColumnsToSeed = []
 
         // Detect any changes with live columns or links (filterBy, uniqueBy, etc.).
+        const isAllColumns =
+            columns && columns.length === 1 && columns[0].path.split('.')[2] === '*'
+
+        // Upsert any new/changed live columns listed in the config.
+        // We will seed (or re-seed) all live columns that were upserted.
         const upsertLiveColumnService = new UpsertLiveColumnsService()
         try {
             await upsertLiveColumnService.perform()
             liveColumnsToSeed = upsertLiveColumnService.liveColumnsToUpsert
+
+            if (columns) {
+                liveColumnsToSeed.push(
+                    ...upsertLiveColumnService.prevLiveColumns.filter((c) => {
+                        const result = isAllColumns
+                            ? true
+                            : columns.some((col) => {
+                                  return col.path === c.columnPath
+                              })
+                        return result
+                    })
+                )
+                // remove duplicates from liveColumnsToSeed
+                liveColumnsToSeed = liveColumnsToSeed.filter((v, i, a) => a.indexOf(v) === i)
+            }
         } catch (err) {
             logger.error(`Failed to upsert live columns: ${err}`)
             liveColumnsToSeed = []
         }
 
-        const tablePathsUsingLiveObjectId = upsertLiveColumnService.tablePathsUsingLiveObjectId
-        const newLiveTablePaths = upsertLiveColumnService.newLiveTablePaths
+        const tablePathsUsingLiveObjectId: { [key: string]: Set<string> } = {}
+        const newLiveTablePaths = new Set<string>()
 
         // Get a map of unique live-object/table relations (grouping the column names).
         const uniqueLiveObjectTablePaths = {}

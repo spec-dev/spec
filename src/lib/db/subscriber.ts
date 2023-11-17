@@ -1,6 +1,12 @@
 import { db, connectionConfig } from '.'
 import { getSpecTriggers, maybeDropTrigger, createTrigger } from './triggers'
 import {
+    ReseedJob,
+    ReseedStatus,
+    reseedSucceeded,
+    updateReseedJobStatusById,
+} from './spec/reseedQueue'
+import {
     TableSub,
     TableSubStatus,
     TableSubEvent,
@@ -61,6 +67,7 @@ export class TableSubscriber {
             logger.error(`Table Subscriber Error: ${err}`)
         })
     }
+    reseedJobCallback: (columns: { path: string }[]) => Promise<void>
 
     async upsertTableSubs() {
         this._upsertPgListener()
@@ -145,10 +152,44 @@ export class TableSubscriber {
             this._onTableDataChange(event)
         )
 
+        // Register event handler.
+        pgListener.notifications.on(constants.RESEED_QUEUE_CHANNEL, async (event) => {
+            const reseedJob: ReseedJob = {
+                id: event.data.id,
+                tableName: event.data.table_name,
+                columnNames: event.data.column_names,
+                createdAt: event.data.created_at,
+                status: event.data.status,
+            }
+
+            await updateReseedJobStatusById(reseedJob.id, ReseedStatus.InProgress)
+
+            const isAllColumns = reseedJob.columnNames === '*'
+
+            try {
+                if (isAllColumns) {
+                    const column = {
+                        path: `${reseedJob.tableName}.*`,
+                    }
+                    await this.reseedJobCallback([column])
+                } else {
+                    const columns = reseedJob.columnNames.split(',').map((colName) => ({
+                        path: `${reseedJob.tableName}.${colName}`,
+                    }))
+                    await this.reseedJobCallback(columns)
+                }
+                await reseedSucceeded([reseedJob.id])
+            } catch (error) {
+                console.error(error)
+                await updateReseedJobStatusById(reseedJob.id, ReseedStatus.Failed)
+            }
+        })
+
         // Actually start listening to table data changes.
         try {
             await this.pgListener.connect()
             await this.pgListener.listenTo(constants.TABLE_SUB_CHANNEL)
+            await this.pgListener.listenTo(constants.RESEED_QUEUE_CHANNEL)
         } catch (err) {
             logger.error(`Error connecting to table-subs notification channel: ${err}`)
         }

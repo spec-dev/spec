@@ -1,5 +1,6 @@
 export const SPEC_SCHEMA_NAME = 'spec'
 export const EVENT_CURSORS_TABLE_NAME = 'event_cursors'
+export const RESEED_QUEUE_TABLE_NAME = 'reseed_queue'
 export const LIVE_COLUMNS_TABLE_NAME = 'live_columns'
 export const LINKS_TABLE_NAME = 'links'
 export const TABLE_SUB_CURSORS_TABLE_NAME = 'table_sub_cursors'
