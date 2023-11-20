@@ -9,6 +9,7 @@ export const chainNamespaces = {
     PGN: 'pgn',
     CELO: 'celo',
     LINEA: 'linea',
+    SEPOLIA: 'sepolia',
 }
 
 export const TOKENS_NSP = 'tokens'
