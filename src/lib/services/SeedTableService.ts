@@ -590,9 +590,18 @@ class SeedTableService {
             seedInputBatchSize = Math.min(seedInputBatchSize, 20)
         }
 
+        const foreignInputColPaths = inputColNames.map(colName => [foreignTablePath, colName].join('.'))
+        let chainIdColName = null
+        for (const colPath of foreignInputColPaths) {
+            const inputProperties = (this.colPathsToFunctionInputArgs[colPath] || []).map(entry => entry.property)
+            if (inputProperties.inludes('chainId')) {
+                chainIdColName = colPath.split('.').pop()
+                break
+            }
+        }
+
         const sharedErrorContext = { error: null }
         let t0 = null
-
         while (true) {
             if (sharedErrorContext.error) throw sharedErrorContext.error
 
@@ -610,6 +619,17 @@ class SeedTableService {
                     this.cursor,
                     seedInputBatchSize
                 )
+            }
+
+            // Reduce the batch to the first N records that share the same chain id.
+            if (chainIdColName) {
+                let chainBatchInputRecords = []
+                let batchChainId = batchInputRecords[0][chainIdColName]
+                for (const inputRecord of batchInputRecords) {
+                    if (inputRecord[chainIdColName] !== batchChainId) break
+                    chainBatchInputRecords.push(inputRecord)
+                }
+                batchInputRecords = chainBatchInputRecords
             }
 
             if (batchInputRecords === null) {
@@ -692,7 +712,6 @@ class SeedTableService {
             }
 
             if (sharedErrorContext.error) throw sharedErrorContext.error
-
             await updateCursor(this.seedCursorId, this.cursor)
 
             if (
