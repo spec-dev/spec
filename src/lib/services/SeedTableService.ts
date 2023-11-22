@@ -590,11 +590,15 @@ class SeedTableService {
             seedInputBatchSize = Math.min(seedInputBatchSize, 20)
         }
 
-        const foreignInputColPaths = inputColNames.map(colName => [foreignTablePath, colName].join('.'))
+        const foreignInputColPaths = inputColNames.map((colName) =>
+            [foreignTablePath, colName].join('.')
+        )
         let chainIdColName = null
         for (const colPathsToFunctionInputArgs of this.colPathsToFunctionInputArgs) {
-            for (const colPath of foreignInputColPaths) { 
-                const inputProperties = (colPathsToFunctionInputArgs[colPath] || []).map(entry => entry.property)
+            for (const colPath of foreignInputColPaths) {
+                const inputProperties = (colPathsToFunctionInputArgs[colPath] || []).map(
+                    (entry) => entry.property
+                )
                 if (inputProperties.includes('chainId')) {
                     chainIdColName = colPath.split('.').pop()
                     break
@@ -660,7 +664,7 @@ class SeedTableService {
             }
 
             this.cursor += batchInputRecords.length
-            const isLastBatch = !reducedBatchSize && (batchInputRecords.length < seedInputBatchSize)
+            const isLastBatch = !reducedBatchSize && batchInputRecords.length < seedInputBatchSize
 
             // Map the input records to their reference key values so that records added
             // to the seed table can easily find/assign their associated foreign keys.
