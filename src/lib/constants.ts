@@ -54,7 +54,7 @@ export const constants: StringKeyMap = {
 
     // The number of records to use in a single batch when seeding live
     // columns with a *foreign table*.
-    FOREIGN_SEED_INPUT_BATCH_SIZE: Number(ev('FOREIGN_SEED_INPUT_BATCH_SIZE', 100)),
+    FOREIGN_SEED_INPUT_BATCH_SIZE: Number(ev('FOREIGN_SEED_INPUT_BATCH_SIZE', 10)),
 
     // The 'limit' to use (alongside 'offset') when fetching an entire live table from scratch.
     FROM_SCRATCH_SEED_INPUT_BATCH_SIZE: Number(ev('FROM_SCRATCH_SEED_INPUT_BATCH_SIZE', 100000)),
