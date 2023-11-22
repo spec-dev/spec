@@ -625,14 +625,17 @@ class SeedTableService {
             }
 
             // Reduce the batch to the first N records that share the same chain id.
+            let reducedBatchSize = false
             if (chainIdColName) {
                 let chainBatchInputRecords = []
                 let batchChainId = batchInputRecords[0][chainIdColName]
+                const prevBatchInputRecordsLength = batchInputRecords.length
                 for (const inputRecord of batchInputRecords) {
                     if (inputRecord[chainIdColName] !== batchChainId) break
                     chainBatchInputRecords.push(inputRecord)
                 }
                 batchInputRecords = chainBatchInputRecords
+                reducedBatchSize = batchInputRecords.length < prevBatchInputRecordsLength
             }
 
             if (batchInputRecords === null) {
@@ -657,7 +660,7 @@ class SeedTableService {
             }
 
             this.cursor += batchInputRecords.length
-            const isLastBatch = batchInputRecords.length < seedInputBatchSize
+            const isLastBatch = !reducedBatchSize && (batchInputRecords.length < seedInputBatchSize)
 
             // Map the input records to their reference key values so that records added
             // to the seed table can easily find/assign their associated foreign keys.
