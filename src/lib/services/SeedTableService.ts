@@ -592,12 +592,15 @@ class SeedTableService {
 
         const foreignInputColPaths = inputColNames.map(colName => [foreignTablePath, colName].join('.'))
         let chainIdColName = null
-        for (const colPath of foreignInputColPaths) {
-            const inputProperties = (this.colPathsToFunctionInputArgs[colPath] || []).map(entry => entry.property)
-            if (inputProperties.inludes('chainId')) {
-                chainIdColName = colPath.split('.').pop()
-                break
+        for (const colPathsToFunctionInputArgs of this.colPathsToFunctionInputArgs) {
+            for (const colPath of foreignInputColPaths) { 
+                const inputProperties = (colPathsToFunctionInputArgs[colPath] || []).map(entry => entry.property)
+                if (inputProperties.includes('chainId')) {
+                    chainIdColName = colPath.split('.').pop()
+                    break
+                }
             }
+            if (chainIdColName) break
         }
 
         const sharedErrorContext = { error: null }
