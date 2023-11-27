@@ -172,7 +172,7 @@ class SeedTableService {
             ? (this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null
             : null
 
-        this.liveObjectIsContractEvent = isContractNamespace(this.liveObject.id)
+        this.liveObjectIsContractEvent = isContractNamespace(fromNamespacedVersion(this.liveObject.id).nsp)
 
         this.seedStrategy = null
     }
@@ -724,12 +724,7 @@ class SeedTableService {
             if (sharedErrorContext.error) throw sharedErrorContext.error
             await updateCursor(this.seedCursorId, this.cursor)
 
-            if (
-                !isLastBatch &&
-                this.updateOpTrackingFloorAsSeedProgresses &&
-                this.isReorgActivelyProcessing &&
-                !this.isReorgActivelyProcessing()
-            ) {
+            if (!isLastBatch && this.attemptOpTrackingFloorUpdate) {
                 await this._updateOpTrackingFloor()
             }
             if (isLastBatch) {
@@ -1336,6 +1331,7 @@ class SeedTableService {
     async _updateOpTrackingFloor() {
         const lastUpdate = this.lastOpTrackingFloorUpdate
         const now = new Date()
+
         // @ts-ignore
         const timeSinceLastUpdate = now - lastUpdate
         if (

@@ -398,7 +398,7 @@ class Config {
             return null
         }
 
-        const liveObjectChainIds = Object.keys(liveObject?.config?.chains || {})
+        const liveObjectChainIds = Object.keys(liveObject?.config?.chains || {}).sort()
 
         let defaultChainId = null
         if (!chainIdColName) {

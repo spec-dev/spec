@@ -71,6 +71,19 @@ export class MessageClient {
         }
     }
 
+    async getLiveObjectChainIds(liveObjectIds: string[]): Promise<{
+        data: StringKeyMap | null
+        error: RpcError | null
+    }> {
+        const { data, error } = await this.call(RPC.GetLiveObjectChainIds, {
+            ids: liveObjectIds,
+        })
+        return {
+            data: data ? (data as StringKeyMap) : null,
+            error,
+        }
+    }
+
     async getMostRecentBlockNumbers(): Promise<{
         data: StringKeyMap | null
         error: RpcError | null
