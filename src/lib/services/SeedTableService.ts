@@ -84,8 +84,6 @@ class SeedTableService {
 
     seedStrategy: () => void | null
 
-    liveObjectIsContractEvent: boolean
-
     forceSeedInputBatchSizeToOne: boolean = false
 
     foreignKeyMappings: LRU<string, any> = new LRU({ max: 5000 })
@@ -134,6 +132,26 @@ class SeedTableService {
         )
     }
 
+    get liveObjectName(): string {
+        return fromNamespacedVersion(this.liveObject.id).name
+    }
+
+    get liveObjectHasContractNsp(): boolean {
+        return isContractNamespace(fromNamespacedVersion(this.liveObject.id).nsp)
+    }
+
+    get liveObjectIsContractTransactions(): boolean {
+        return this.liveObjectHasContractNsp && this.liveObjectName === constants.TXS_LIVE_OBJECT_NAME
+    }
+
+    get liveObjectIsContractEvent(): boolean {
+        return this.liveObjectHasContractNsp && !this.liveObjectIsContractTransactions
+    }
+
+    get liveObjectHasSpecSchema(): boolean {
+        return this.sharedTablePath.split('.')[0] === constants.SPEC_SCHEMA
+    }
+
     constructor(
         seedSpec: SeedSpec,
         liveObject: LiveObject,
@@ -141,7 +159,6 @@ class SeedTableService {
         cursor: number,
         metadata?: StringKeyMap | null,
         updateOpTrackingFloorAsSeedProgresses?: boolean,
-        liveObjectChainIds?: string[],
         isReorgActivelyProcessing?: Function | null
     ) {
         this.seedSpec = seedSpec
@@ -150,7 +167,7 @@ class SeedTableService {
         this.cursor = cursor || 0
         this.metadata = metadata || {}
         this.updateOpTrackingFloorAsSeedProgresses = !!updateOpTrackingFloorAsSeedProgresses
-        this.liveObjectChainIds = liveObjectChainIds || []
+        this.liveObjectChainIds = Object.keys(liveObject.config?.chains || {}).sort()
         this.isReorgActivelyProcessing = isReorgActivelyProcessing || null
         this.seedColNames = new Set<string>(this.seedSpec.seedColNames)
         this.tableDataSources = config.getLiveObjectTableDataSources(
@@ -172,8 +189,6 @@ class SeedTableService {
             ? (this.tableDataSources[this.primaryTimestampProperty] || [])[0]?.columnName || null
             : null
 
-        this.liveObjectIsContractEvent = isContractNamespace(fromNamespacedVersion(this.liveObject.id).nsp)
-
         this.seedStrategy = null
     }
 
@@ -187,7 +202,7 @@ class SeedTableService {
         this._findRequiredArgColumns()
 
         const inputTableColumns = {}
-        const inputColumnLocations = { onSeedTable: 0, onForeignTable: 0 }
+        let numForeignTableSeedColumns = 0 
         const uniqueTablePaths = new Set<string>()
         const uniqueRequiredArgColPaths = unique(this.requiredArgColPaths.flat())
 
@@ -196,9 +211,10 @@ class SeedTableService {
             const tablePath = [schemaName, tableName].join('.')
             uniqueTablePaths.add(tablePath)
 
-            tablePath === this.seedTablePath
-                ? inputColumnLocations.onSeedTable++
-                : inputColumnLocations.onForeignTable++
+            if (tablePath === this.seedTablePath) {
+                throw `[${this.seedTablePath}] Can't seed a table using its own columns`
+            }
+            numForeignTableSeedColumns++
 
             if (!inputTableColumns.hasOwnProperty(tablePath)) {
                 inputTableColumns[tablePath] = []
@@ -216,7 +232,7 @@ class SeedTableService {
 
         // Potentially seed completely from scratch.
         if (allRequiredInputColsAreEmpty) {
-            if (inputColumnLocations.onForeignTable > 0) {
+            if (numForeignTableSeedColumns > 0) {
                 logger.warn(
                     `${this.seedTablePath} - Can't seed a cross-table relationship from scratch.`
                 )
@@ -224,17 +240,11 @@ class SeedTableService {
             }
             this.seedStrategy = async () => await this._seedFromScratch()
         }
-        // Seed using the seed table as the target of the query.
-        else if (inputColumnLocations.onSeedTable > 0) {
-            this.seedStrategy = async () => await this._seedWithAdjacentCols()
+        // TODO: This is possible in the future, just gonna take a lot more lookup work...
+        else if (numForeignTableSeedColumns > 1 && uniqueTablePaths.size > 1) {
+            throw `[${this.seedTablePath}] Can't yet seed tables using exclusively more than one foreign table.`
         }
-        // TODO: This is possible, just gonna take a lot more lookup work.
-        else if (inputColumnLocations.onForeignTable > 1 && uniqueTablePaths.size > 1) {
-            logger.warn(
-                `${this.seedTablePath} - Can't yet seed tables using exclusively more than one foreign table.`
-            )
-        }
-        // Seed using the foreign table as the target of the query.
+        // Seed using the existing records of a foreign table.
         else {
             const tablePath = Object.keys(inputTableColumns)[0] as string
             const colNames = inputTableColumns[tablePath] as string[]
@@ -396,111 +406,6 @@ class SeedTableService {
                 `Upserted ${this.seedCount.toLocaleString('en-US')} records in ${seconds} seconds.`
             )
         )
-    }
-
-    async _seedWithAdjacentCols() {
-        logger.info(chalk.cyanBright(`\nSeeding ${this.seedTablePath} from adjacent columns...`))
-
-        const queryConditions = this._buildQueryForSeedWithAdjacentCols()
-
-        // Get the live object property keys associated with each input column.
-        const reverseLinkProperties = this.reverseLinkProperties
-        const inputPropertyKeys = this.requiredArgColPaths.map(
-            (colPath) => reverseLinkProperties[colPath]
-        )
-
-        // If any of the input columns is of array type, shrink the seed input batch size to 1.
-        const seedInputBatchSize =
-            queryConditions.arrayColumns.length || this.forceSeedInputBatchSizeToOne
-                ? 1
-                : constants.SEED_INPUT_BATCH_SIZE
-
-        // Start seeding with batches of input records.
-        const sharedErrorContext = { error: null }
-        let t0 = null
-        while (true) {
-            if (sharedErrorContext.error) throw sharedErrorContext.error
-
-            // Get batch of input records from the seed table.
-            const batchInputRecords = await this._findInputRecordsFromAdjacentCols(
-                queryConditions,
-                this.cursor,
-                seedInputBatchSize
-            )
-            if (batchInputRecords === null) {
-                throw `Foreign input records batch came up null for ${this.seedTablePath} at offset ${this.cursor}.`
-            }
-
-            this.cursor += batchInputRecords.length
-            const isLastBatch = batchInputRecords.length < seedInputBatchSize
-
-            const batchFunctionInputs = []
-            const indexedPkConditions = {}
-            for (const record of batchInputRecords) {
-                const input = {}
-                const colValues = []
-
-                for (const colPath of this.requiredArgColPaths) {
-                    const [colSchemaName, colTableName, colName] = colPath.split('.')
-                    const colTablePath = [colSchemaName, colTableName].join('.')
-                    const inputArg = this.colPathsToFunctionInputArgs[colPath]
-                    const recordColKey = colTablePath === this.seedTablePath ? colName : colPath
-                    const value = record[recordColKey]
-                    input[inputArg] = value
-                    colValues.push(value)
-                }
-
-                batchFunctionInputs.push(input)
-
-                const recordPrimaryKeys = {}
-                for (const pk of this.seedTablePrimaryKeys) {
-                    recordPrimaryKeys[pk] = record[pk]
-                }
-
-                const colValueOptions = getCombinations(colValues)
-                for (const valueOptions of colValueOptions) {
-                    const key = valueOptions.join(valueSep)
-                    indexedPkConditions[key] = indexedPkConditions[key] || []
-                    indexedPkConditions[key].push(recordPrimaryKeys)
-                }
-            }
-            const batchFunctionInput = groupByKeys(batchFunctionInputs)
-
-            // Callback to use when a batch of response data is available.
-            const onFunctionRespData = async (data) =>
-                this._handleDataOnAdjacentColsSeed(
-                    data,
-                    inputPropertyKeys,
-                    indexedPkConditions
-                ).catch((err) => {
-                    sharedErrorContext.error = err
-                })
-
-            // Call spec function and handle response data.
-            t0 = t0 || performance.now()
-            try {
-                await querySharedTable(
-                    this.sharedTablePath,
-                    batchFunctionInput,
-                    onFunctionRespData,
-                    sharedErrorContext,
-                    {},
-                    this.metadata.fromTrigger
-                )
-            } catch (err) {
-                logger.error(err)
-                throw err
-            }
-
-            if (sharedErrorContext.error) throw sharedErrorContext.error
-
-            await updateCursor(this.seedCursorId, this.cursor)
-
-            if (isLastBatch) {
-                this._logResults(t0)
-                break
-            }
-        }
     }
 
     async _seedWithForeignTable(
@@ -1029,109 +934,7 @@ class SeedTableService {
         resp.referenceKeyValuesMap = referenceKeyValuesMap
         return resp
     }
-
-    async _handleDataOnAdjacentColsSeed(
-        batch: StringKeyMap[],
-        inputPropertyKeys: string[],
-        indexedPkConditions: StringKeyMap
-    ) {
-        this.seedCount += batch.length
-        logger.info(
-            chalk.cyanBright(
-                `  ${this.seedCount.toLocaleString('en-US')} records -> ${this.seedTableName}`
-            )
-        )
-
-        const tableDataSources = this.tableDataSources
-        const linkProperties = this.linkProperties
-        const updates: StringKeyMap = {}
-
-        for (const liveObjectData of batch) {
-            // Format a seed table record for this live object data.
-            const recordUpdates = {}
-            for (const property in liveObjectData) {
-                if (linkProperties.hasOwnProperty(property)) continue
-                const colsWithThisPropertyAsDataSource = tableDataSources[property] || []
-                const value = liveObjectData[property]
-                for (const { columnName } of colsWithThisPropertyAsDataSource) {
-                    if (this.seedColNames.has(columnName)) {
-                        recordUpdates[columnName] = value
-                    }
-                }
-            }
-            if (!Object.keys(recordUpdates).length) continue
-
-            // Find the primary key groups to apply the updates to.
-            const pkConditionsKey = inputPropertyKeys.map((k) => liveObjectData[k]).join(valueSep)
-            const primaryKeyConditions = indexedPkConditions[pkConditionsKey] || []
-            if (!primaryKeyConditions?.length) continue
-
-            // Merge updates by the actual primary key values.
-            for (const pkConditions of primaryKeyConditions) {
-                const uniquePkKey = Object.keys(pkConditions)
-                    .sort()
-                    .map((k) => pkConditions[k])
-                    .join(valueSep)
-                updates[uniquePkKey] = updates[uniquePkKey] || {
-                    where: pkConditions,
-                    updates: {},
-                }
-                updates[uniquePkKey].updates = { ...updates[uniquePkKey].updates, ...recordUpdates }
-            }
-        }
-        if (!Object.keys(updates)) return
-
-        const useBulkUpdate = batch.length > constants.MAX_UPDATES_BEFORE_BULK_UPDATE_USED
-        const bulkWhere = []
-        const bulkUpdates = []
-        const indivUpdateOps = []
-        for (const entry of Object.values(updates)) {
-            if (useBulkUpdate) {
-                bulkWhere.push(entry.where)
-                bulkUpdates.push(entry.updates)
-            } else {
-                indivUpdateOps.push({
-                    type: OpType.Update,
-                    schema: this.seedSchemaName,
-                    table: this.seedTableName,
-                    where: entry.where,
-                    data: entry.updates,
-                    liveTableColumns: this.liveTableColumns,
-                    primaryTimestampColumn: this.primaryTimestampColumn,
-                    defaultColumnValues: this.defaultColumnValues,
-                })
-            }
-        }
-
-        const op = async () => {
-            try {
-                if (useBulkUpdate) {
-                    const op = {
-                        type: OpType.Update,
-                        schema: this.seedSchemaName,
-                        table: this.seedTableName,
-                        where: bulkWhere,
-                        data: bulkUpdates,
-                        liveTableColumns: this.liveTableColumns,
-                        primaryTimestampColumn: this.primaryTimestampColumn,
-                        defaultColumnValues: this.defaultColumnValues,
-                    }
-                    await new RunOpService(op).perform()
-                } else {
-                    await db.transaction(async (tx) => {
-                        await Promise.all(
-                            indivUpdateOps.map((op) => new RunOpService(op, tx).perform())
-                        )
-                    })
-                }
-            } catch (err) {
-                throw new QueryError('update', this.seedSchemaName, this.seedTableName, err)
-            }
-        }
-
-        await withDeadlockProtection(op)
-    }
-
+    
     _transformRecordsIntoFunctionInputs(
         records: StringKeyMap[],
         primaryTablePath: string

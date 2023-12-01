@@ -884,9 +884,12 @@ class Spec {
             const { liveObjectId, tablePath } = seedSpec
             const liveObject = this.liveObjects[liveObjectId]
             if (!liveObject) continue
-            const tableChainInfo = config.getChainInfoForTable(tablePath, this.liveObjects)
-            if (!tableChainInfo) continue
-            const { liveObjectChainIds } = tableChainInfo
+
+            const liveObjectChainIds = Object.keys(liveObject?.config?.chains || {}).sort()
+            if (!liveObjectChainIds.length) {
+                logger.warn(`No chain ids associated with ${liveObjectId} yet...not seeding ${tablePath}`)
+                continue
+            }
 
             const isReorgActivelyProcessing = () => {
                 for (const chainId of liveObjectChainIds) {
@@ -905,7 +908,6 @@ class Spec {
                     seedCursor.cursor,
                     seedCursor.metadata,
                     true, // updateOpTrackingFloorAsSeedProgresses
-                    liveObjectChainIds,
                     isReorgActivelyProcessing
                 )
 
@@ -1101,10 +1103,10 @@ class Spec {
                 this._runNextSeedCursorInSeries(seedCursor.metadata?.nextId)
             return
         }
-
-        const tableChainInfo = config.getChainInfoForTable(tablePath, this.liveObjects)
-        if (!tableChainInfo) {
-            logger.error(
+        
+        const liveObjectChainIds = Object.keys(liveObject?.config?.chains || {}).sort()
+        if (!liveObjectChainIds.length) {
+            logger.warn(
                 `Live object chain info not found - skipping seed cursor in series.`,
                 seedCursor
             )
@@ -1114,7 +1116,7 @@ class Spec {
                 this._runNextSeedCursorInSeries(seedCursor.metadata?.nextId)
             return
         }
-        const { liveObjectChainIds } = tableChainInfo
+        
         const isReorgActivelyProcessing = () => {
             for (const chainId of liveObjectChainIds) {
                 if (this.reorgSubs[chainId]?.isProcessing) {
@@ -1133,7 +1135,6 @@ class Spec {
                 seedCursor.cursor,
                 seedCursor.metadata,
                 true, // updateOpTrackingFloorAsSeedProgresses
-                liveObjectChainIds,
                 isReorgActivelyProcessing
             )
 

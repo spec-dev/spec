@@ -131,9 +131,11 @@ export const constants: StringKeyMap = {
     EXPO_BACKOFF_MAX_ATTEMPTS: 10,
     EXPO_BACKOFF_FACTOR: 1.5,
 
-    // Special live object properties.
+    // Special live object properties/constants.
     CHAIN_ID_PROPERTY: 'chainId',
     BLOCK_NUMBER_PROPERTY: 'blockNumber',
+    TXS_LIVE_OBJECT_NAME: 'Transactions',
+    SPEC_SCHEMA: 'spec',
 
     // Whether to allow live relationships that
     // use non-lowercased addresses as filter columns.
