@@ -65,10 +65,12 @@ export const constants: StringKeyMap = {
     // How often to save the most recent events recieved from the events API to the DB.
     SAVE_EVENT_CURSORS_INTERVAL: Number(ev('SAVE_EVENT_CURSORS_INTERVAL', 100)),
 
+    // How often to check for live object chain id updates.
+    POLL_LIVE_OBJECT_CHAIN_IDS_INTERVAL: Number(ev('POLL_LIVE_OBJECT_CHAIN_IDS_INTERVAL', 30000)),
+
     // How often to poll the database schema for any changes.
     ANALYZE_TABLES_INTERVAL: Number(ev('ANALYZE_TABLES_INTERVAL', 30000)),
 
-    // Batch size to upsert with once a new batch of streaming query request data is available.
     POLL_HEADS_DURING_LONG_RUNNING_SEEDS_INTERVAL: Number(
         ev('POLL_HEADS_DURING_LONG_RUNNING_SEEDS_INTERVAL', 10000)
     ),

@@ -3,6 +3,7 @@ enum RPC {
     GetEventsAfterCursors = 'getEventsAfterCursors',
     GetMostRecentBlockNumbers = 'getMostRecentBlockNumbers',
     ValidateReorg = 'validateReorg',
+    GetLiveObjectChainIds = 'getLiveObjectChainIds',
     Ping = 'ping',
 }
 

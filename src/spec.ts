@@ -51,7 +51,7 @@ import { randomIntegerInRange } from './lib/utils/math'
 import { tablesMeta } from './lib/db/tablesMeta'
 import { db } from './lib/db'
 import { getSpecTriggers, createTrigger, maybeDropTrigger } from './lib/db/triggers'
-import { importHandlers, getHandlers, CUSTOM_EVENT_HANDLER_KEY } from './lib/handlers'
+import { importHandlers, getHandlers } from './lib/handlers'
 import { subtractMinutes } from './lib/utils/time'
 
 class Spec {
@@ -74,6 +74,8 @@ class Spec {
     saveEventCursorsJob: any = null
 
     retrySeedCursorsJob: any = null
+
+    pollLiveObjectChainIdsJob: any = null
 
     isProcessingNewConfig: boolean = false
 
@@ -160,6 +162,9 @@ class Spec {
 
         // Subscribe to reorg events for the chains needed.
         await this._subscribeToReorgs()
+
+        // Kick off interval job to poll for the chain ids associated with each live object.
+        this._upsertPollLiveObjectChainIdsJob()
 
         // Subscribe to all events powering the live objects,
         // as well as those used in custom event handlers.
@@ -297,7 +302,7 @@ class Spec {
         // Prevent the re-processing of duplicates.
         const subjects = [...liveObjectIdsThatWillProcessEvent]
         if (hasCustomEventHandler) {
-            subjects.push(CUSTOM_EVENT_HANDLER_KEY)
+            subjects.push('custom')
         }
         if (this._wasEventSeenByAll(eventKey, subjects)) {
             logger.warn(`Duplicate event seen - ${eventKey} - skipping.`)
@@ -1357,10 +1362,49 @@ class Spec {
             setInterval(() => this._retrySeedCursors(), constants.RETRY_SEED_CURSORS_INTERVAL)
     }
 
+    _upsertPollLiveObjectChainIdsJob() {
+        this.pollLiveObjectChainIdsJob =
+            this.pollLiveObjectChainIdsJob ||
+            setInterval(() => this._pollLiveObjectChainIds(), constants.POLL_LIVE_OBJECT_CHAIN_IDS_INTERVAL)
+    }
+
     async _retrySeedCursors() {
         if (!(await failedSeedCursorsExist())) return
         logger.info('Failed seed cursors exist....Will retry seed job(s).')
         await this._upsertAndSeedLiveColumns()
+    }
+
+    async _pollLiveObjectChainIds() {
+        const prevChainIds = new Set(this._getCurrentlyUsedChainIds())
+
+        const ids = Object.keys(this.liveObjects)
+        const { data: liveObjectChainIds, error } = await messageClient.getLiveObjectChainIds(ids)
+        if (error) {
+            logger.error(`Failed to fetch updated live object chain ids: ${error}`)
+            return
+        }
+
+        const newChainIds = new Set()
+        for (const id in liveObjectChainIds) {
+            if (this.liveObjects[id] && this.liveObjects[id].config) {
+                const chainIdsMap = {}
+                for (const chainId of liveObjectChainIds[id] || []) {
+                    if (!prevChainIds.has(chainId)) {
+                        newChainIds.add(chainId)
+                    }
+                    chainIdsMap[chainId] = {}
+                }
+                this.liveObjects[id].config.chains = chainIdsMap
+            }
+        }
+        if (!newChainIds.size) return
+
+        logger.info(chalk.magenta(`Detected new chain support for ${Array.from(newChainIds).join(', ')}`))
+        
+        await Promise.all([
+            this._subscribeToReorgs(),
+            this._upsertOpTrackingEntries(),
+        ])
     }
 
     _removeUselessSubs(liveObjectsByEvent: { [key: string]: string[] }) {
