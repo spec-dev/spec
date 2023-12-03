@@ -84,6 +84,23 @@ export class MessageClient {
         }
     }
 
+    async getSeedPreflightInfo(
+        liveObjectId: string,
+        tablePath: string
+    ): Promise<{
+        data: StringKeyMap | null
+        error: RpcError | null
+    }> {
+        const { data, error } = await this.call(RPC.GetSeedPreflightInfo, {
+            liveObjectId,
+            tablePath,
+        })
+        return {
+            data: data ? (data as StringKeyMap) : null,
+            error,
+        }
+    }
+
     async getMostRecentBlockNumbers(): Promise<{
         data: StringKeyMap | null
         error: RpcError | null

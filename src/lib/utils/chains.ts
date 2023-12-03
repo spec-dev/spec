@@ -1,3 +1,5 @@
+import { constants } from '../constants'
+
 export const chainNamespaces = {
     ETHEREUM: 'eth',
     GOERLI: 'goerli',
@@ -19,4 +21,4 @@ export const chainNamespacesSet = new Set(Object.values(chainNamespaces))
 export const isContractNamespace = (nsp: string): boolean => nsp.includes('.')
 
 export const isPrimitiveNamespace = (nsp: string): boolean =>
-    nsp === TOKENS_NSP || chainNamespacesSet.has(nsp)
+    nsp === TOKENS_NSP || chainNamespacesSet.has(nsp) || nsp === constants.SPEC

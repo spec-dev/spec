@@ -48,16 +48,19 @@ export const constants: StringKeyMap = {
         ev('FORCED_BLOCK_NUMBER_EVENT_DEBOUNCE_DURATION', 500)
     ),
 
-    // The number of records to use in a single input batch when
-    // seeding live columns by an *adjacent column of the same table*.
-    SEED_INPUT_BATCH_SIZE: Number(ev('SEED_INPUT_BATCH_SIZE', 1000)),
-
     // The number of records to use in a single batch when seeding live
     // columns with a *foreign table*.
     FOREIGN_SEED_INPUT_BATCH_SIZE: Number(ev('FOREIGN_SEED_INPUT_BATCH_SIZE', 10)),
 
     // The 'limit' to use (alongside 'offset') when fetching an entire live table from scratch.
     FROM_SCRATCH_SEED_INPUT_BATCH_SIZE: Number(ev('FROM_SCRATCH_SEED_INPUT_BATCH_SIZE', 100000)),
+
+    // The maximum number of records an event can have before another method of backfilling
+    // will be used instead of offset/limit.
+    EVENT_OFFSET_LIMIT_SEED_THRESHOLD: Number(ev('EVENT_OFFSET_LIMIT_SEED_THRESHOLD', 2500)),
+
+    // Block range size to seed with when using the seek method.
+    SEEK_BLOCK_RANGE_SIZE: Number(ev('SEEK_BLOCK_RANGE_SIZE', 999999)),
 
     // Batch size to upsert with once a new batch of streaming query request data is available.
     STREAMING_SEED_UPSERT_BATCH_SIZE: Number(ev('STREAMING_SEED_UPSERT_BATCH_SIZE', 1000)),
@@ -135,7 +138,7 @@ export const constants: StringKeyMap = {
     CHAIN_ID_PROPERTY: 'chainId',
     BLOCK_NUMBER_PROPERTY: 'blockNumber',
     TXS_LIVE_OBJECT_NAME: 'Transactions',
-    SPEC_SCHEMA: 'spec',
+    SPEC: 'spec',
 
     // Whether to allow live relationships that
     // use non-lowercased addresses as filter columns.
