@@ -438,7 +438,10 @@ class SeedTableService {
                     options.blockRange = [fromBlock]
 
                     // Leave "to" off of the last query.
-                    if (toBlock < currentChainHead && ((currentChainHead - toBlock) > (constants.SEEK_BLOCK_RANGE_SIZE * 0.3))) {
+                    if (
+                        toBlock < currentChainHead &&
+                        currentChainHead - toBlock > constants.SEEK_BLOCK_RANGE_SIZE * 0.3
+                    ) {
                         options.blockRange.push(toBlock)
                     }
                 } else {
