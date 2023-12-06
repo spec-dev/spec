@@ -404,12 +404,19 @@ class SeedTableService {
             const chainId = chainIds[i]
             const inputArgs = chainId ? inputArgsByChainId[chainId] || [] : allInputArgs
             const currentChainHead = currentChainHeads[chainId]
+            const isFirstIteration = i === initialChainIndex
 
             if (useSeekMethod) {
-                if (i > initialChainIndex) {
+                if (isFirstIteration) {
                     this.cursor = this.cursor || dataSourceStartBlocks[chainId] || 0
                 } else {
                     this.cursor = dataSourceStartBlocks[chainId] || 0
+                }
+            } else {
+                if (isFirstIteration) {
+                    this.cursor = this.cursor || 0 // assume potentially saved cursor from a previous failure
+                } else {
+                    this.cursor = 0 // always 0 on iterations after the first
                 }
             }
 
