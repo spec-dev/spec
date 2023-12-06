@@ -502,11 +502,7 @@ class SeedTableService {
         const tf = performance.now()
         const seconds = Number(((tf - t0) / 1000).toFixed(2))
         logger.info(chalk.cyanBright('Done.'))
-        logger.info(
-            chalk.cyanBright(
-                `Upserted ${this.seedCount.toLocaleString('en-US')} records in ${seconds} seconds.`
-            )
-        )
+        logger.info(chalk.cyanBright(`Upserted ${this.seedCount.toLocaleString('en-US')} records.`))
     }
 
     async _seedWithForeignTable(
@@ -1146,9 +1142,7 @@ class SeedTableService {
 
         logger.info(
             chalk.cyanBright(
-                `Upserted ${this.seedCount.toLocaleString('en-US')} ${
-                    this.seedTableName
-                } records. in ${seconds} seconds.`
+                `Upserted ${this.seedCount.toLocaleString('en-US')} ${this.seedTableName} records.`
             )
         )
     }
