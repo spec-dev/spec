@@ -184,3 +184,9 @@ export const padDateNumber = (value: number): string => {
     const asString = value.toString()
     return asString.length < 2 ? `0${asString}` : asString
 }
+
+export const sortChainIds = (chainIds: string[]): string[] =>
+    chainIds
+        .map((chainId) => Number(chainId))
+        .sort((a, b) => a - b)
+        .map((chainId) => chainId.toString())

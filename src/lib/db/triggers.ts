@@ -119,7 +119,7 @@ export async function createTrigger(
         procedureName = constants.TABLE_SUB_FUNCTION_NAME
         procedureArgs = primaryKeys
     }
-    
+
     // Op-tracking trigger.
     else if (procedure === TriggerProcedure.TrackOps) {
         const tableChainInfo = config.getChainInfoForTable(tablePath, liveObjects)
