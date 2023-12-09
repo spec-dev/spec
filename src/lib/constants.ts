@@ -145,4 +145,8 @@ export const constants: StringKeyMap = {
     MATCH_CASE_INSENSITIVE_ADDRESSES: ['true', true].includes(
         ev('MATCH_CASE_INSENSITIVE_ADDRESSES')
     ),
+
+    // Whether to log *every* instance of lower-level,
+    // primitive events, rather than only those acted on.
+    LOG_PRIMITIVE_NSP_EVENTS: ['true', true].includes(ev('LOG_PRIMITIVE_NSP_EVENTS')),
 }

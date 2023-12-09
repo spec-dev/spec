@@ -2,11 +2,14 @@ import { LiveObject, LiveObjectLink, StringKeyMap, Op, OpType, EnrichedLink } fr
 import { SpecEvent } from '@spec.dev/event-client'
 import ApplyDiffsService from './ApplyDiffsService'
 import logger from '../logger'
+import { fromNamespacedVersion } from '../utils/formatters'
 import { db } from '../db'
 import RunOpService from './RunOpService'
 import { getFrozenTablesForChainId } from '../db/spec/frozenTables'
 import config from '../config'
+import { constants } from '../constants'
 import chalk from 'chalk'
+import { isPrimitiveNamespace } from '../utils/chains'
 
 class ApplyEventService {
     event: SpecEvent
@@ -110,6 +113,18 @@ class ApplyEventService {
 
     async runOps() {
         if (!this.ops.length) return
+
+        const eventNsp = fromNamespacedVersion(this.event.name).nsp
+        const logDelayedEvent =
+            isPrimitiveNamespace(eventNsp) && !constants.LOG_PRIMITIVE_NSP_EVENTS
+        if (logDelayedEvent) {
+            const origin = this.event.origin
+            const chainId = origin?.chainId
+            const blockNumber = origin?.blockNumber
+            logger.info(
+                `[${chainId}:${blockNumber}] Processing ${this.event.name} (${this.event.nonce})...`
+            )
+        }
 
         for (const op of this.ops) {
             if (op.type === OpType.Insert) {

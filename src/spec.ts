@@ -45,7 +45,7 @@ import ResolveRecordsService from './lib/services/ResolveRecordsService'
 import { getRecordsForPrimaryKeys } from './lib/db'
 import { importHooks } from './lib/hooks'
 import { sleep } from './lib/utils/time'
-import { unique, stringify, mapBy } from './lib/utils/formatters'
+import { unique, stringify, fromNamespacedVersion } from './lib/utils/formatters'
 import chalk from 'chalk'
 import { randomIntegerInRange } from './lib/utils/math'
 import { tablesMeta } from './lib/db/tablesMeta'
@@ -53,6 +53,7 @@ import { db } from './lib/db'
 import { getSpecTriggers, createTrigger, maybeDropTrigger } from './lib/db/triggers'
 import { importHandlers, getHandlers } from './lib/handlers'
 import { subtractMinutes } from './lib/utils/time'
+import { isPrimitiveNamespace } from './lib/utils/chains'
 
 class Spec {
     liveObjects: { [key: string]: LiveObject } = {}
@@ -368,7 +369,11 @@ class Spec {
         const origin = event.origin
         const chainId = origin?.chainId
         const blockNumber = origin?.blockNumber
-        logger.info(`[${chainId}:${blockNumber}] Processing ${event.name} (${event.nonce})...`)
+
+        const eventNsp = fromNamespacedVersion(event.name).nsp
+        const ignoreLog = isPrimitiveNamespace(eventNsp) && !constants.LOG_PRIMITIVE_NSP_EVENTS
+        ignoreLog ||
+            logger.info(`[${chainId}:${blockNumber}] Processing ${event.name} (${event.nonce})...`)
 
         // Run custom event handler (if exists).
         const customHandler = this.customEventHandlers[event.name]
