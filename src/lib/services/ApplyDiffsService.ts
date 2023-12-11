@@ -17,6 +17,7 @@ import { QueryError } from '../errors'
 import RunOpService from './RunOpService'
 import { getRel, isColTypeArray, tablesMeta } from '../db/tablesMeta'
 import logger from '../logger'
+import { SpecEvent } from '@spec.dev/event-client'
 import chalk from 'chalk'
 import { withDeadlockProtection } from '../utils/db'
 import { isDateColType, isTimestampColType } from '../utils/colTypes'
@@ -35,6 +36,8 @@ class ApplyDiffsService {
     enrichedLink: EnrichedLink
 
     liveObject: LiveObject
+
+    event: SpecEvent
 
     filteredDiffs: StringKeyMap[]
 
@@ -86,11 +89,17 @@ class ApplyDiffsService {
         return this.liveObject.config?.primaryTimestampProperty || null
     }
 
-    constructor(diffs: StringKeyMap[], enrichedLink: EnrichedLink, liveObject: LiveObject) {
+    constructor(
+        diffs: StringKeyMap[],
+        enrichedLink: EnrichedLink,
+        liveObject: LiveObject,
+        event: SpecEvent
+    ) {
         this.liveObjectDiffs = diffs
         this.filteredDiffs = diffs
         this.enrichedLink = enrichedLink
         this.liveObject = liveObject
+        this.event = event
         this.liveTableColumns = Object.keys(
             config.getTable(this.linkSchemaName, this.linkTableName) || {}
         )
@@ -717,9 +726,13 @@ class ApplyDiffsService {
                         defaultColumnValues: this.defaultColumnValues,
                     }
 
+                    const origin = this.event.origin
+                    const chainId = origin?.chainId
+                    const blockNumber = origin?.blockNumber
+
                     logger.info(
                         chalk.green(
-                            `Upserting ${upsertRecords.length} records in ${this.linkSchemaName}.${this.linkTableName}...`
+                            `[${chainId}:${blockNumber}] Upserting ${upsertRecords.length} records in ${this.linkSchemaName}.${this.linkTableName}...`
                         )
                     )
                     await new RunOpService(upsertBatchOp, tx).perform()
