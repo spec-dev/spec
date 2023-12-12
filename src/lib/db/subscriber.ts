@@ -30,7 +30,7 @@ import {
     upsertTableSubCursor,
     deleteTableSubCursor,
 } from './spec/tableSubCursors'
-import { createSeedCursor, seedFailed, seedSucceeded } from './spec/seedCursors'
+import { createSeedCursor, seedFailed, seedSucceeded, getInitialSeedForTablePath } from './spec/seedCursors'
 import short from 'short-uuid'
 import { getHooks, hooksExist } from '../hooks'
 import { createRealtimeClient } from '@spec.dev/realtime-client'
@@ -385,6 +385,10 @@ export class TableSubscriber {
         // Get table sub for path.
         const tableSub = this.tableSubs[tablePath]
         if (!tableSub) return
+
+        // Ignore trigger-based reactions to tables being backfilled for the first time.
+        const ignoreDueToActiveInitialBackfill = !!(await getInitialSeedForTablePath(tablePath))
+        if (ignoreDueToActiveInitialBackfill) return
 
         // Extract events from buffer / reset buffer.
         const events = [...tableSub.buffer]

@@ -1,5 +1,5 @@
 import { schema, db } from '..'
-import { SeedCursor, SeedCursorStatus, StringKeyMap } from '../../types'
+import { SeedCursor, SeedCursorJobType, SeedCursorStatus, StringKeyMap } from '../../types'
 import { SPEC_SCHEMA_NAME, SEED_CURSORS_TABLE_NAME } from './names'
 import logger from '../../logger'
 import { unique } from '../../utils/formatters'
@@ -209,4 +209,23 @@ export async function failedSeedCursorsExist(): Promise<boolean> {
         logger.error(`Error querying for failed seed jobs: ${err}`)
         return false
     }
+}
+
+export async function getInitialSeedForTablePath(tablePath: string): Promise<SeedCursor | null> {
+    const activeTableSeeds = await getSeedCursorsWithStatus(SeedCursorStatus.InProgress)
+    if (!activeTableSeeds.length) return null
+
+    for (const seedCursor of activeTableSeeds) {
+        const { metadata, spec, job_type } = seedCursor
+        const wasFromTrigger = (metadata || {}).fromTrigger === true
+        if (
+            job_type === SeedCursorJobType.SeedTable && 
+            spec.tablePath === tablePath && 
+            !wasFromTrigger
+        ) {
+            return seedCursor
+        }
+    }
+
+    return null
 }

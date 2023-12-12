@@ -476,7 +476,7 @@ class SeedTableService {
                     throw err
                 }
                 if (sharedErrorContext.error) throw sharedErrorContext.error
-
+                
                 let isLastBatch = false
                 if (useSeekMethod) {
                     if (options.blockRange.length > 1) {
