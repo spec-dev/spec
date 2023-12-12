@@ -219,8 +219,8 @@ export async function getInitialSeedForTablePath(tablePath: string): Promise<See
         const { metadata, spec, job_type } = seedCursor
         const wasFromTrigger = (metadata || {}).fromTrigger === true
         if (
-            job_type === SeedCursorJobType.SeedTable && 
-            spec.tablePath === tablePath && 
+            job_type === SeedCursorJobType.SeedTable &&
+            spec.tablePath === tablePath &&
             !wasFromTrigger
         ) {
             return seedCursor

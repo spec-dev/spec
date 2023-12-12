@@ -30,7 +30,12 @@ import {
     upsertTableSubCursor,
     deleteTableSubCursor,
 } from './spec/tableSubCursors'
-import { createSeedCursor, seedFailed, seedSucceeded, getInitialSeedForTablePath } from './spec/seedCursors'
+import {
+    createSeedCursor,
+    seedFailed,
+    seedSucceeded,
+    getInitialSeedForTablePath,
+} from './spec/seedCursors'
 import short from 'short-uuid'
 import { getHooks, hooksExist } from '../hooks'
 import { createRealtimeClient } from '@spec.dev/realtime-client'
