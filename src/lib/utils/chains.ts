@@ -8,6 +8,7 @@ export const chainNamespaces = {
     BASE: 'base',
     OPTIMISM: 'optimism',
     ARBITRUM: 'arbitrum',
+    ARBITRUM_SEPOLIA: 'arbitrumsepolia',
     PGN: 'pgn',
     CELO: 'celo',
     LINEA: 'linea',
