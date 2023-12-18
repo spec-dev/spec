@@ -458,7 +458,7 @@ class Spec {
         let i = 0
         while (this.processingEvents) {
             i === 0 &&
-                logger.warn(
+                logger.debug(
                     `[${chainId}:${rollbackToBlockNumber}] Waiting to perform reorg....blocked by current event processing.`
                 )
             await sleep(100)
