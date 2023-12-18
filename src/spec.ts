@@ -459,7 +459,7 @@ class Spec {
             logger.warn(
                 `[${chainId}:${rollbackToBlockNumber}] Waiting to perform reorg....blocked by current event processing.`
             )
-            await sleep(500)
+            await sleep(100)
         }
 
         // Roll records back to their latest valid snapshot.
