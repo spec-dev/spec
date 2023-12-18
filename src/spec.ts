@@ -455,11 +455,13 @@ class Spec {
         const rollbackToBlockNumber = Number(reorgEvent.blockNumber)
 
         // Process any events still in the buffer that came before the reorg event.
+        let i = 0
         while (this.processingEvents) {
-            logger.warn(
+            i === 0 && logger.warn(
                 `[${chainId}:${rollbackToBlockNumber}] Waiting to perform reorg....blocked by current event processing.`
             )
             await sleep(100)
+            i++
         }
 
         // Roll records back to their latest valid snapshot.
