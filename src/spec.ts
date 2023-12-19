@@ -452,30 +452,34 @@ class Spec {
 
     async _processReorg(chainId: string) {
         const reorgEvent = this.reorgSubs[chainId].buffer.shift()
-        const rollbackToBlockNumber = Number(reorgEvent.blockNumber)
+        const rollbackToBlockNumber = Number(reorgEvent?.blockNumber)
 
-        // Process any events still in the buffer that came before the reorg event.
-        let i = 0
-        while (this.processingEvents) {
-            i === 0 &&
-                logger.debug(
-                    `[${chainId}:${rollbackToBlockNumber}] Waiting to perform reorg....blocked by current event processing.`
-                )
-            await sleep(100)
-            i++
-        }
+        if (reorgEvent) {
+            // Process any events still in the buffer that came before the reorg event.
+            let i = 0
+            while (this.processingEvents) {
+                i === 0 &&
+                    logger.debug(
+                        `[${chainId}:${rollbackToBlockNumber}] Waiting to perform reorg....blocked by current event processing.`
+                    )
+                await sleep(100)
+                i++
+            }
 
-        // Roll records back to their latest valid snapshot.
-        const service = new RollbackService(rollbackToBlockNumber, chainId)
-        try {
-            await service.perform()
-        } catch (err) {
-            logger.error(
-                chalk.redBright(
-                    `[${chainId}:${rollbackToBlockNumber}] Reorg failed: ${stringify(err)}`
+            // Roll records back to their latest valid snapshot.
+            const service = new RollbackService(rollbackToBlockNumber, chainId)
+            try {
+                await service.perform()
+            } catch (err) {
+                logger.error(
+                    chalk.redBright(
+                        `[${chainId}:${rollbackToBlockNumber}] Reorg failed: ${stringify(err)}`
+                    )
                 )
-            )
-            await freezeTablesForChainId(service.tablePaths, chainId)
+                await freezeTablesForChainId(service.tablePaths, chainId)
+            }
+        } else {
+            logger.warn(`[${chainId}] Empty reorg event: ${reorgEvent}`)
         }
 
         // Keep pulling from the buffer until all reorgs are complete.
